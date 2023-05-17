@@ -49,7 +49,7 @@ public class RedditScreenshotGenerator {
      // Draw profile picture next to user name
         g2d.drawImage(pfpImage, 30, 30, 60, 60, null);
         
-     // Load the Reddit logo image from a local file
+     // Load the 3 logo image from a local file
         File logoFile = new File("ai_comment.png");
         ImageIcon logoIcon = new ImageIcon(logoFile.getPath());
         Image logoImage = logoIcon.getImage();
@@ -125,7 +125,6 @@ public class RedditScreenshotGenerator {
 
         // Draw timestamp
         g2d.drawImage(viewedImage, arrowX + arrowWidth + 40, arrowY + arrowHeight * 2 + 10, 30, 30, null);
-        //g2d.drawString("4 hours ago", arrowX + arrowWidth + 80, arrowY + arrowHeight * 5 / 2);
         
         // Draw random time stamp
         g2d.drawImage(viewedImage, arrowX + arrowWidth + 40, arrowY + arrowHeight * 2 + 10, 30, 30, null);
@@ -153,7 +152,7 @@ public class RedditScreenshotGenerator {
     	RandomProfileName profName = new RandomProfileName();
     	String sProfName = profName.getRandomProfileName();
     	System.out.println(sProfName);
-    	
+    	//dont think this needs to be here tbh
     	TextLoader aLoader = new TextLoader("auther_names.txt");
     	
     	
@@ -161,7 +160,7 @@ public class RedditScreenshotGenerator {
     	TextFileReader listOfNames = new TextFileReader();
     	
     	String randomName = listOfNames.toString();
-		
+		Random rand = new Random();
 		int rViews = new Random().nextInt(50000);
 		int rLikes = new Random().nextInt(1000);
 		RedditScreenshotGenerator generator = new RedditScreenshotGenerator("0first", randomName, "/OverLord", "Today is... i dont know", sProfName, rViews, rLikes);
@@ -181,16 +180,18 @@ public class RedditScreenshotGenerator {
 			System.out.println("comments loaded");
 			generator.postLocation = "/OverLord/comment";
         for (int i = 0; i < ListOfComments.size(); i++) {
-        	//set the comment from loaded comment list aray location
+        	
+        	//set random views
+			rViews = rand.nextInt(50000);
+			generator.views = rand.nextInt(50000);
+			//set random likes
+			generator.upvotes = rand.nextInt(1000);
+			//set the comment from loaded comment list aray location
 			generator.comment = ListOfComments.get(i);
 			//set random profile picture
 			generator.pfpImg = profName.getRandomProfileName();
 			//set random profile name
 			generator.userName = listOfNames.toString();
-			//set random views
-			rViews = new Random().nextInt(50000);
-			//set random likes
-			rLikes = new Random().nextInt(1000);
 			generator.fileName = i + "aithread";
 			generator.generateImage();
         	
