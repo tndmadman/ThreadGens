@@ -74,9 +74,29 @@ public class RedditScreenshotGenerator {
         g2d.fillRoundRect(30, 120, width - 60, height - 300, 20, 20);
 
         // Draw comment
+        //old
+        //g2d.setColor(Color.WHITE);
+        //g2d.setFont(new Font("Arial", Font.PLAIN, 26));
+        //g2d.drawString(comment, 50, 170);
+        
+        //draw wrapped comment
         g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.PLAIN, 26));
-        g2d.drawString(comment, 50, 170);
+        g2d.setFont(new Font("Arial", Font.PLAIN, 52));
+        
+        
+        //wrap the current comment
+        CommentWrapper commentWrapper = new CommentWrapper(comment, 40);
+        List<String> wrappedCommentLines = commentWrapper.wrapComment();
+        //set a couple of ints
+        int lineHeight = 60;
+        int y = 170;
+        // Draw each line of the wrapped comment
+        for (String line : wrappedCommentLines) {
+            g2d.drawString(line, 50, y);
+            System.out.println(line);
+            y += lineHeight; // Move to the next line
+        }
+        
 
         // Draw upvote and downvote arrows and upvote count
         int arrowX = 50;
