@@ -46,15 +46,15 @@ public class RedditScreenshotGenerator {
         File pfpFile = new File("pfp/" + pfpImg);
         ImageIcon pfpIcon = new ImageIcon(pfpFile.getPath());
         Image pfpImage = pfpIcon.getImage();
-     // Draw profile picture next to user name
+        // Draw profile picture next to user name
         g2d.drawImage(pfpImage, 30, 30, 60, 60, null);
         
-     // Load the 3 logo image from a local file
+        // Load the logo image from a local file
         File logoFile = new File("ai_comment.png");
         ImageIcon logoIcon = new ImageIcon(logoFile.getPath());
         Image logoImage = logoIcon.getImage();
 
-        // Draw the Reddit logo image in the top right corner
+        // Draw the  logo image in the top right corner
         int logoWidth = 150 /2;
         int logoHeight = 80;
         int logoX = width - logoWidth - 30;
@@ -65,6 +65,7 @@ public class RedditScreenshotGenerator {
         // Draw user name and post location
         g2d.setColor(Color.WHITE);
         g2d.setFont(new Font("Arial", Font.BOLD, 30));
+        System.out.println(userName);
         g2d.drawString(userName, 100, 60);
         g2d.setFont(new Font("Arial", Font.PLAIN, 22));
         g2d.drawString(postLocation, 100, 90);
@@ -72,17 +73,10 @@ public class RedditScreenshotGenerator {
         // Draw comment box
         g2d.setColor(new Color(37, 37, 38));
         g2d.fillRoundRect(30, 120, width - 60, height - 300, 20, 20);
-
-        // Draw comment
-        //old
-        //g2d.setColor(Color.WHITE);
-        //g2d.setFont(new Font("Arial", Font.PLAIN, 26));
-        //g2d.drawString(comment, 50, 170);
         
         //draw wrapped comment
         g2d.setColor(Color.WHITE);
         g2d.setFont(new Font("Arial", Font.PLAIN, 52));
-        
         
         //wrap the current comment
         CommentWrapper commentWrapper = new CommentWrapper(comment, 40);
@@ -130,10 +124,10 @@ public class RedditScreenshotGenerator {
         g2d.drawImage(viewedImage, arrowX + arrowWidth + 40, arrowY + arrowHeight * 2 + 10, 30, 30, null);
         g2d.setColor(Color.WHITE);
         g2d.setFont(new Font("Arial", Font.PLAIN, 22));
-        String[] timeUnits = {"minute", "hours", "days", "weeks", "months", "years"};
+        String[] timeUnits = {"minutes", "hours", "days", "weeks", "months", "years"};
         int randomIndex = new Random().nextInt(timeUnits.length);
         String randomTimeUnit = timeUnits[randomIndex];
-        int randomTimeValue = new Random().nextInt(99) + 1; // generate a random number between 1 and 99
+        int randomTimeValue = new Random().nextInt(7) + 1; // generate a random number between 1 and 7
         g2d.drawString(randomTimeValue + " " + randomTimeUnit + " ago", arrowX + arrowWidth + 80, arrowY + arrowHeight * 5 / 2);
 
         
@@ -158,10 +152,16 @@ public class RedditScreenshotGenerator {
     	
     	
     	TextFileReader listOfNames = new TextFileReader();
-    	
-    	String randomName = listOfNames.toString();
-		Random rand = new Random();
-		int rViews = new Random().nextInt(50000);
+    	try {
+			listOfNames.readTextFile("auther_names.txt");
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+    	//what the fuck is this
+    	String randomName = listOfNames.getEntry(0);
+    	Random rand = new Random();
+		int rViews = new Random().nextInt(10000);
 		int rLikes = new Random().nextInt(1000);
 		RedditScreenshotGenerator generator = new RedditScreenshotGenerator("0first", randomName, "/OverLord", "Today is... i dont know", sProfName, rViews, rLikes);
         generator.generateImage();
@@ -174,12 +174,13 @@ public class RedditScreenshotGenerator {
         
         //load list of comments
         String commentsFile = readInput();
-        List<String> ListOfComments;
 		try {
-			ListOfComments = TextFileReader.readTextFile(commentsFile);
+			TextFileReader  ListOfComments = new TextFileReader();
+			ListOfComments.readTextFile(commentsFile);
+			//ListOfComments = TextFileReader.readTextFile(commentsFile);
 			System.out.println("comments loaded");
 			generator.postLocation = "/OverLord/comment";
-        for (int i = 0; i < ListOfComments.size(); i++) {
+        for (int i = 0; i < ListOfComments.getSize(); i++) {
         	
         	//set random views
 			rViews = rand.nextInt(50000);
@@ -187,11 +188,11 @@ public class RedditScreenshotGenerator {
 			//set random likes
 			generator.upvotes = rand.nextInt(1000);
 			//set the comment from loaded comment list aray location
-			generator.comment = ListOfComments.get(i);
+			generator.comment = ListOfComments.getEntry(i);
 			//set random profile picture
 			generator.pfpImg = profName.getRandomProfileName();
 			//set random profile name
-			generator.userName = listOfNames.toString();
+			generator.userName = listOfNames.getEntry(rand.nextInt(listOfNames.getSize()));
 			generator.fileName = i + "aithread";
 			generator.generateImage();
         	
