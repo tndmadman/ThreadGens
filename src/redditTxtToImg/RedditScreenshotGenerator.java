@@ -273,21 +273,36 @@ public class RedditScreenshotGenerator {
 
         try {
             if (settings.guiMode) {
-                ThreadGensWindow.open();
+                GuiApp.open();
                 return;
             }
+            if (settings.autoGenerateText) {
+                generateTextWithLocalLlm(settings);
+            }
             generateBatch(settings);
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.err.println("Failed: " + e.getMessage());
             printUsage();
             e.printStackTrace();
         }
     }
 
-    private static void generateBatch(Settings settings) throws IOException {
+    private static void generateTextWithLocalLlm(Settings settings) throws IOException, InterruptedException {
+        int requestedCount = settings.count > -1 ? settings.count : settings.autoTextCount;
+        LocalLlmTextGenerator generator = new LocalLlmTextGenerator(settings.ollamaUrl, settings.llmModel);
+        Path generatedFile = generator.generateToFile(settings.topic, requestedCount, settings.generatedTextFile);
+        settings.commentsFile = generatedFile;
+        if (settings.count < 0) {
+            settings.count = requestedCount;
+        }
+        System.out.println("Generated script: " + generatedFile);
+    }
+
+    private static void generateBatch(Settings settings) throws IOException, InterruptedException {
         TextFileReader comments = TextFileReader.fromFile(settings.commentsFile);
         TextFileReader authors = TextFileReader.fromFile(settings.authorNamesFile);
         RandomProfileName profileName = new RandomProfileName(settings.profileDirectory);
+        VoiceGenerator voiceGenerator = new VoiceGenerator(settings.ttsEngine, settings.ttsCommand, settings.voiceModel, settings.ttsTimeoutSeconds);
         Random rand = new Random();
         Style style = Style.load(settings.styleName);
 
@@ -306,12 +321,14 @@ public class RedditScreenshotGenerator {
             int randomLikes = rand.nextInt(settings.maxLikes);
             String randomAuthor = authors.getRandomEntry(rand);
             String randomProfileImage = profileName.getRandomProfileName();
+            String currentComment = commentLines.get(i);
+            String currentFileName = i + settings.outputPrefix;
 
             RedditScreenshotGenerator generator = new RedditScreenshotGenerator(
-                    i + settings.outputPrefix,
+                    currentFileName,
                     randomAuthor,
                     settings.postLocation,
-                    commentLines.get(i),
+                    currentComment,
                     randomProfileImage,
                     randomLikes,
                     randomViews,
@@ -320,13 +337,21 @@ public class RedditScreenshotGenerator {
                     style
             );
             generator.generateImage();
-            System.out.println("Generated: " + settings.outputDirectory.resolve(i + settings.outputPrefix + ".png"));
+            System.out.println("Generated image: " + settings.outputDirectory.resolve(currentFileName + ".png"));
+
+            if (voiceGenerator.isEnabled()) {
+                Path audioPath = settings.audioDirectory.resolve(currentFileName + ".wav");
+                voiceGenerator.generateSpeech(currentComment, audioPath);
+                System.out.println("Generated audio: " + audioPath);
+            }
         }
     }
 
     private static void printUsage() {
-        System.err.println("Usage: java -cp out redditTxtToImg.RedditScreenshotGenerator data/comments.txt output [options]");
-        System.err.println("Options: --count N --prefix NAME --style dark|light --shuffle --center --top --no-watermark --gui");
+        System.err.println("Usage: java -cp out redditTxtToImg.RedditScreenshotGenerator [comments.txt] [output] [options]");
+        System.err.println("Image options: --count N --prefix NAME --style dark|light --shuffle --center --top --no-watermark --gui");
+        System.err.println("Local LLM options: --auto --topic TEXT --llm-model MODEL --llm-url URL --script-out FILE");
+        System.err.println("Local TTS options: --tts none|piper --voice path/to/voice.onnx --tts-command piper --audio-dir DIR");
     }
 
     private static class Settings {
@@ -338,19 +363,30 @@ public class RedditScreenshotGenerator {
         int maxViews = 50000;
         int maxLikes = 15000;
         int count = -1;
+        int autoTextCount = 10;
+        int ttsTimeoutSeconds = 120;
         boolean shuffle = false;
         boolean centerShortComments = true;
         boolean showWatermark = true;
         boolean guiMode = false;
+        boolean autoGenerateText = false;
         String fontName = "Arial";
         String postLocation = "/thread/comment";
         String outputPrefix = "aithread";
         String styleName = "dark";
         String watermarkText = "MOCKUP";
+        String topic = "weird everyday stories";
+        String llmModel = "llama3.1:8b";
+        String ollamaUrl = "http://localhost:11434/api/generate";
+        String ttsEngine = "none";
+        String ttsCommand = "piper";
         Path commentsFile = Path.of("data", "comments.txt");
         Path outputDirectory = Path.of("output");
         Path authorNamesFile = Path.of("data", "author_names.txt");
         Path profileDirectory = Path.of("assets", "pfp");
+        Path generatedTextFile = Path.of("output", "script", "generated_comments.txt");
+        Path audioDirectory = Path.of("output", "audio");
+        Path voiceModel = Path.of("voices", "en_US-lessac-medium.onnx");
 
         static Settings fromArgs(String[] args) {
             Settings settings = loadDefaults();
@@ -365,7 +401,7 @@ public class RedditScreenshotGenerator {
                 String arg = args[i];
                 if ("--count".equals(arg) && i + 1 < args.length) settings.count = parseInt(args[++i], settings.count);
                 else if ("--prefix".equals(arg) && i + 1 < args.length) settings.outputPrefix = args[++i];
-                else if ("--style".equals(arg) && i + 1 < args.length) settings.styleName = args[++i];
+                else if ("--style".equals(arg) && i + 1 < args.length) settings.styleName = args[++i].replace("reddit_", "");
                 else if ("--names".equals(arg) && i + 1 < args.length) settings.authorNamesFile = Path.of(args[++i]);
                 else if ("--profiles".equals(arg) && i + 1 < args.length) settings.profileDirectory = Path.of(args[++i]);
                 else if ("--shuffle".equals(arg)) settings.shuffle = true;
@@ -373,6 +409,16 @@ public class RedditScreenshotGenerator {
                 else if ("--center".equals(arg)) settings.centerShortComments = true;
                 else if ("--no-watermark".equals(arg)) settings.showWatermark = false;
                 else if ("--gui".equals(arg)) settings.guiMode = true;
+                else if ("--auto".equals(arg)) settings.autoGenerateText = true;
+                else if ("--topic".equals(arg) && i + 1 < args.length) settings.topic = args[++i];
+                else if ("--llm-model".equals(arg) && i + 1 < args.length) settings.llmModel = args[++i];
+                else if ("--llm-url".equals(arg) && i + 1 < args.length) settings.ollamaUrl = args[++i];
+                else if ("--script-out".equals(arg) && i + 1 < args.length) settings.generatedTextFile = Path.of(args[++i]);
+                else if ("--tts".equals(arg) && i + 1 < args.length) settings.ttsEngine = args[++i];
+                else if ("--voice".equals(arg) && i + 1 < args.length) settings.voiceModel = Path.of(args[++i]);
+                else if ("--tts-command".equals(arg) && i + 1 < args.length) settings.ttsCommand = args[++i];
+                else if ("--audio-dir".equals(arg) && i + 1 < args.length) settings.audioDirectory = Path.of(args[++i]);
+                else if ("--tts-timeout".equals(arg) && i + 1 < args.length) settings.ttsTimeoutSeconds = parseInt(args[++i], settings.ttsTimeoutSeconds);
             }
             return settings;
         }
@@ -390,6 +436,13 @@ public class RedditScreenshotGenerator {
                 settings.outputPrefix = properties.getProperty("prefix", settings.outputPrefix);
                 settings.styleName = properties.getProperty("style", settings.styleName).replace("reddit_", "");
                 settings.centerShortComments = Boolean.parseBoolean(properties.getProperty("centerShortComments", "true"));
+                settings.topic = properties.getProperty("topic", settings.topic);
+                settings.llmModel = properties.getProperty("llmModel", settings.llmModel);
+                settings.ollamaUrl = properties.getProperty("ollamaUrl", settings.ollamaUrl);
+                settings.ttsEngine = properties.getProperty("ttsEngine", settings.ttsEngine);
+                settings.ttsCommand = properties.getProperty("ttsCommand", settings.ttsCommand);
+                settings.voiceModel = Path.of(properties.getProperty("voiceModel", settings.voiceModel.toString()));
+                settings.audioDirectory = Path.of(properties.getProperty("audioDirectory", settings.audioDirectory.toString()));
             } catch (IOException ignored) {
                 return settings;
             }
@@ -447,27 +500,6 @@ public class RedditScreenshotGenerator {
             } catch (NumberFormatException e) {
                 return null;
             }
-        }
-    }
-
-    private static class ThreadGensWindow {
-        static void open() {
-            javax.swing.SwingUtilities.invokeLater(new Runnable() {
-                public void run() {
-                    javax.swing.JFrame frame = new javax.swing.JFrame("ThreadGens");
-                    frame.setDefaultCloseOperation(javax.swing.JFrame.EXIT_ON_CLOSE);
-                    frame.setSize(460, 220);
-                    javax.swing.JPanel panel = new javax.swing.JPanel();
-                    panel.setLayout(new java.awt.GridLayout(0, 1, 8, 8));
-                    javax.swing.JLabel label = new javax.swing.JLabel("ThreadGens GUI placeholder");
-                    javax.swing.JLabel help = new javax.swing.JLabel("CLI is ready: choose full GUI controls next.");
-                    panel.add(label);
-                    panel.add(help);
-                    frame.add(panel);
-                    frame.setLocationRelativeTo(null);
-                    frame.setVisible(true);
-                }
-            });
         }
     }
 
