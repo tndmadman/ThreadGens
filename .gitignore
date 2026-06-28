@@ -1,0 +1,5 @@
+out/
+output/
+*.class
+.DS_Store
+Thumbs.db

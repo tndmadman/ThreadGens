@@ -1,0 +1,23 @@
+plugins {
+    id 'application'
+}
+
+group = 'tndmadman'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+sourceSets.main.java.srcDirs = ['src']
+
+application {
+    mainClass = 'redditTxtToImg.RedditScreenshotGenerator'
+}
+
+jar {
+    archiveBaseName = 'ThreadGens'
+    manifest {
+        attributes 'Main-Class': 'redditTxtToImg.RedditScreenshotGenerator'
+    }
+}

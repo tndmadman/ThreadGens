@@ -1,0 +1,4 @@
+Today is the day I finally automate this whole thing.
+The clean version should generate one image for every line in this file.
+If profile pictures or icons are missing, the app draws fallback graphics instead of crashing.
+This is exactly why projects need a README and sample data.
