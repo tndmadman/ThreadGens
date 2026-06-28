@@ -9,6 +9,8 @@ repositories {
     mavenCentral()
 }
 
+sourceSets.main.java.srcDirs = ['src']
+
 application {
     mainClass = 'redditTxtToImg.RedditScreenshotGenerator'
 }
@@ -16,14 +18,6 @@ application {
 jar {
     archiveBaseName = 'ThreadGens'
     manifest {
-        attributes 'Main-Class': application.mainClass
+        attributes 'Main-Class': 'redditTxtToImg.RedditScreenshotGenerator'
     }
-}
-
-tasks.register('generateSample', JavaExec) {
-    group = 'application'
-    description = 'Generate sample images from data/comments.txt into output/'
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = application.mainClass
-    args 'data/comments.txt', 'output'
 }
