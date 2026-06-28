@@ -1,0 +1,29 @@
+plugins {
+    id 'application'
+}
+
+group = 'tndmadman'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+application {
+    mainClass = 'redditTxtToImg.RedditScreenshotGenerator'
+}
+
+jar {
+    archiveBaseName = 'ThreadGens'
+    manifest {
+        attributes 'Main-Class': application.mainClass
+    }
+}
+
+tasks.register('generateSample', JavaExec) {
+    group = 'application'
+    description = 'Generate sample images from data/comments.txt into output/'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = application.mainClass
+    args 'data/comments.txt', 'output'
+}
