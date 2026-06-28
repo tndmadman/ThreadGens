@@ -1,11 +1,17 @@
 # Build notes
 
-Planned next additions:
+Completed on this branch:
 
-- Gradle build files
-- config.properties
-- richer CLI options
-- templates
-- GUI entry point
-- GitHub Actions build
-- sample preview image
+- Gradle build file
+- Defaults file
+- CLI options
+- Dark and light style templates
+- Runnable jar manifest
+- SVG sample preview
+- Basic GUI app
+- README updates
+- Source files moved into package directory
+
+Still blocked by connector:
+
+- Workflow file writes under the GitHub automation folder.
