@@ -1,0 +1,6 @@
+background=245 245 245
+card=255 255 255
+text=20 20 20
+muted=90 90 90
+accent=255 69 0
+secondary=50 110 220
