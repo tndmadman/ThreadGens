@@ -1,6 +1,8 @@
 # ThreadGens
 
-ThreadGens is a Java tool that reads lines from a text file and creates one vertical PNG image per line.
+ThreadGens is a Java tool that reads lines from a text file and creates one vertical 1080x1920 PNG image per line.
+
+The default layout is built for 9:16 short-form video frames. It keeps the card centered with top and bottom safe space so the output fits TikTok, YouTube Shorts, and Reels-style compositions better.
 
 ![Sample preview](docs/sample-preview.svg)
 
@@ -42,7 +44,8 @@ Options:
 - `--prefix NAME` changes output file names.
 - `--style dark|light` chooses a template from `templates/`.
 - `--shuffle` shuffles input lines before rendering.
-- `--center` centers short comments.
+- `--center` centers comments in the vertical card.
+- `--top` keeps comments closer to the top of the card.
 - `--no-watermark` hides the small watermark.
 
 ## Files
