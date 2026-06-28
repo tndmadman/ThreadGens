@@ -22,6 +22,14 @@ gradle build
 java -cp out redditTxtToImg.RedditScreenshotGenerator data/comments.txt output
 ```
 
+## GUI
+
+```bash
+java -cp out redditTxtToImg.GuiApp
+```
+
+The GUI lets you choose an input text file, choose an output folder, and generate images.
+
 ## CLI options
 
 ```bash
@@ -36,7 +44,6 @@ Options:
 - `--shuffle` shuffles input lines before rendering.
 - `--center` centers short comments.
 - `--no-watermark` hides the small watermark.
-- `--gui` opens a basic GUI placeholder window.
 
 ## Files
 
