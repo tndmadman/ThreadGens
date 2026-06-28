@@ -10,7 +10,6 @@ import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.geom.Ellipse2D;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -229,6 +228,8 @@ public class RedditScreenshotGenerator {
     }
 
     public static void main(String[] args) {
+        System.setProperty("java.awt.headless", "true");
+
         try {
             Path commentsFile = resolveCommentsFile(args);
             Path outputDirectory = args.length >= 2 ? Path.of(args[1]) : Path.of("output");
