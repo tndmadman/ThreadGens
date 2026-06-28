@@ -2,6 +2,8 @@
 
 ThreadGens is a Java tool that reads lines from a text file and creates one vertical PNG image per line.
 
+![Sample preview](docs/sample-preview.svg)
+
 ## Build
 
 ```bash
