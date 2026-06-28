@@ -19,14 +19,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.Random;
-import java.util.Scanner;
 
 import javax.imageio.ImageIO;
 
 public class RedditScreenshotGenerator {
-    private static final int MARGIN = 30;
-    private static final int COMMENT_BOX_TOP = 120;
-    private static final int COMMENT_BOX_BOTTOM_PADDING = 300;
+    private static final int MARGIN = 64;
+    private static final int COMMENT_BOX_TOP = 260;
+    private static final int COMMENT_BOX_BOTTOM_PADDING = 330;
 
     private final Random random = new Random();
     private final Settings settings;
@@ -65,10 +64,10 @@ public class RedditScreenshotGenerator {
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
         drawBackground(g2d);
-        drawProfilePicture(g2d, profileImageName, MARGIN, MARGIN, 60);
+        drawCommentBox(g2d);
+        drawProfilePicture(g2d, profileImageName, MARGIN + 42, COMMENT_BOX_TOP + 48, 72);
         drawLogo(g2d);
         drawHeader(g2d);
-        drawCommentBox(g2d);
         drawComment(g2d);
         drawStats(g2d);
         drawWatermark(g2d);
@@ -79,26 +78,44 @@ public class RedditScreenshotGenerator {
         ImageIO.write(image, "png", outputPath.toFile());
     }
 
+    private int boxBottom() {
+        return settings.height - COMMENT_BOX_BOTTOM_PADDING;
+    }
+
+    private int boxHeight() {
+        return boxBottom() - COMMENT_BOX_TOP;
+    }
+
+    private int boxRight() {
+        return settings.width - MARGIN;
+    }
+
+    private int boxWidth() {
+        return settings.width - (MARGIN * 2);
+    }
+
     private void drawBackground(Graphics2D g2d) {
         g2d.setColor(style.background);
         g2d.fillRect(0, 0, settings.width, settings.height);
     }
 
     private void drawHeader(Graphics2D g2d) {
+        int textX = MARGIN + 136;
+        int avatarY = COMMENT_BOX_TOP + 48;
         g2d.setColor(style.text);
         g2d.setFont(new Font(settings.fontName, Font.BOLD, settings.authorFontSize));
-        g2d.drawString(userName, 100, 60);
+        g2d.drawString(userName, textX, avatarY + 30);
         g2d.setFont(new Font(settings.fontName, Font.PLAIN, settings.locationFontSize));
         g2d.setColor(style.muted);
-        g2d.drawString(postLocation, 100, 90);
+        g2d.drawString(postLocation, textX, avatarY + 63);
     }
 
     private void drawLogo(Graphics2D g2d) {
         BufferedImage logo = loadImageIfPresent(Path.of("assets", "ai_comment.png"));
-        int logoWidth = 90;
-        int logoHeight = 80;
-        int logoX = settings.width - logoWidth - MARGIN;
-        int logoY = MARGIN;
+        int logoWidth = 92;
+        int logoHeight = 76;
+        int logoX = boxRight() - 42 - logoWidth;
+        int logoY = COMMENT_BOX_TOP + 48;
 
         if (logo != null) {
             g2d.drawImage(logo, logoX, logoY, logoWidth, logoHeight, null);
@@ -106,15 +123,15 @@ public class RedditScreenshotGenerator {
         }
 
         g2d.setColor(style.accent);
-        g2d.fillRoundRect(logoX, logoY, logoWidth, logoHeight, 20, 20);
+        g2d.fillRoundRect(logoX, logoY, logoWidth, logoHeight, 22, 22);
         g2d.setColor(Color.WHITE);
         g2d.setFont(new Font(settings.fontName, Font.BOLD, 24));
-        g2d.drawString("AI", logoX + 28, logoY + 50);
+        g2d.drawString("AI", logoX + 30, logoY + 48);
     }
 
     private void drawCommentBox(Graphics2D g2d) {
         g2d.setColor(style.card);
-        g2d.fillRoundRect(MARGIN, COMMENT_BOX_TOP, settings.width - (MARGIN * 2), settings.height - COMMENT_BOX_BOTTOM_PADDING, 20, 20);
+        g2d.fillRoundRect(MARGIN, COMMENT_BOX_TOP, boxWidth(), boxHeight(), 34, 34);
     }
 
     private void drawComment(Graphics2D g2d) {
@@ -123,21 +140,22 @@ public class RedditScreenshotGenerator {
         g2d.setFont(commentFont);
         FontMetrics metrics = g2d.getFontMetrics(commentFont);
 
-        int textX = 50;
-        int maxTextWidth = settings.width - 100;
+        int textX = MARGIN + 42;
+        int maxTextWidth = boxWidth() - 84;
         List<String> wrappedCommentLines = CommentWrapper.wrapComment(comment, metrics, maxTextWidth);
 
-        int lineHeight = settings.commentFontSize + 8;
-        int y = 170;
-        int maxY = settings.height - COMMENT_BOX_BOTTOM_PADDING - 40;
+        int lineHeight = settings.commentFontSize + 10;
+        int textAreaTop = COMMENT_BOX_TOP + 178;
+        int textAreaBottom = boxBottom() - 190;
+        int y = textAreaTop;
 
-        if (settings.centerShortComments && wrappedCommentLines.size() <= 3) {
-            int cardHeight = settings.height - COMMENT_BOX_BOTTOM_PADDING - COMMENT_BOX_TOP;
-            y = COMMENT_BOX_TOP + (cardHeight / 2) - ((wrappedCommentLines.size() * lineHeight) / 2);
+        if (settings.centerShortComments) {
+            int textBlockHeight = wrappedCommentLines.size() * lineHeight;
+            y = textAreaTop + Math.max(0, ((textAreaBottom - textAreaTop) - textBlockHeight) / 2);
         }
 
         for (String line : wrappedCommentLines) {
-            if (y > maxY) {
+            if (y > textAreaBottom) {
                 g2d.drawString("...", textX, y);
                 break;
             }
@@ -147,8 +165,8 @@ public class RedditScreenshotGenerator {
     }
 
     private void drawStats(Graphics2D g2d) {
-        int arrowX = 50;
-        int arrowY = settings.height - 150;
+        int arrowX = MARGIN + 42;
+        int arrowY = boxBottom() - 112;
         int arrowWidth = 40;
         int arrowHeight = 40;
 
@@ -171,15 +189,15 @@ public class RedditScreenshotGenerator {
         g2d.setFont(new Font(settings.fontName, Font.PLAIN, 22));
         g2d.drawString(numberFormat.format(upvotes), arrowX + arrowWidth / 4 - 15, arrowY + arrowHeight * 3 / 2 + 8);
 
-        int iconX = arrowX + arrowWidth + 40;
+        int iconX = arrowX + arrowWidth + 48;
         drawViewIcon(g2d, iconX, arrowY + arrowHeight - 10, 30);
-        g2d.drawString(numberFormat.format(views) + " views", arrowX + arrowWidth + 80, arrowY + arrowHeight * 3 / 2);
+        g2d.drawString(numberFormat.format(views) + " views", iconX + 40, arrowY + arrowHeight * 3 / 2);
 
         drawClockIcon(g2d, iconX, arrowY + arrowHeight * 2 + 10, 30);
         String[] timeUnits = {"days", "weeks", "months", "years"};
         String randomTimeUnit = timeUnits[random.nextInt(timeUnits.length)];
         int randomTimeValue = random.nextInt(7) + 1;
-        g2d.drawString(randomTimeValue + " " + randomTimeUnit + " ago", arrowX + arrowWidth + 80, arrowY + arrowHeight * 5 / 2);
+        g2d.drawString(randomTimeValue + " " + randomTimeUnit + " ago", iconX + 40, arrowY + arrowHeight * 5 / 2);
     }
 
     private void drawWatermark(Graphics2D g2d) {
@@ -188,7 +206,7 @@ public class RedditScreenshotGenerator {
         }
         g2d.setColor(new Color(style.muted.getRed(), style.muted.getGreen(), style.muted.getBlue(), 80));
         g2d.setFont(new Font(settings.fontName, Font.BOLD, 24));
-        g2d.drawString(settings.watermarkText, settings.width - 150, settings.height - 40);
+        g2d.drawString(settings.watermarkText, boxRight() - 150, boxBottom() - 28);
     }
 
     private void drawProfilePicture(Graphics2D g2d, String profileImageName, int x, int y, int size) {
@@ -205,7 +223,7 @@ public class RedditScreenshotGenerator {
         g2d.setPaint(new GradientPaint(x, y, style.accent, x + size, y + size, style.secondary));
         g2d.fill(new Ellipse2D.Double(x, y, size, size));
         g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font(settings.fontName, Font.BOLD, 26));
+        g2d.setFont(new Font(settings.fontName, Font.BOLD, 28));
         String initial = userName == null || userName.isBlank() ? "?" : userName.substring(0, 1).toUpperCase();
         FontMetrics metrics = g2d.getFontMetrics();
         int textX = x + (size - metrics.stringWidth(initial)) / 2;
@@ -308,20 +326,20 @@ public class RedditScreenshotGenerator {
 
     private static void printUsage() {
         System.err.println("Usage: java -cp out redditTxtToImg.RedditScreenshotGenerator data/comments.txt output [options]");
-        System.err.println("Options: --count N --prefix NAME --style dark|light --shuffle --center --no-watermark --gui");
+        System.err.println("Options: --count N --prefix NAME --style dark|light --shuffle --center --top --no-watermark --gui");
     }
 
     private static class Settings {
         int width = 1080;
         int height = 1920;
-        int commentFontSize = 52;
+        int commentFontSize = 60;
         int authorFontSize = 30;
         int locationFontSize = 22;
         int maxViews = 50000;
         int maxLikes = 15000;
         int count = -1;
         boolean shuffle = false;
-        boolean centerShortComments = false;
+        boolean centerShortComments = true;
         boolean showWatermark = true;
         boolean guiMode = false;
         String fontName = "Arial";
@@ -351,6 +369,7 @@ public class RedditScreenshotGenerator {
                 else if ("--names".equals(arg) && i + 1 < args.length) settings.authorNamesFile = Path.of(args[++i]);
                 else if ("--profiles".equals(arg) && i + 1 < args.length) settings.profileDirectory = Path.of(args[++i]);
                 else if ("--shuffle".equals(arg)) settings.shuffle = true;
+                else if ("--top".equals(arg)) settings.centerShortComments = false;
                 else if ("--center".equals(arg)) settings.centerShortComments = true;
                 else if ("--no-watermark".equals(arg)) settings.showWatermark = false;
                 else if ("--gui".equals(arg)) settings.guiMode = true;
@@ -370,6 +389,7 @@ public class RedditScreenshotGenerator {
                 settings.height = parseInt(properties.getProperty("height"), settings.height);
                 settings.outputPrefix = properties.getProperty("prefix", settings.outputPrefix);
                 settings.styleName = properties.getProperty("style", settings.styleName).replace("reddit_", "");
+                settings.centerShortComments = Boolean.parseBoolean(properties.getProperty("centerShortComments", "true"));
             } catch (IOException ignored) {
                 return settings;
             }
