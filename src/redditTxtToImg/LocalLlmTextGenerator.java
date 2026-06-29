@@ -37,7 +37,7 @@ public class LocalLlmTextGenerator {
         while (lines.size() < count && attempts < maxAttempts) {
             attempts++;
             int remaining = count - lines.size();
-            String prompt = attempts == 1
+            String prompt = attempts == 1 || lines.isEmpty()
                     ? buildPrompt(topic, count)
                     : buildContinuationPrompt(topic, remaining, lines);
 
@@ -99,12 +99,17 @@ public class LocalLlmTextGenerator {
 
     private static String buildPrompt(String topic, int count) {
         String safeTopic = topic == null || topic.isBlank() ? "weird everyday stories" : topic.trim();
-        return "Generate exactly " + count + " short Reddit-style comment posts for vertical short-form videos about: "
-                + safeTopic + "\n\n"
+        int replyCount = Math.max(0, count - 1);
+        return "Generate exactly " + count + " lines for a Reddit thread about: " + safeTopic + "\n\n"
+                + "Structure:\n"
+                + "- Line 1 must be the original Reddit post. Make it sound like the main post/body.\n"
+                + "- Lines 2 through " + count + " must be comments or replies reacting to that original post.\n"
+                + "- If there are " + replyCount + " replies, make them feel like a real thread conversation.\n\n"
                 + "Rules:\n"
                 + "- Return exactly " + count + " lines.\n"
-                + "- Return one post per line.\n"
+                + "- Return one post/comment per line.\n"
                 + "- No numbering, bullets, quotes, markdown, explanations, titles, or labels.\n"
+                + "- Do not prefix lines with POST, OP, COMMENT, or REPLY.\n"
                 + "- Each line should be 1 or 2 sentences.\n"
                 + "- Make each line punchy, readable aloud, and safe for a general audience.\n"
                 + "- Do not mention that you are an AI.\n";
@@ -114,11 +119,12 @@ public class LocalLlmTextGenerator {
         String safeTopic = topic == null || topic.isBlank() ? "weird everyday stories" : topic.trim();
         StringBuilder prompt = new StringBuilder();
         prompt.append("Generate exactly ").append(count)
-                .append(" more short Reddit-style comment posts for vertical short-form videos about: ")
+                .append(" more Reddit comments/replies for the same thread about: ")
                 .append(safeTopic).append("\n\n")
                 .append("Rules:\n")
                 .append("- Return exactly ").append(count).append(" lines.\n")
-                .append("- Return one post per line.\n")
+                .append("- Return one comment/reply per line.\n")
+                .append("- These are follow-up comments, not a second original post.\n")
                 .append("- No numbering, bullets, quotes, markdown, explanations, titles, or labels.\n")
                 .append("- Do not repeat these already accepted lines:\n");
         for (String existingLine : existingLines) {
@@ -135,6 +141,7 @@ public class LocalLlmTextGenerator {
             String line = rawLine.trim();
             line = line.replaceAll("^[-*•]+\\s*", "");
             line = line.replaceAll("^\\d+[.)-]\\s*", "");
+            line = line.replaceAll("^(?i)(post|op|original post|comment|reply)\\s*[:.-]\\s*", "");
             line = stripMatchingQuotes(line);
             if (!line.isBlank()) {
                 lines.add(line);
