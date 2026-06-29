@@ -8,7 +8,6 @@ set "TOPIC=weird everyday stories"
 set "VOICE=en_US-lessac-medium"
 set "TTS=piper"
 set "MAKE_VIDEO=N"
-set "MAKE_FINAL=N"
 set "VIDEO_FLAGS="
 set "VOICE_DIR=voices"
 set "PIPER_CMD=%~dp0piper\piper.exe"
@@ -110,13 +109,8 @@ set /p "COUNT=How many posts [10]: "
 if "%COUNT%"=="" set "COUNT=10"
 
 echo.
-set /p "MAKE_VIDEO=Make MP4 video clips? y/N: "
-if /I "%MAKE_VIDEO%"=="Y" set "VIDEO_FLAGS=--video"
-
-if /I "%MAKE_VIDEO%"=="Y" (
-  set /p "MAKE_FINAL=Also combine into output\video\final.mp4? y/N: "
-  if /I "%MAKE_FINAL%"=="Y" set "VIDEO_FLAGS=--video --concat-video"
-)
+set /p "MAKE_VIDEO=Make stitched MP4 video? y/N: "
+if /I "%MAKE_VIDEO%"=="Y" set "VIDEO_FLAGS=--video --concat-video"
 
 echo.
 echo Topic: %TOPIC%
@@ -130,9 +124,10 @@ java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --topic "%TOPIC%" -
 
 echo.
 echo Done.
-echo Text:   output\script\generated_comments.txt
-echo Images: output\
-echo Audio:  output\audio\
-echo Video:  output\video\
+echo Text:        output\script\generated_comments.txt
+echo Images:      output\
+echo Audio:       output\audio\
+echo Clips:       output\video\
+echo Final video: output\video\final.mp4
 echo.
 pause
