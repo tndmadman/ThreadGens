@@ -15,10 +15,14 @@ set "PIPER_CMD=%~dp0piper\piper.exe"
 set "KOKORO_PYTHON=%~dp0.venv-kokoro\Scripts\python.exe"
 set "PYTHON_CMD=python"
 set "TTS_CMD="
+set "THREADGENS_KOKORO_VERBOSE=0"
+set "PYTHONWARNINGS=ignore"
+set "HF_HUB_DISABLE_PROGRESS_BARS=1"
+set "TOKENIZERS_PARALLELISM=false"
 
 echo.
 echo ThreadGens local AI runner
-echo Branch: feature/kokoro-tts
+echo Branch: main
 echo.
 
 echo Choose TTS engine:
@@ -149,6 +153,7 @@ set "TTS_CMD=%PYTHON_CMD%"
 
 :kokoro_python_ok
 echo Kokoro Python: %TTS_CMD%
+echo Kokoro console: quiet
 echo.
 echo Common Kokoro voices:
 echo af_heart   af_bella   af_nicole
@@ -204,6 +209,7 @@ echo Cmd:        %TTS_CMD%
 echo Video:      %VIDEO_FLAGS%
 echo Watermark:  off
 echo Layout:     body text starts at top
+echo Kokoro log: quiet
 echo Pipeline:   text/script first, then images, then audio, then video
 echo.
 
