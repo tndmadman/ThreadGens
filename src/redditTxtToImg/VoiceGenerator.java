@@ -156,6 +156,9 @@ class VoiceCatalog {
 
 class VideoGenerator {
     private static final double TRANSITION_SECONDS = 0.35;
+    private static final double END_PAUSE_SECONDS = 0.70;
+    private static final double FADE_IN_SECONDS = 0.08;
+    private static final double FADE_OUT_SECONDS = 0.14;
 
     private final String command;
     private final int timeoutSeconds;
@@ -171,6 +174,13 @@ class VideoGenerator {
             Files.createDirectories(outputFile.getParent());
         }
 
+        double audioDuration = probeDurationSeconds(audioFile);
+        double outputDuration = audioDuration + END_PAUSE_SECONDS;
+        double fadeOutStart = Math.max(0.0, audioDuration - FADE_OUT_SECONDS);
+        String audioFilter = "afade=t=in:st=0:d=" + formatSeconds(FADE_IN_SECONDS)
+                + ",afade=t=out:st=" + formatSeconds(fadeOutStart) + ":d=" + formatSeconds(FADE_OUT_SECONDS)
+                + ",apad=pad_dur=" + formatSeconds(END_PAUSE_SECONDS);
+
         List<String> parts = new ArrayList<>();
         parts.add(command);
         parts.add("-y");
@@ -182,15 +192,18 @@ class VideoGenerator {
         parts.add(imageFile.toString());
         parts.add("-i");
         parts.add(audioFile.toString());
+        parts.add("-t");
+        parts.add(formatSeconds(outputDuration));
+        parts.add("-vf");
+        parts.add("scale=" + width + ":" + height);
+        parts.add("-af");
+        parts.add(audioFilter);
         parts.add("-c:v");
         parts.add("libx264");
         parts.add("-c:a");
         parts.add("aac");
         parts.add("-pix_fmt");
         parts.add("yuv420p");
-        parts.add("-shortest");
-        parts.add("-vf");
-        parts.add("scale=" + width + ":" + height);
         parts.add(outputFile.toString());
 
         run(parts, "video render");
