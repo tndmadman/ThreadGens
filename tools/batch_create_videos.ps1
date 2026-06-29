@@ -2,7 +2,8 @@ param(
     [string]$InputFile = 'data\batch_videos.txt',
     [int]$Count = 10,
     [string]$Model = 'llama3.1:8b',
-    [string]$Voice = 'af_heart'
+    [string]$Voice = 'af_heart',
+    [switch]$KeepOllamaLoaded
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,6 +52,11 @@ Write-Step 'ThreadGens batch video creator'
 Write-Host "Input file: $InputPath"
 Write-Host "Output root: $OutputRoot"
 Write-Host "Defaults: model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
+if ($KeepOllamaLoaded) {
+    Write-Host 'Ollama unload: disabled, keeping model loaded between videos' -ForegroundColor Green
+} else {
+    Write-Host 'Ollama unload: enabled after each script (default)'
+}
 
 if (-not (Test-Path $InputPath)) {
     Create-SampleInput $InputPath
@@ -97,6 +103,7 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
     $body = $lines[$i + 1].Trim()
     $jobLabel = '{0:D3}' -f $jobNumber
     $safeTitle = New-SafeFileName $title
+    $finalVideoName = "${jobLabel}_${safeTitle}.mp4"
 
     $jobRoot = Join-Path $OutputRoot ("video_$jobLabel")
     $imageDir = Join-Path $jobRoot 'images'
@@ -109,6 +116,7 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
 
     Write-Step "[$jobLabel/$jobCountLabel] $title"
     Write-Host "Body: $body"
+    Write-Host "Final MP4: $finalVideoName"
 
     $javaArgs = @(
         '-cp', 'out', 'redditTxtToImg.RedditScreenshotGenerator',
@@ -126,22 +134,26 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
         '--concat-video',
         '--video-dir', $videoDir,
         '--script-out', $scriptOut,
-        '--final-video', 'final.mp4',
+        '--final-video', $finalVideoName,
         '--no-watermark',
         '--top'
     )
+
+    if ($KeepOllamaLoaded) {
+        $javaArgs += '--keep-ollama-loaded'
+    }
 
     & java @javaArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Video job $jobLabel failed with exit code $LASTEXITCODE."
     }
 
-    $finalVideo = Join-Path $videoDir 'final.mp4'
+    $finalVideo = Join-Path $videoDir $finalVideoName
     if (-not (Test-Path $finalVideo)) {
         throw "Video job $jobLabel finished but final video was not found: $finalVideo"
     }
 
-    $copyTo = Join-Path $FinalDir ("${jobLabel}_${safeTitle}.mp4")
+    $copyTo = Join-Path $FinalDir $finalVideoName
     Copy-Item -Force -Path $finalVideo -Destination $copyTo
     Write-Host "Saved final copy: $copyTo" -ForegroundColor Green
 }
