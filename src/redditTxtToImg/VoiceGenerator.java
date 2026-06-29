@@ -205,8 +205,14 @@ class VideoGenerator {
         parts.add("0");
         parts.add("-i");
         parts.add(listFile.toString());
-        parts.add("-c");
-        parts.add("copy");
+        parts.add("-c:v");
+        parts.add("libx264");
+        parts.add("-c:a");
+        parts.add("aac");
+        parts.add("-pix_fmt");
+        parts.add("yuv420p");
+        parts.add("-movflags");
+        parts.add("+faststart");
         parts.add(outputFile.toString());
 
         run(parts, "video combine");
