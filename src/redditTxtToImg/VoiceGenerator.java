@@ -50,7 +50,7 @@ public class VoiceGenerator {
         }
 
         List<String> commandParts = new ArrayList<>();
-        commandParts.add(command);
+        commandParts.add(resolveCommand(command));
         commandParts.add("--model");
         commandParts.add(voiceModel.toString());
         commandParts.add("--output_file");
@@ -76,6 +76,16 @@ public class VoiceGenerator {
         if (process.exitValue() != 0) {
             throw new IOException("Piper failed with exit code " + process.exitValue() + ": " + output.toString(StandardCharsets.UTF_8));
         }
+    }
+
+    private String resolveCommand(String configuredCommand) throws IOException {
+        if (configuredCommand == null || configuredCommand.isBlank() || "piper".equalsIgnoreCase(configuredCommand.trim())) {
+            Path localPiper = Path.of("piper", "piper.exe");
+            if (Files.exists(localPiper)) {
+                return localPiper.toString();
+            }
+        }
+        return configuredCommand;
     }
 }
 
