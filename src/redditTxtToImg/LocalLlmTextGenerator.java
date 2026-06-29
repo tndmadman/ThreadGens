@@ -31,15 +31,16 @@ public class LocalLlmTextGenerator {
         }
 
         List<String> lines = new ArrayList<>();
+        lines.add(buildOriginalPost(topic));
+
+        int replyTarget = count - 1;
         int attempts = 0;
         int maxAttempts = 4;
 
-        while (lines.size() < count && attempts < maxAttempts) {
+        while (lines.size() - 1 < replyTarget && attempts < maxAttempts) {
             attempts++;
             int remaining = count - lines.size();
-            String prompt = attempts == 1 || lines.isEmpty()
-                    ? buildPrompt(topic, count)
-                    : buildContinuationPrompt(topic, remaining, lines);
+            String prompt = buildReplyPrompt(topic, remaining, lines);
 
             String generatedText = requestGeneration(prompt);
             List<String> cleanedLines = cleanGeneratedLines(generatedText, remaining);
@@ -55,7 +56,7 @@ public class LocalLlmTextGenerator {
         }
 
         if (lines.size() < count) {
-            throw new IOException("Local LLM returned only " + lines.size() + " usable lines out of " + count
+            throw new IOException("Local LLM returned only " + (lines.size() - 1) + " usable replies out of " + replyTarget
                     + ". Try again, lower the count, or use a stronger Ollama model.");
         }
 
@@ -97,35 +98,28 @@ public class LocalLlmTextGenerator {
         return generatedText;
     }
 
-    private static String buildPrompt(String topic, int count) {
-        String safeTopic = topic == null || topic.isBlank() ? "weird everyday stories" : topic.trim();
-        int replyCount = Math.max(0, count - 1);
-        return "Generate exactly " + count + " lines for a Reddit thread about: " + safeTopic + "\n\n"
-                + "Structure:\n"
-                + "- Line 1 must be the original Reddit post. Make it sound like the main post/body.\n"
-                + "- Lines 2 through " + count + " must be comments or replies reacting to that original post.\n"
-                + "- If there are " + replyCount + " replies, make them feel like a real thread conversation.\n\n"
-                + "Rules:\n"
-                + "- Return exactly " + count + " lines.\n"
-                + "- Return one post/comment per line.\n"
-                + "- No numbering, bullets, quotes, markdown, explanations, titles, or labels.\n"
-                + "- Do not prefix lines with POST, OP, COMMENT, or REPLY.\n"
-                + "- Each line should be 1 or 2 sentences.\n"
-                + "- Make each line punchy, readable aloud, and safe for a general audience.\n"
-                + "- Do not mention that you are an AI.\n";
+    private static String buildOriginalPost(String topic) {
+        String safeTopic = topic == null || topic.isBlank() ? "a weird everyday story" : topic.trim();
+        if (safeTopic.toLowerCase().startsWith("finish this story in the comments")) {
+            return safeTopic;
+        }
+        return "Finish this story in the comments: " + safeTopic;
     }
 
-    private static String buildContinuationPrompt(String topic, int count, List<String> existingLines) {
-        String safeTopic = topic == null || topic.isBlank() ? "weird everyday stories" : topic.trim();
+    private static String buildReplyPrompt(String topic, int count, List<String> existingLines) {
+        String originalPost = existingLines.isEmpty() ? buildOriginalPost(topic) : existingLines.get(0);
         StringBuilder prompt = new StringBuilder();
         prompt.append("Generate exactly ").append(count)
-                .append(" more Reddit comments/replies for the same thread about: ")
-                .append(safeTopic).append("\n\n")
+                .append(" Reddit comments/replies that finish or continue this original post:\n")
+                .append(originalPost).append("\n\n")
                 .append("Rules:\n")
                 .append("- Return exactly ").append(count).append(" lines.\n")
                 .append("- Return one comment/reply per line.\n")
-                .append("- These are follow-up comments, not a second original post.\n")
+                .append("- The comments should feel like different Reddit users continuing the story, reacting to it, or adding punchlines.\n")
+                .append("- Do not write a new original post.\n")
                 .append("- No numbering, bullets, quotes, markdown, explanations, titles, or labels.\n")
+                .append("- Do not prefix lines with POST, OP, COMMENT, or REPLY.\n")
+                .append("- Each line should be 1 or 2 sentences and readable aloud.\n")
                 .append("- Do not repeat these already accepted lines:\n");
         for (String existingLine : existingLines) {
             prompt.append(existingLine).append("\n");
