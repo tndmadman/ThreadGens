@@ -396,8 +396,8 @@ public class RedditScreenshotGenerator {
         }
 
         for (int i = 0; i < total; i++) {
-            int randomViews = rand.nextInt(settings.maxViews);
-            int randomLikes = rand.nextInt(settings.maxLikes);
+            int randomViews = generateViews(rand, settings, i);
+            int randomLikes = generateLikes(rand, settings, randomViews, i);
             String randomAuthor = authors.getRandomEntry(rand);
             String randomProfileImage = profileName.getRandomProfileName();
             String currentComment = commentLines.get(i);
@@ -445,6 +445,25 @@ public class RedditScreenshotGenerator {
             videoGenerator.combineClips(videoClips, finalVideo);
             System.out.println("Generated final video: " + finalVideo);
         }
+    }
+
+    private static int generateViews(Random rand, Settings settings, int index) {
+        int base = index == 0 ? 12000 : 2500;
+        int range = Math.max(1, settings.maxViews - base);
+        return base + rand.nextInt(range);
+    }
+
+    private static int generateLikes(Random rand, Settings settings, int views, int index) {
+        double minRate = index == 0 ? 0.06 : 0.03;
+        double maxRate = index == 0 ? 0.32 : 0.22;
+        int minLikes = Math.max(1, (int) Math.round(views * minRate));
+        int maxLikes = Math.max(minLikes, (int) Math.round(views * maxRate));
+        maxLikes = Math.min(maxLikes, settings.maxLikes);
+        maxLikes = Math.min(maxLikes, Math.max(1, views - 1));
+        if (maxLikes <= minLikes) {
+            return Math.max(1, Math.min(maxLikes, views - 1));
+        }
+        return minLikes + rand.nextInt(maxLikes - minLikes + 1);
     }
 
     private static void printUsage() {
