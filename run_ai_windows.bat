@@ -109,7 +109,7 @@ set /p "COUNT=How many posts [10]: "
 if "%COUNT%"=="" set "COUNT=10"
 
 echo.
-set /p "MAKE_VIDEO=Make stitched MP4 video? y/N: "
+set /p "MAKE_VIDEO=Make stitched MP4 video with smooth transitions? y/N: "
 if /I "%MAKE_VIDEO%"=="Y" set "VIDEO_FLAGS=--video --concat-video"
 
 echo.
@@ -118,9 +118,10 @@ echo Count: %COUNT%
 echo Voice: %VOICE%
 echo Piper: %PIPER_CMD%
 echo Video: %VIDEO_FLAGS%
+echo Watermark: off
 echo.
 
-java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%PIPER_CMD%" --voice "%VOICE%" %VIDEO_FLAGS%
+java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%PIPER_CMD%" --voice "%VOICE%" --no-watermark %VIDEO_FLAGS%
 
 echo.
 echo Done.
