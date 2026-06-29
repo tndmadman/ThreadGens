@@ -87,7 +87,8 @@ if (($lines.Count % 2) -ne 0) {
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $FinalDir | Out-Null
 
-$jobCount = [Math]::Floor($lines.Count / 2)
+$jobCount = [int]([Math]::Floor($lines.Count / 2))
+$jobCountLabel = '{0:D3}' -f $jobCount
 Write-Step "Creating $jobCount video(s)"
 
 for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
@@ -106,7 +107,7 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
 
     New-Item -ItemType Directory -Force -Path $imageDir, $audioDir, $videoDir, $scriptDir | Out-Null
 
-    Write-Step "[$jobLabel/$('{0:D3}' -f $jobCount)] $title"
+    Write-Step "[$jobLabel/$jobCountLabel] $title"
     Write-Host "Body: $body"
 
     $javaArgs = @(
