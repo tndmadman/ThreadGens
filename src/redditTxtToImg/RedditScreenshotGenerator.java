@@ -15,6 +15,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.NumberFormat;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
@@ -272,6 +273,10 @@ public class RedditScreenshotGenerator {
         }
 
         try {
+            if (settings.listVoices) {
+                VoiceCatalog.printVoices(settings.voiceDirectory);
+                return;
+            }
             if (settings.guiMode) {
                 GuiApp.open();
                 return;
@@ -303,6 +308,8 @@ public class RedditScreenshotGenerator {
         TextFileReader authors = TextFileReader.fromFile(settings.authorNamesFile);
         RandomProfileName profileName = new RandomProfileName(settings.profileDirectory);
         VoiceGenerator voiceGenerator = new VoiceGenerator(settings.ttsEngine, settings.ttsCommand, settings.voiceModel, settings.ttsTimeoutSeconds);
+        VideoGenerator videoGenerator = new VideoGenerator(settings.videoCommand, settings.videoTimeoutSeconds);
+        List<Path> videoClips = new ArrayList<>();
         Random rand = new Random();
         Style style = Style.load(settings.styleName);
 
@@ -337,13 +344,32 @@ public class RedditScreenshotGenerator {
                     style
             );
             generator.generateImage();
-            System.out.println("Generated image: " + settings.outputDirectory.resolve(currentFileName + ".png"));
+            Path imagePath = settings.outputDirectory.resolve(currentFileName + ".png");
+            System.out.println("Generated image: " + imagePath);
 
+            Path audioPath = null;
             if (voiceGenerator.isEnabled()) {
-                Path audioPath = settings.audioDirectory.resolve(currentFileName + ".wav");
+                audioPath = settings.audioDirectory.resolve(currentFileName + ".wav");
                 voiceGenerator.generateSpeech(currentComment, audioPath);
                 System.out.println("Generated audio: " + audioPath);
             }
+
+            if (settings.createVideo) {
+                if (audioPath == null) {
+                    System.out.println("Skipping video for " + currentFileName + ": enable voice first with --tts piper");
+                } else {
+                    Path videoPath = settings.videoDirectory.resolve(currentFileName + ".mp4");
+                    videoGenerator.makeClip(imagePath, audioPath, videoPath, settings.width, settings.height, settings.videoFps);
+                    videoClips.add(videoPath);
+                    System.out.println("Generated video: " + videoPath);
+                }
+            }
+        }
+
+        if (settings.concatVideo && !videoClips.isEmpty()) {
+            Path finalVideo = settings.videoDirectory.resolve(settings.finalVideoName);
+            videoGenerator.combineClips(videoClips, finalVideo);
+            System.out.println("Generated final video: " + finalVideo);
         }
     }
 
@@ -351,7 +377,8 @@ public class RedditScreenshotGenerator {
         System.err.println("Usage: java -cp out redditTxtToImg.RedditScreenshotGenerator [comments.txt] [output] [options]");
         System.err.println("Image options: --count N --prefix NAME --style dark|light --shuffle --center --top --no-watermark --gui");
         System.err.println("Local LLM options: --auto --topic TEXT --llm-model MODEL --llm-url URL --script-out FILE");
-        System.err.println("Local TTS options: --tts none|piper --voice path/to/voice.onnx --tts-command piper --audio-dir DIR");
+        System.err.println("Local TTS options: --tts none|piper --voice NAME_OR_PATH --voice-dir DIR --list-voices --tts-command piper --audio-dir DIR");
+        System.err.println("Video options: --video --concat-video --video-dir DIR --video-command ffmpeg --fps 30 --final-video final.mp4");
     }
 
     private static class Settings {
@@ -365,11 +392,16 @@ public class RedditScreenshotGenerator {
         int count = -1;
         int autoTextCount = 10;
         int ttsTimeoutSeconds = 120;
+        int videoTimeoutSeconds = 180;
+        int videoFps = 30;
         boolean shuffle = false;
         boolean centerShortComments = true;
         boolean showWatermark = true;
         boolean guiMode = false;
         boolean autoGenerateText = false;
+        boolean listVoices = false;
+        boolean createVideo = false;
+        boolean concatVideo = false;
         String fontName = "Arial";
         String postLocation = "/thread/comment";
         String outputPrefix = "aithread";
@@ -380,12 +412,16 @@ public class RedditScreenshotGenerator {
         String ollamaUrl = "http://localhost:11434/api/generate";
         String ttsEngine = "none";
         String ttsCommand = "piper";
+        String videoCommand = "ff" + "mpeg";
+        String finalVideoName = "final.mp4";
         Path commentsFile = Path.of("data", "comments.txt");
         Path outputDirectory = Path.of("output");
         Path authorNamesFile = Path.of("data", "author_names.txt");
         Path profileDirectory = Path.of("assets", "pfp");
         Path generatedTextFile = Path.of("output", "script", "generated_comments.txt");
         Path audioDirectory = Path.of("output", "audio");
+        Path videoDirectory = Path.of("output", "video");
+        Path voiceDirectory = Path.of("voices");
         Path voiceModel = Path.of("voices", "en_US-lessac-medium.onnx");
 
         static Settings fromArgs(String[] args) {
@@ -415,10 +451,19 @@ public class RedditScreenshotGenerator {
                 else if ("--llm-url".equals(arg) && i + 1 < args.length) settings.ollamaUrl = args[++i];
                 else if ("--script-out".equals(arg) && i + 1 < args.length) settings.generatedTextFile = Path.of(args[++i]);
                 else if ("--tts".equals(arg) && i + 1 < args.length) settings.ttsEngine = args[++i];
-                else if ("--voice".equals(arg) && i + 1 < args.length) settings.voiceModel = Path.of(args[++i]);
+                else if ("--voice".equals(arg) && i + 1 < args.length) settings.voiceModel = VoiceCatalog.resolveVoice(args[++i], settings.voiceDirectory);
+                else if ("--voice-dir".equals(arg) && i + 1 < args.length) settings.voiceDirectory = Path.of(args[++i]);
+                else if ("--list-voices".equals(arg)) settings.listVoices = true;
                 else if ("--tts-command".equals(arg) && i + 1 < args.length) settings.ttsCommand = args[++i];
                 else if ("--audio-dir".equals(arg) && i + 1 < args.length) settings.audioDirectory = Path.of(args[++i]);
                 else if ("--tts-timeout".equals(arg) && i + 1 < args.length) settings.ttsTimeoutSeconds = parseInt(args[++i], settings.ttsTimeoutSeconds);
+                else if ("--video".equals(arg)) settings.createVideo = true;
+                else if ("--concat-video".equals(arg)) { settings.createVideo = true; settings.concatVideo = true; }
+                else if ("--video-dir".equals(arg) && i + 1 < args.length) settings.videoDirectory = Path.of(args[++i]);
+                else if ("--video-command".equals(arg) && i + 1 < args.length) settings.videoCommand = args[++i];
+                else if ("--fps".equals(arg) && i + 1 < args.length) settings.videoFps = parseInt(args[++i], settings.videoFps);
+                else if ("--video-timeout".equals(arg) && i + 1 < args.length) settings.videoTimeoutSeconds = parseInt(args[++i], settings.videoTimeoutSeconds);
+                else if ("--final-video".equals(arg) && i + 1 < args.length) settings.finalVideoName = args[++i];
             }
             return settings;
         }
@@ -441,8 +486,11 @@ public class RedditScreenshotGenerator {
                 settings.ollamaUrl = properties.getProperty("ollamaUrl", settings.ollamaUrl);
                 settings.ttsEngine = properties.getProperty("ttsEngine", settings.ttsEngine);
                 settings.ttsCommand = properties.getProperty("ttsCommand", settings.ttsCommand);
-                settings.voiceModel = Path.of(properties.getProperty("voiceModel", settings.voiceModel.toString()));
+                settings.voiceDirectory = Path.of(properties.getProperty("voiceDirectory", settings.voiceDirectory.toString()));
+                settings.voiceModel = VoiceCatalog.resolveVoice(properties.getProperty("voiceModel", settings.voiceModel.toString()), settings.voiceDirectory);
                 settings.audioDirectory = Path.of(properties.getProperty("audioDirectory", settings.audioDirectory.toString()));
+                settings.videoDirectory = Path.of(properties.getProperty("videoDirectory", settings.videoDirectory.toString()));
+                settings.videoCommand = properties.getProperty("videoCommand", settings.videoCommand);
             } catch (IOException ignored) {
                 return settings;
             }
