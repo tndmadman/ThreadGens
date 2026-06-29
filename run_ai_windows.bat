@@ -11,6 +11,7 @@ set "MAKE_VIDEO=N"
 set "VIDEO_FLAGS="
 set "VOICE_DIR=voices"
 set "PIPER_CMD=%~dp0piper\piper.exe"
+set "KOKORO_PYTHON=%~dp0.venv-kokoro\Scripts\python.exe"
 set "PYTHON_CMD=python"
 set "TTS_CMD="
 
@@ -21,7 +22,7 @@ echo.
 
 echo Choose TTS engine:
 echo 1. Piper  - fast fallback, lower quality
-echo 2. Kokoro - better local voice, uses Python
+echo 2. Kokoro - better local voice, uses isolated .venv-kokoro
 echo.
 set /p "TTS_CHOICE=Choice [1/2]: "
 if "%TTS_CHOICE%"=="2" set "TTS=kokoro"
@@ -125,27 +126,26 @@ goto after_tts_setup
 :kokoro_setup
 set "TTS=kokoro"
 set "VOICE=af_heart"
+
+if exist "%KOKORO_PYTHON%" (
+  set "TTS_CMD=%KOKORO_PYTHON%"
+  goto kokoro_python_ok
+)
+
+echo Kokoro venv was not found:
+echo %KOKORO_PYTHON%
+echo.
+echo Run setup_windows.bat first to create the isolated Kokoro environment.
+echo Falling back to system Python only if you explicitly choose it.
+set /p "USE_SYSTEM_PYTHON=Use system Python anyway? y/N: "
+if /I not "%USE_SYSTEM_PYTHON%"=="Y" (
+  pause
+  exit /b 1
+)
 set "TTS_CMD=%PYTHON_CMD%"
 
-where %PYTHON_CMD% >nul 2>nul
-if errorlevel 1 (
-  echo Python was not found in PATH.
-  set /p "TTS_CMD=Full path to python.exe, or blank to stop: "
-  if "%TTS_CMD%"=="" (
-    echo Stopping. Python is required for Kokoro TTS.
-    pause
-    exit /b 1
-  )
-)
-
-echo.
-echo Kokoro needs Python packages: kokoro soundfile numpy
-set /p "INSTALL_KOKORO=Install/update Kokoro packages now? y/N: "
-if /I "%INSTALL_KOKORO%"=="Y" (
-  "%TTS_CMD%" -m pip install --upgrade pip
-  "%TTS_CMD%" -m pip install --upgrade kokoro soundfile numpy
-)
-
+:kokoro_python_ok
+echo Kokoro Python: %TTS_CMD%
 echo.
 echo Common Kokoro voices:
 echo af_heart   af_bella   af_nicole
