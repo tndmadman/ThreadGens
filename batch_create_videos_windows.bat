@@ -8,6 +8,10 @@ set "MODEL=llama3.1:8b"
 set "VOICE=af_heart"
 set "KEEP_OLLAMA=N"
 set "KEEP_OLLAMA_FLAG="
+set "THREADGENS_KOKORO_VERBOSE=0"
+set "PYTHONWARNINGS=ignore"
+set "HF_HUB_DISABLE_PROGRESS_BARS=1"
+set "TOKENIZERS_PARALLELISM=false"
 
 if not "%~1"=="" set "INPUT_FILE=%~1"
 if not "%~2"=="" set "COUNT=%~2"
@@ -27,6 +31,7 @@ echo   count: %COUNT%
 echo   tts:   kokoro
 echo   voice: %VOICE%
 echo   video: stitched MP4, watermark off, body text top-aligned
+echo   kokoro console: quiet
 echo.
 set /p "KEEP_OLLAMA=Keep Ollama loaded between videos? y/N: "
 if /I "%KEEP_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
