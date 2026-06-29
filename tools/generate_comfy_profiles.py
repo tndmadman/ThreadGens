@@ -8,6 +8,7 @@ Also writes matching Reddit-style usernames to data/author_names.txt.
 Requirements:
 - ComfyUI running locally, usually http://127.0.0.1:8188
 - At least one checkpoint installed in ComfyUI
+- Optional: Ollama running locally for LLM-generated usernames
 - No Python packages required. Uses only the standard library.
 """
 
@@ -17,6 +18,7 @@ import argparse
 import hashlib
 import json
 import random
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -67,7 +69,7 @@ def seed_int(value: str) -> int:
     return int(hashlib.sha256(value.encode("utf-8")).hexdigest()[:16], 16)
 
 
-def make_username(rng: random.Random, used: set[str]) -> str:
+def make_random_username(rng: random.Random, used: set[str]) -> str:
     for _ in range(500):
         adjective = rng.choice(ADJECTIVES)
         noun = rng.choice(NOUNS)
@@ -79,12 +81,28 @@ def make_username(rng: random.Random, used: set[str]) -> str:
             name = f"{adjective}The{noun}{number if rng.random() < 0.45 else ''}"
         else:
             name = f"{adjective}{sep}{noun}{number if rng.random() < 0.55 else ''}"
-        if 5 <= len(name) <= 24 and name not in used:
+        if is_valid_username(name, used):
             used.add(name)
             return name
     fallback = f"User{rng.randint(100000, 999999)}"
     used.add(fallback)
     return fallback
+
+
+def is_valid_username(name: str, used: set[str]) -> bool:
+    return 5 <= len(name) <= 24 and name not in used and re.fullmatch(r"[A-Za-z0-9_]+", name) is not None
+
+
+def clean_username(raw: str) -> str:
+    name = raw.strip()
+    name = re.sub(r"^[-*•\d.)\s]+", "", name)
+    name = re.sub(r"^(username|user|name)\s*[:=-]\s*", "", name, flags=re.IGNORECASE)
+    name = name.replace("u/", "").replace("@", "")
+    name = re.sub(r"[^A-Za-z0-9_ ]+", "", name)
+    name = re.sub(r"\s+", "", name)
+    if len(name) > 24:
+        name = name[:24]
+    return name
 
 
 def request_json(method: str, url: str, payload: Optional[dict] = None, timeout: int = 30) -> dict:
@@ -100,6 +118,55 @@ def request_json(method: str, url: str, payload: Optional[dict] = None, timeout:
 def request_bytes(url: str, timeout: int = 60) -> bytes:
     with urllib.request.urlopen(url, timeout=timeout) as response:
         return response.read()
+
+
+def request_ollama_usernames(ollama_url: str, model: str, count: int, used: set[str]) -> List[str]:
+    prompt = (
+        f"Generate exactly {count} unique Reddit-style usernames for fictional social media profiles.\n"
+        "Rules:\n"
+        "- Return one username per line.\n"
+        "- Use only letters, numbers, and underscores.\n"
+        "- 5 to 24 characters each.\n"
+        "- No @ symbol, no u/ prefix, no bullets, no numbering, no explanations.\n"
+        "- Make them varied, casual, believable, and slightly funny.\n"
+        "- Do not use real people's names.\n"
+    )
+    payload = {"model": model, "prompt": prompt, "stream": False}
+    response = request_json("POST", ollama_url, payload, timeout=180)
+    text = response.get("response", "")
+    names: List[str] = []
+    for raw_line in text.replace("\r", "\n").split("\n"):
+        name = clean_username(raw_line)
+        if is_valid_username(name, used):
+            used.add(name)
+            names.append(name)
+        if len(names) >= count:
+            break
+    return names
+
+
+def generate_usernames(args: argparse.Namespace, rng: random.Random, used: set[str]) -> List[str]:
+    if args.username_mode == "random":
+        print("Username mode: fast random")
+        return [make_random_username(rng, used) for _ in range(args.count)]
+
+    print(f"Username mode: Ollama-generated using {args.ollama_model}")
+    names: List[str] = []
+    attempts = 0
+    while len(names) < args.count and attempts < 4:
+        attempts += 1
+        remaining = args.count - len(names)
+        try:
+            names.extend(request_ollama_usernames(args.ollama_url, args.ollama_model, remaining, used))
+        except Exception as exc:
+            print(f"Ollama username generation failed on attempt {attempts}: {exc}")
+            break
+
+    if len(names) < args.count:
+        print(f"Ollama only produced {len(names)} usable usernames. Filling the rest with fast random names.")
+        while len(names) < args.count:
+            names.append(make_random_username(rng, used))
+    return names[:args.count]
 
 
 def check_comfy(base_url: str) -> None:
@@ -145,22 +212,10 @@ def build_workflow(
     filename_prefix: str,
 ) -> Dict[str, dict]:
     return {
-        "4": {
-            "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": checkpoint},
-        },
-        "5": {
-            "class_type": "EmptyLatentImage",
-            "inputs": {"width": size, "height": size, "batch_size": 1},
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": ["4", 1]},
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": negative, "clip": ["4", 1]},
-        },
+        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}},
+        "5": {"class_type": "EmptyLatentImage", "inputs": {"width": size, "height": size, "batch_size": 1}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["4", 1]}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["4", 1]}},
         "3": {
             "class_type": "KSampler",
             "inputs": {
@@ -176,14 +231,8 @@ def build_workflow(
                 "latent_image": ["5", 0],
             },
         },
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
-        },
-        "9": {
-            "class_type": "SaveImage",
-            "inputs": {"filename_prefix": filename_prefix, "images": ["8", 0]},
-        },
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+        "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": filename_prefix, "images": ["8", 0]}},
     }
 
 
@@ -271,6 +320,9 @@ def main() -> None:
     parser.add_argument("--sampler", default="euler")
     parser.add_argument("--scheduler", default="normal")
     parser.add_argument("--style", default="not a celebrity, not a real person, believable casual selfie")
+    parser.add_argument("--username-mode", choices=["random", "ollama"], default="random")
+    parser.add_argument("--ollama-url", default="http://127.0.0.1:11434/api/generate")
+    parser.add_argument("--ollama-model", default="llama3.1:8b")
     parser.add_argument("--append-names", action="store_true")
     parser.add_argument("--no-backup", action="store_true")
     parser.add_argument("--timeout", type=int, default=360)
@@ -312,17 +364,15 @@ def main() -> None:
         if backup:
             print(f"Backed up existing usernames: {backup}")
 
+    usernames = generate_usernames(args, rng, used_names)
     start_index = next_profile_index(pfp_dir, args.prefix)
     client_id = str(uuid.uuid4())
-    generated_names: List[str] = []
 
     print(f"ComfyUI: {base_url}")
     print(f"Checkpoint: {checkpoint}")
     print(f"Generating {args.count} AI selfie profile pictures into {pfp_dir}")
 
-    for offset in range(args.count):
-        username = make_username(rng, used_names)
-        generated_names.append(username)
+    for offset, username in enumerate(usernames):
         file_number = start_index + offset
         output_path = pfp_dir / f"{args.prefix}_{file_number:04d}.png"
         seed = seed_int(f"{username}-{time.time_ns()}") % 18446744073709551615
@@ -347,7 +397,7 @@ def main() -> None:
         download_comfy_image(base_url, images[0], output_path)
         print(f"[{offset + 1:03d}/{args.count:03d}] saved {username} -> {output_path}")
 
-    write_names(names_file, generated_names, append=args.append_names)
+    write_names(names_file, usernames, append=args.append_names)
     print("Done.")
     print(f"Generated AI PNGs: {pfp_dir}")
     print(f"Username file: {names_file}")
