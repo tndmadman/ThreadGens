@@ -48,38 +48,59 @@ goto after_voice_download
 
 :voice_menu
 echo.
-echo Choose a voice to download:
+echo Choose a voice to download. You can type the number OR the exact voice name:
 echo 1. en_US-lessac-medium   female US medium
 echo 2. en_US-amy-medium      female US medium
 echo 3. en_US-ryan-high       male US high
 echo 4. custom direct base URL
 echo.
-set /p "VOICE_CHOICE=Choice [1-4]: "
+set /p "VOICE_CHOICE=Choice or voice name [1-4/name]: "
 
-if "%VOICE_CHOICE%"=="2" (
+if /I "%VOICE_CHOICE%"=="1" set "VOICE_CHOICE=en_US-lessac-medium"
+if /I "%VOICE_CHOICE%"=="2" set "VOICE_CHOICE=en_US-amy-medium"
+if /I "%VOICE_CHOICE%"=="3" set "VOICE_CHOICE=en_US-ryan-high"
+
+if /I "%VOICE_CHOICE%"=="en_US-lessac-medium" (
+  set "DL_VOICE=en_US-lessac-medium"
+  set "DL_BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium"
+  goto download_voice
+)
+if /I "%VOICE_CHOICE%"=="en_US-amy-medium" (
   set "DL_VOICE=en_US-amy-medium"
   set "DL_BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium"
   goto download_voice
 )
-if "%VOICE_CHOICE%"=="3" (
+if /I "%VOICE_CHOICE%"=="en_US-ryan-high" (
   set "DL_VOICE=en_US-ryan-high"
   set "DL_BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high"
   goto download_voice
 )
-if "%VOICE_CHOICE%"=="4" (
-  set /p "DL_VOICE=Voice file name without .onnx: "
-  set /p "DL_BASE=Base URL folder containing the .onnx and .onnx.json files: "
-  goto download_voice
+if /I "%VOICE_CHOICE%"=="4" goto custom_voice
+
+echo Unknown built-in voice: %VOICE_CHOICE%
+echo Switching to custom download mode.
+set "DL_VOICE=%VOICE_CHOICE%"
+goto ask_custom_base
+
+:custom_voice
+set /p "DL_VOICE=Voice file name without .onnx: "
+
+:ask_custom_base
+set /p "DL_BASE=Base URL folder containing the .onnx and .onnx.json files: "
+if "%DL_BASE%"=="" (
+  echo No URL entered. Skipping download.
+  goto after_voice_download
 )
-set "DL_VOICE=en_US-lessac-medium"
-set "DL_BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium"
 
 :download_voice
 echo.
 echo Downloading %DL_VOICE%...
-curl.exe -L -o "%VOICE_DIR%\%DL_VOICE%.onnx" "%DL_BASE%/%DL_VOICE%.onnx"
-if errorlevel 1 echo Warning: voice model download may have failed.
-curl.exe -L -o "%VOICE_DIR%\%DL_VOICE%.onnx.json" "%DL_BASE%/%DL_VOICE%.onnx.json"
+curl.exe -L -f -o "%VOICE_DIR%\%DL_VOICE%.onnx" "%DL_BASE%/%DL_VOICE%.onnx"
+if errorlevel 1 (
+  echo Voice model download failed. Not selecting this voice.
+  goto after_voice_download
+)
+curl.exe -L -f -o "%VOICE_DIR%\%DL_VOICE%.onnx.json" "%DL_BASE%/%DL_VOICE%.onnx.json"
 if errorlevel 1 echo Warning: voice config download may have failed.
 set "VOICE=%DL_VOICE%"
 
