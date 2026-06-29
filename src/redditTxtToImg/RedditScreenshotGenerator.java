@@ -395,8 +395,11 @@ public class RedditScreenshotGenerator {
             total = Math.min(total, settings.count);
         }
 
+        int originalPostViews = generateOriginalPostViews(rand, settings);
         for (int i = 0; i < total; i++) {
-            int randomViews = generateViews(rand, settings, i);
+            int randomViews = i == 0
+                    ? originalPostViews
+                    : generateReplyViews(rand, originalPostViews, i, total);
             int randomLikes = generateLikes(rand, settings, randomViews, i);
             String randomAuthor = authors.getRandomEntry(rand);
             String randomProfileImage = profileName.getRandomProfileName();
@@ -447,10 +450,24 @@ public class RedditScreenshotGenerator {
         }
     }
 
-    private static int generateViews(Random rand, Settings settings, int index) {
-        int base = index == 0 ? 12000 : 2500;
-        int range = Math.max(1, settings.maxViews - base);
-        return base + rand.nextInt(range);
+    private static int generateOriginalPostViews(Random rand, Settings settings) {
+        int minimum = Math.min(settings.maxViews, 25000);
+        if (settings.maxViews <= minimum) {
+            return Math.max(1, settings.maxViews);
+        }
+        return minimum + rand.nextInt(settings.maxViews - minimum + 1);
+    }
+
+    private static int generateReplyViews(Random rand, int originalPostViews, int index, int total) {
+        int hardCap = Math.max(1, originalPostViews - 1);
+        double maxRate = Math.max(0.22, 0.78 - (index * 0.07));
+        double minRate = Math.max(0.04, 0.18 - (index * 0.015));
+        int maxViews = Math.max(1, Math.min(hardCap, (int) Math.round(originalPostViews * maxRate)));
+        int minViews = Math.max(1, Math.min(maxViews, (int) Math.round(originalPostViews * minRate)));
+        if (maxViews <= minViews) {
+            return Math.min(hardCap, minViews);
+        }
+        return minViews + rand.nextInt(maxViews - minViews + 1);
     }
 
     private static int generateLikes(Random rand, Settings settings, int views, int index) {
