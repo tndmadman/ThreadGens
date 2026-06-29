@@ -72,6 +72,27 @@ public class LocalLlmTextGenerator {
         return outputFile;
     }
 
+    public void unloadModel() {
+        try {
+            String json = "{"
+                    + "\"model\":\"" + escapeJson(model) + "\","
+                    + "\"keep_alive\":0,"
+                    + "\"stream\":false"
+                    + "}";
+
+            HttpRequest request = HttpRequest.newBuilder(endpoint)
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                    .build();
+
+            httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            System.out.println("Requested Ollama model unload: " + model);
+        } catch (Exception e) {
+            System.out.println("Could not unload Ollama model cleanly: " + e.getMessage());
+        }
+    }
+
     private String requestGeneration(String prompt) throws IOException, InterruptedException {
         String json = "{"
                 + "\"model\":\"" + escapeJson(model) + "\","
