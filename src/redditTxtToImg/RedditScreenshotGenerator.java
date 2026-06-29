@@ -32,14 +32,14 @@ public class RedditScreenshotGenerator {
     private final Settings settings;
     private final Style style;
 
-    private String profileImageName;
-    private String userName;
-    private String postLocation;
-    private String comment;
-    private String fileName;
-    private int upvotes;
-    private int views;
-    private Path outputDirectory;
+    private final String profileImageName;
+    private final String userName;
+    private final String postLocation;
+    private final String comment;
+    private final String fileName;
+    private final int upvotes;
+    private final int views;
+    private final Path outputDirectory;
 
     public RedditScreenshotGenerator(String fileName, String userName, String postLocation, String comment,
                                      String profileImageName, int upvotes, int views, Path outputDirectory,
@@ -74,9 +74,7 @@ public class RedditScreenshotGenerator {
         drawWatermark(g2d);
 
         g2d.dispose();
-
-        Path outputPath = outputDirectory.resolve(fileName + ".png");
-        ImageIO.write(image, "png", outputPath.toFile());
+        ImageIO.write(image, "png", outputDirectory.resolve(fileName + ".png").toFile());
     }
 
     private int boxBottom() {
@@ -100,6 +98,11 @@ public class RedditScreenshotGenerator {
         g2d.fillRect(0, 0, settings.width, settings.height);
     }
 
+    private void drawCommentBox(Graphics2D g2d) {
+        g2d.setColor(style.card);
+        g2d.fillRoundRect(MARGIN, COMMENT_BOX_TOP, boxWidth(), boxHeight(), 34, 34);
+    }
+
     private void drawHeader(Graphics2D g2d) {
         int textX = MARGIN + 136;
         int avatarY = COMMENT_BOX_TOP + 48;
@@ -112,27 +115,26 @@ public class RedditScreenshotGenerator {
     }
 
     private void drawLogo(Graphics2D g2d) {
-        BufferedImage logo = loadImageIfPresent(Path.of("assets", "ai_comment.png"));
-        int logoWidth = 92;
-        int logoHeight = 76;
-        int logoX = boxRight() - 42 - logoWidth;
-        int logoY = COMMENT_BOX_TOP + 48;
-
-        if (logo != null) {
-            g2d.drawImage(logo, logoX, logoY, logoWidth, logoHeight, null);
-            return;
-        }
+        int badgeWidth = 168;
+        int badgeHeight = 72;
+        int badgeX = boxRight() - 42 - badgeWidth;
+        int badgeY = COMMENT_BOX_TOP + 48;
 
         g2d.setColor(style.accent);
-        g2d.fillRoundRect(logoX, logoY, logoWidth, logoHeight, 22, 22);
-        g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font(settings.fontName, Font.BOLD, 24));
-        g2d.drawString("AI", logoX + 30, logoY + 48);
-    }
+        g2d.fillRoundRect(badgeX, badgeY, badgeWidth, badgeHeight, 24, 24);
 
-    private void drawCommentBox(Graphics2D g2d) {
-        g2d.setColor(style.card);
-        g2d.fillRoundRect(MARGIN, COMMENT_BOX_TOP, boxWidth(), boxHeight(), 34, 34);
+        int iconX = badgeX + 18;
+        int iconY = badgeY + 16;
+        g2d.setColor(Color.WHITE);
+        g2d.fillOval(iconX, iconY, 40, 40);
+        g2d.setColor(style.accent);
+        g2d.fillOval(iconX + 13, iconY + 15, 5, 5);
+        g2d.fillOval(iconX + 24, iconY + 15, 5, 5);
+        g2d.drawArc(iconX + 12, iconY + 19, 18, 10, 180, 180);
+
+        g2d.setColor(Color.WHITE);
+        g2d.setFont(new Font(settings.fontName, Font.BOLD, 28));
+        g2d.drawString("reddit", badgeX + 66, badgeY + 46);
     }
 
     private void drawComment(Graphics2D g2d) {
@@ -202,7 +204,7 @@ public class RedditScreenshotGenerator {
     }
 
     private void drawWatermark(Graphics2D g2d) {
-        if (!settings.showWatermark) {
+        if (!settings.showWatermark || settings.watermarkText == null || settings.watermarkText.isBlank()) {
             return;
         }
         g2d.setColor(new Color(style.muted.getRed(), style.muted.getGreen(), style.muted.getBlue(), 80));
@@ -257,7 +259,6 @@ public class RedditScreenshotGenerator {
         if (!Files.exists(path)) {
             return null;
         }
-
         try {
             return ImageIO.read(path.toFile());
         } catch (IOException e) {
@@ -396,7 +397,7 @@ public class RedditScreenshotGenerator {
         int videoFps = 30;
         boolean shuffle = false;
         boolean centerShortComments = true;
-        boolean showWatermark = true;
+        boolean showWatermark = false;
         boolean guiMode = false;
         boolean autoGenerateText = false;
         boolean listVoices = false;
@@ -406,7 +407,7 @@ public class RedditScreenshotGenerator {
         String postLocation = "/thread/comment";
         String outputPrefix = "aithread";
         String styleName = "dark";
-        String watermarkText = "MOCKUP";
+        String watermarkText = "";
         String topic = "weird everyday stories";
         String llmModel = "llama3.1:8b";
         String ollamaUrl = "http://localhost:11434/api/generate";
