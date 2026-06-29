@@ -224,49 +224,59 @@ public class RedditScreenshotGenerator {
     private void drawOriginalPostTitleAndBody(Graphics2D g2d) {
         int textX = contentLeft();
         int maxTextWidth = boxWidth() - 84;
-        int textAreaTop = COMMENT_BOX_TOP + 215;
-        int textAreaBottom = boxBottom() - 150;
+        int titleTop = COMMENT_BOX_TOP + 205;
+        int dividerY = COMMENT_BOX_TOP + 410;
+        int bodyAreaTop = dividerY + 62;
+        int bodyAreaBottom = boxBottom() - 150;
 
-        int titleFontSize = 46;
-        int bodyFontSize = Math.max(46, settings.commentFontSize - 12);
+        int titleFontSize = 60;
+        int bodyFontSize = Math.max(46, settings.commentFontSize - 10);
         Font titleFont = new Font(settings.fontName, Font.BOLD, titleFontSize);
         Font bodyFont = new Font(settings.fontName, Font.PLAIN, bodyFontSize);
         FontMetrics titleMetrics = g2d.getFontMetrics(titleFont);
         FontMetrics bodyMetrics = g2d.getFontMetrics(bodyFont);
 
         List<String> titleLines = CommentWrapper.wrapComment(settings.postTitle.trim(), titleMetrics, maxTextWidth);
+        if (titleLines.size() > 2) {
+            titleLines = new ArrayList<>(titleLines.subList(0, 2));
+            String last = titleLines.get(titleLines.size() - 1);
+            if (!last.endsWith("...")) {
+                titleLines.set(titleLines.size() - 1, last + "...");
+            }
+        }
         List<String> bodyLines = CommentWrapper.wrapComment(comment, bodyMetrics, maxTextWidth);
 
-        int titleLineHeight = titleFontSize + 9;
-        int bodyLineHeight = bodyFontSize + 10;
-        int gap = 34;
-        int textBlockHeight = titleLines.size() * titleLineHeight + gap + bodyLines.size() * bodyLineHeight;
-        int y = textAreaTop;
-        if (settings.centerShortComments) {
-            y = textAreaTop + Math.max(0, ((textAreaBottom - textAreaTop) - textBlockHeight) / 2);
-        }
+        int titleLineHeight = titleFontSize + 10;
+        int y = titleTop;
 
         g2d.setFont(titleFont);
         g2d.setColor(style.text);
         for (String line : titleLines) {
-            if (y > textAreaBottom) {
-                g2d.drawString("...", textX, y);
-                return;
-            }
-            g2d.drawString(line, textX, y);
+            int centeredTitleX = textX + Math.max(0, (maxTextWidth - titleMetrics.stringWidth(line)) / 2);
+            g2d.drawString(line, centeredTitleX, y);
             y += titleLineHeight;
         }
 
-        y += gap;
+        g2d.setColor(new Color(style.muted.getRed(), style.muted.getGreen(), style.muted.getBlue(), 100));
+        g2d.setStroke(new BasicStroke(2, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2d.drawLine(textX + 80, dividerY, textX + maxTextWidth - 80, dividerY);
+
         g2d.setFont(bodyFont);
         g2d.setColor(style.text);
+        int bodyLineHeight = bodyFontSize + 10;
+        int bodyBlockHeight = bodyLines.size() * bodyLineHeight;
+        int bodyY = bodyAreaTop;
+        if (settings.centerShortComments) {
+            bodyY = bodyAreaTop + Math.max(0, ((bodyAreaBottom - bodyAreaTop) - bodyBlockHeight) / 2);
+        }
+
         for (String line : bodyLines) {
-            if (y > textAreaBottom) {
-                g2d.drawString("...", textX, y);
+            if (bodyY > bodyAreaBottom) {
+                g2d.drawString("...", textX, bodyY);
                 return;
             }
-            g2d.drawString(line, textX, y);
-            y += bodyLineHeight;
+            g2d.drawString(line, textX, bodyY);
+            bodyY += bodyLineHeight;
         }
     }
 
