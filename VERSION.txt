@@ -1,0 +1,22 @@
+ThreadGens 0.2.0-local-ai
+
+Branch: local-ai-automation
+
+Included in this version:
+- local Ollama text generation
+- exact requested comment count retry logic
+- local Piper TTS generation
+- interactive Windows runner
+- Piper voice listing and voice download menu
+- voice model validation before running Piper
+- PNG generation without the old MOCKUP watermark by default
+- top-right reddit badge instead of the old AI badge
+- MP4 clip generation
+- final stitched MP4 output
+- quick video crossfade and audio crossfade between comments
+
+Default output folders:
+- generated script: output/script/generated_comments.txt
+- images: output/
+- audio: output/audio/
+- video clips and final video: output/video/
