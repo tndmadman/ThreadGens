@@ -45,6 +45,16 @@ public class VoiceGenerator {
         if (voiceModel == null || voiceModel.toString().isBlank()) {
             throw new IOException("Piper needs a voice model path. Use --voice path/to/voice.onnx");
         }
+        if (!Files.exists(voiceModel)) {
+            throw new IOException("Piper voice model not found: " + voiceModel
+                    + ". Pick a listed voice or download it from the runner first.");
+        }
+
+        Path configFile = Path.of(voiceModel.toString() + ".json");
+        if (!Files.exists(configFile)) {
+            System.err.println("Warning: Piper voice config not found: " + configFile);
+        }
+
         if (outputFile.getParent() != null) {
             Files.createDirectories(outputFile.getParent());
         }
@@ -145,7 +155,7 @@ class VoiceCatalog {
 }
 
 class VideoGenerator {
-    private static final double TRANSITION_SECONDS = 0.22;
+    private static final double TRANSITION_SECONDS = 0.35;
 
     private final String command;
     private final int timeoutSeconds;
