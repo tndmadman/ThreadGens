@@ -25,13 +25,17 @@ public class LocalLlmTextGenerator {
         this.model = model;
     }
 
-    public List<String> generateLines(String postTitle, String originalStory, int count) throws IOException, InterruptedException {
+    public List<String> generateLines(String topic, int count) throws IOException, InterruptedException {
+        return generateLines("Finish this story in the comments", topic, count);
+    }
+
+    public List<String> generateLines(String postTitle, String topic, int count) throws IOException, InterruptedException {
         if (count <= 0) {
             return List.of();
         }
 
         List<String> lines = new ArrayList<>();
-        lines.add(buildOriginalPost(originalStory));
+        lines.add(buildOriginalPostBody(topic));
 
         int replyTarget = count - 1;
         int attempts = 0;
@@ -40,7 +44,7 @@ public class LocalLlmTextGenerator {
         while (lines.size() - 1 < replyTarget && attempts < maxAttempts) {
             attempts++;
             int remaining = count - lines.size();
-            String prompt = buildReplyPrompt(postTitle, originalStory, remaining, lines);
+            String prompt = buildReplyPrompt(postTitle, lines.get(0), remaining, lines);
 
             String generatedText = requestGeneration(prompt);
             List<String> cleanedLines = cleanGeneratedLines(generatedText, remaining);
@@ -63,8 +67,12 @@ public class LocalLlmTextGenerator {
         return new ArrayList<>(lines.subList(0, count));
     }
 
-    public Path generateToFile(String postTitle, String originalStory, int count, Path outputFile) throws IOException, InterruptedException {
-        List<String> lines = generateLines(postTitle, originalStory, count);
+    public Path generateToFile(String topic, int count, Path outputFile) throws IOException, InterruptedException {
+        return generateToFile("Finish this story in the comments", topic, count, outputFile);
+    }
+
+    public Path generateToFile(String postTitle, String topic, int count, Path outputFile) throws IOException, InterruptedException {
+        List<String> lines = generateLines(postTitle, topic, count);
         if (outputFile.getParent() != null) {
             Files.createDirectories(outputFile.getParent());
         }
@@ -119,27 +127,32 @@ public class LocalLlmTextGenerator {
         return generatedText;
     }
 
-    private static String buildOriginalPost(String originalStory) {
-        String safeStory = originalStory == null || originalStory.isBlank() ? "I found something weird in my everyday routine and need Reddit to finish what happened next." : originalStory.trim();
-        return safeStory;
+    private static String buildOriginalPostBody(String topic) {
+        String safeTopic = topic == null || topic.isBlank() ? "a weird everyday story" : topic.trim();
+        safeTopic = safeTopic.replaceAll("^(?i)finish this story in the comments\s*[:.-]?\s*", "").trim();
+        if (safeTopic.isBlank()) {
+            return "a weird everyday story";
+        }
+        return safeTopic;
     }
 
-    private static String buildReplyPrompt(String postTitle, String originalStory, int count, List<String> existingLines) {
+    private static String buildReplyPrompt(String postTitle, String originalPost, int count, List<String> existingLines) {
         String safeTitle = postTitle == null || postTitle.isBlank() ? "Finish this story in the comments" : postTitle.trim();
-        String originalPost = existingLines.isEmpty() ? buildOriginalPost(originalStory) : existingLines.get(0);
+        String safeOriginalPost = originalPost == null || originalPost.isBlank() ? "a weird everyday story" : originalPost.trim();
         StringBuilder prompt = new StringBuilder();
         prompt.append("Generate exactly ").append(count)
-                .append(" Reddit comments/replies that continue this thread.\n\n")
-                .append("Original post title:\n")
+                .append(" Reddit comments/replies for this thread.\n\n")
+                .append("Post title:\n")
                 .append(safeTitle).append("\n\n")
                 .append("Original post body:\n")
-                .append(originalPost).append("\n\n")
+                .append(safeOriginalPost).append("\n\n")
                 .append("Rules:\n")
                 .append("- Return exactly ").append(count).append(" lines.\n")
                 .append("- Return one comment/reply per line.\n")
                 .append("- The comments should feel like different Reddit users continuing the story, reacting to it, or adding punchlines.\n")
                 .append("- Do not write a new original post.\n")
-                .append("- Do not repeat the title.\n")
+                .append("- Do not repeat the post title.\n")
+                .append("- Do not repeat the original post body.\n")
                 .append("- No numbering, bullets, quotes, markdown, explanations, titles, or labels.\n")
                 .append("- Do not prefix lines with POST, OP, COMMENT, or REPLY.\n")
                 .append("- Each line should be 1 or 2 sentences and readable aloud.\n")
@@ -158,7 +171,7 @@ public class LocalLlmTextGenerator {
             String line = rawLine.trim();
             line = line.replaceAll("^[-*•]+\\s*", "");
             line = line.replaceAll("^\\d+[.)-]\\s*", "");
-            line = line.replaceAll("^(?i)(post|op|original post|comment|reply|title)\\s*[:.-]\\s*", "");
+            line = line.replaceAll("^(?i)(post|op|original post|comment|reply)\\s*[:.-]\\s*", "");
             line = stripMatchingQuotes(line);
             if (!line.isBlank()) {
                 lines.add(line);
