@@ -373,6 +373,9 @@ public class RedditScreenshotGenerator {
             settings.count = requestedCount;
         }
         System.out.println("Generated script: " + generatedFile);
+        if (settings.unloadOllamaAfterText) {
+            generator.unloadModel();
+        }
     }
 
     private static void generateBatch(Settings settings) throws IOException, InterruptedException {
@@ -382,6 +385,7 @@ public class RedditScreenshotGenerator {
         VoiceGenerator voiceGenerator = new VoiceGenerator(settings.ttsEngine, settings.ttsCommand, settings.voiceModel, settings.ttsTimeoutSeconds);
         VideoGenerator videoGenerator = new VideoGenerator(settings.videoCommand, settings.videoTimeoutSeconds);
         List<Path> videoClips = new ArrayList<>();
+        List<FrameJob> jobs = new ArrayList<>();
         Random rand = new Random();
         Style style = Style.load(settings.styleName);
 
@@ -405,6 +409,9 @@ public class RedditScreenshotGenerator {
             String randomProfileImage = profileName.getRandomProfileName();
             String currentComment = commentLines.get(i);
             String currentFileName = i + settings.outputPrefix;
+            Path imagePath = settings.outputDirectory.resolve(currentFileName + ".png");
+            Path audioPath = settings.audioDirectory.resolve(currentFileName + ".wav");
+            Path videoPath = settings.videoDirectory.resolve(currentFileName + ".mp4");
 
             RedditScreenshotGenerator generator = new RedditScreenshotGenerator(
                     currentFileName,
@@ -420,33 +427,47 @@ public class RedditScreenshotGenerator {
                     i,
                     total
             );
-            generator.generateImage();
-            Path imagePath = settings.outputDirectory.resolve(currentFileName + ".png");
-            System.out.println("Generated image: " + imagePath);
+            jobs.add(new FrameJob(currentComment, imagePath, audioPath, videoPath, generator));
+        }
 
-            Path audioPath = null;
-            if (voiceGenerator.isEnabled()) {
-                audioPath = settings.audioDirectory.resolve(currentFileName + ".wav");
-                voiceGenerator.generateSpeech(currentComment, audioPath);
-                System.out.println("Generated audio: " + audioPath);
+        System.out.println("Phase 1/4: rendering all images...");
+        for (FrameJob job : jobs) {
+            job.generator.generateImage();
+            System.out.println("Generated image: " + job.imagePath);
+        }
+
+        if (voiceGenerator.isEnabled()) {
+            System.out.println("Phase 2/4: generating all audio with " + settings.ttsEngine + "...");
+            for (FrameJob job : jobs) {
+                voiceGenerator.generateSpeech(job.text, job.audioPath);
+                System.out.println("Generated audio: " + job.audioPath);
             }
+        } else {
+            System.out.println("Phase 2/4: skipping audio because TTS is disabled.");
+        }
 
-            if (settings.createVideo) {
-                if (audioPath == null) {
-                    System.out.println("Skipping video for " + currentFileName + ": enable voice first with --tts piper");
-                } else {
-                    Path videoPath = settings.videoDirectory.resolve(currentFileName + ".mp4");
-                    videoGenerator.makeClip(imagePath, audioPath, videoPath, settings.width, settings.height, settings.videoFps);
-                    videoClips.add(videoPath);
-                    System.out.println("Generated video: " + videoPath);
+        if (settings.createVideo) {
+            System.out.println("Phase 3/4: rendering all video clips...");
+            if (!voiceGenerator.isEnabled()) {
+                System.out.println("Skipping videos: enable voice first with --tts piper or --tts kokoro");
+            } else {
+                for (FrameJob job : jobs) {
+                    videoGenerator.makeClip(job.imagePath, job.audioPath, job.videoPath, settings.width, settings.height, settings.videoFps);
+                    videoClips.add(job.videoPath);
+                    System.out.println("Generated video: " + job.videoPath);
                 }
             }
+        } else {
+            System.out.println("Phase 3/4: skipping video clips.");
         }
 
         if (settings.concatVideo && !videoClips.isEmpty()) {
+            System.out.println("Phase 4/4: stitching final video...");
             Path finalVideo = settings.videoDirectory.resolve(settings.finalVideoName);
             videoGenerator.combineClips(videoClips, finalVideo);
             System.out.println("Generated final video: " + finalVideo);
+        } else {
+            System.out.println("Phase 4/4: no final stitch needed.");
         }
     }
 
@@ -486,9 +507,25 @@ public class RedditScreenshotGenerator {
     private static void printUsage() {
         System.err.println("Usage: java -cp out redditTxtToImg.RedditScreenshotGenerator [comments.txt] [output] [options]");
         System.err.println("Image options: --count N --prefix NAME --style dark|light --shuffle --center --top --no-watermark --gui");
-        System.err.println("Local LLM options: --auto --topic TEXT --llm-model MODEL --llm-url URL --script-out FILE");
-        System.err.println("Local TTS options: --tts none|piper --voice NAME_OR_PATH --voice-dir DIR --list-voices --tts-command piper --audio-dir DIR");
+        System.err.println("Local LLM options: --auto --topic TEXT --llm-model MODEL --llm-url URL --script-out FILE --keep-ollama-loaded");
+        System.err.println("Local TTS options: --tts none|piper|kokoro --voice NAME_OR_PATH --voice-dir DIR --list-voices --tts-command COMMAND --audio-dir DIR");
         System.err.println("Video options: --video --concat-video --video-dir DIR --video-command ffmpeg --fps 30 --final-video final.mp4");
+    }
+
+    private static class FrameJob {
+        final String text;
+        final Path imagePath;
+        final Path audioPath;
+        final Path videoPath;
+        final RedditScreenshotGenerator generator;
+
+        FrameJob(String text, Path imagePath, Path audioPath, Path videoPath, RedditScreenshotGenerator generator) {
+            this.text = text;
+            this.imagePath = imagePath;
+            this.audioPath = audioPath;
+            this.videoPath = videoPath;
+            this.generator = generator;
+        }
     }
 
     private static class Settings {
@@ -509,6 +546,7 @@ public class RedditScreenshotGenerator {
         boolean showWatermark = false;
         boolean guiMode = false;
         boolean autoGenerateText = false;
+        boolean unloadOllamaAfterText = true;
         boolean listVoices = false;
         boolean createVideo = false;
         boolean concatVideo = false;
@@ -556,12 +594,18 @@ public class RedditScreenshotGenerator {
                 else if ("--no-watermark".equals(arg)) settings.showWatermark = false;
                 else if ("--gui".equals(arg)) settings.guiMode = true;
                 else if ("--auto".equals(arg)) settings.autoGenerateText = true;
+                else if ("--keep-ollama-loaded".equals(arg)) settings.unloadOllamaAfterText = false;
                 else if ("--topic".equals(arg) && i + 1 < args.length) settings.topic = args[++i];
                 else if ("--llm-model".equals(arg) && i + 1 < args.length) settings.llmModel = args[++i];
                 else if ("--llm-url".equals(arg) && i + 1 < args.length) settings.ollamaUrl = args[++i];
                 else if ("--script-out".equals(arg) && i + 1 < args.length) settings.generatedTextFile = Path.of(args[++i]);
-                else if ("--tts".equals(arg) && i + 1 < args.length) settings.ttsEngine = args[++i];
-                else if ("--voice".equals(arg) && i + 1 < args.length) settings.voiceModel = VoiceCatalog.resolveVoice(args[++i], settings.voiceDirectory);
+                else if ("--tts".equals(arg) && i + 1 < args.length) settings.ttsEngine = args[++i].toLowerCase();
+                else if ("--voice".equals(arg) && i + 1 < args.length) {
+                    String voiceValue = args[++i];
+                    settings.voiceModel = "kokoro".equals(settings.ttsEngine)
+                            ? Path.of(voiceValue)
+                            : VoiceCatalog.resolveVoice(voiceValue, settings.voiceDirectory);
+                }
                 else if ("--voice-dir".equals(arg) && i + 1 < args.length) settings.voiceDirectory = Path.of(args[++i]);
                 else if ("--list-voices".equals(arg)) settings.listVoices = true;
                 else if ("--tts-command".equals(arg) && i + 1 < args.length) settings.ttsCommand = args[++i];
@@ -597,10 +641,14 @@ public class RedditScreenshotGenerator {
                 settings.ttsEngine = properties.getProperty("ttsEngine", settings.ttsEngine);
                 settings.ttsCommand = properties.getProperty("ttsCommand", settings.ttsCommand);
                 settings.voiceDirectory = Path.of(properties.getProperty("voiceDirectory", settings.voiceDirectory.toString()));
-                settings.voiceModel = VoiceCatalog.resolveVoice(properties.getProperty("voiceModel", settings.voiceModel.toString()), settings.voiceDirectory);
+                String defaultVoice = properties.getProperty("voiceModel", settings.voiceModel.toString());
+                settings.voiceModel = "kokoro".equals(settings.ttsEngine)
+                        ? Path.of(defaultVoice)
+                        : VoiceCatalog.resolveVoice(defaultVoice, settings.voiceDirectory);
                 settings.audioDirectory = Path.of(properties.getProperty("audioDirectory", settings.audioDirectory.toString()));
                 settings.videoDirectory = Path.of(properties.getProperty("videoDirectory", settings.videoDirectory.toString()));
                 settings.videoCommand = properties.getProperty("videoCommand", settings.videoCommand);
+                settings.unloadOllamaAfterText = Boolean.parseBoolean(properties.getProperty("unloadOllamaAfterText", "true"));
             } catch (IOException ignored) {
                 return settings;
             }
