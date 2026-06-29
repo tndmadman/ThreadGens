@@ -3,3 +3,4 @@ output/
 *.class
 .DS_Store
 Thumbs.db
+.venv-kokoro/
