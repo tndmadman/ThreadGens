@@ -1,19 +1,19 @@
-ThreadGens 0.2.0-local-ai
+ThreadGens 0.3.0-kokoro-tts
 
-Branch: local-ai-automation
+Branch: feature/kokoro-tts
 
 Included in this version:
-- local Ollama text generation
-- exact requested comment count retry logic
-- local Piper TTS generation
-- interactive Windows runner
-- Piper voice listing and voice download menu
-- voice model validation before running Piper
-- PNG generation without the old MOCKUP watermark by default
-- top-right reddit badge instead of the old AI badge
-- MP4 clip generation
-- final stitched MP4 output
-- quick video crossfade and audio crossfade between comments
+- keeps Piper TTS fully functional as the fallback engine
+- adds Kokoro TTS through tools/kokoro_tts.py
+- adds requirements-kokoro.txt for Python dependencies
+- updates the Windows runner to choose Piper or Kokoro
+- uses the user prompt as the original post
+- generates AI replies/comments after the original post
+- generates all text first, then all PNG images, then all WAV audio, then all MP4 clips, then the final stitched video
+- requests Ollama model unload after script generation by default
+- keeps reply views below original post views
+- keeps likes below views
+- keeps final stitched MP4 output with transitions
 
 Default output folders:
 - generated script: output/script/generated_comments.txt
