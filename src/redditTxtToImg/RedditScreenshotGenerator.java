@@ -224,19 +224,22 @@ public class RedditScreenshotGenerator {
     private void drawOriginalPostTitleAndBody(Graphics2D g2d) {
         int textX = contentLeft();
         int maxTextWidth = boxWidth() - 84;
-        int titleTop = COMMENT_BOX_TOP + 205;
-        int dividerY = COMMENT_BOX_TOP + 410;
-        int bodyAreaTop = dividerY + 62;
+        int titlePanelX = textX;
+        int titlePanelY = COMMENT_BOX_TOP + 178;
+        int titlePanelWidth = maxTextWidth;
+        int titlePaddingX = 30;
+        int titlePaddingY = 24;
+        int bodyGap = 66;
         int bodyAreaBottom = boxBottom() - 150;
 
-        int titleFontSize = 60;
-        int bodyFontSize = Math.max(46, settings.commentFontSize - 10);
+        int titleFontSize = 48;
+        int bodyFontSize = Math.max(48, settings.commentFontSize - 8);
         Font titleFont = new Font(settings.fontName, Font.BOLD, titleFontSize);
         Font bodyFont = new Font(settings.fontName, Font.PLAIN, bodyFontSize);
         FontMetrics titleMetrics = g2d.getFontMetrics(titleFont);
         FontMetrics bodyMetrics = g2d.getFontMetrics(bodyFont);
 
-        List<String> titleLines = CommentWrapper.wrapComment(settings.postTitle.trim(), titleMetrics, maxTextWidth);
+        List<String> titleLines = CommentWrapper.wrapComment(settings.postTitle.trim(), titleMetrics, titlePanelWidth - (titlePaddingX * 2) - 14);
         if (titleLines.size() > 2) {
             titleLines = new ArrayList<>(titleLines.subList(0, 2));
             String last = titleLines.get(titleLines.size() - 1);
@@ -246,24 +249,29 @@ public class RedditScreenshotGenerator {
         }
         List<String> bodyLines = CommentWrapper.wrapComment(comment, bodyMetrics, maxTextWidth);
 
-        int titleLineHeight = titleFontSize + 10;
-        int y = titleTop;
+        int titleLineHeight = titleFontSize + 8;
+        int titlePanelHeight = Math.max(108, titleLines.size() * titleLineHeight + (titlePaddingY * 2));
+
+        g2d.setColor(new Color(30, 30, 31));
+        g2d.fillRoundRect(titlePanelX, titlePanelY, titlePanelWidth, titlePanelHeight, 26, 26);
+        g2d.setColor(style.accent);
+        g2d.fillRoundRect(titlePanelX, titlePanelY, 9, titlePanelHeight, 9, 9);
+        g2d.setColor(new Color(style.muted.getRed(), style.muted.getGreen(), style.muted.getBlue(), 80));
+        g2d.setStroke(new BasicStroke(2, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2d.drawRoundRect(titlePanelX, titlePanelY, titlePanelWidth, titlePanelHeight, 26, 26);
 
         g2d.setFont(titleFont);
         g2d.setColor(style.text);
+        int titleY = titlePanelY + titlePaddingY + titleMetrics.getAscent();
         for (String line : titleLines) {
-            int centeredTitleX = textX + Math.max(0, (maxTextWidth - titleMetrics.stringWidth(line)) / 2);
-            g2d.drawString(line, centeredTitleX, y);
-            y += titleLineHeight;
+            g2d.drawString(line, titlePanelX + titlePaddingX, titleY);
+            titleY += titleLineHeight;
         }
-
-        g2d.setColor(new Color(style.muted.getRed(), style.muted.getGreen(), style.muted.getBlue(), 100));
-        g2d.setStroke(new BasicStroke(2, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        g2d.drawLine(textX + 80, dividerY, textX + maxTextWidth - 80, dividerY);
 
         g2d.setFont(bodyFont);
         g2d.setColor(style.text);
         int bodyLineHeight = bodyFontSize + 10;
+        int bodyAreaTop = titlePanelY + titlePanelHeight + bodyGap;
         int bodyBlockHeight = bodyLines.size() * bodyLineHeight;
         int bodyY = bodyAreaTop;
         if (settings.centerShortComments) {
