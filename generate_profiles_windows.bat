@@ -15,6 +15,9 @@ set "CHECKPOINT="
 set "STEPS=18"
 set "CFG=6.5"
 set "MODE=ai"
+set "USERNAME_MODE=random"
+set "OLLAMA_URL=http://127.0.0.1:11434/api/generate"
+set "OLLAMA_MODEL=llama3.1:8b"
 
 echo.
 echo ThreadGens profile generator
@@ -70,6 +73,25 @@ echo Example: realisticVisionV60B1_v51VAE.safetensors
 set /p "CHECKPOINT=Checkpoint filename [auto]: "
 
 echo.
+echo Choose username generation:
+echo 1. Fast random usernames ^(recommended/default^)
+echo 2. Ollama-generated usernames
+echo.
+set /p "USERNAME_CHOICE=Choice [1/2, default 1]: "
+if "%USERNAME_CHOICE%"=="2" set "USERNAME_MODE=ollama"
+if /I "%USERNAME_CHOICE%"=="ollama" set "USERNAME_MODE=ollama"
+if /I "%USERNAME_CHOICE%"=="random" set "USERNAME_MODE=random"
+if "%USERNAME_CHOICE%"=="" set "USERNAME_MODE=random"
+
+if /I "%USERNAME_MODE%"=="ollama" (
+  echo.
+  set /p "OLLAMA_URL=Ollama generate URL [http://127.0.0.1:11434/api/generate]: "
+  if "%OLLAMA_URL%"=="" set "OLLAMA_URL=http://127.0.0.1:11434/api/generate"
+  set /p "OLLAMA_MODEL=Ollama model [llama3.1:8b]: "
+  if "%OLLAMA_MODEL%"=="" set "OLLAMA_MODEL=llama3.1:8b"
+)
+
+echo.
 set /p "COUNT=How many AI face profiles/usernames? [25]: "
 if "%COUNT%"=="" set "COUNT=25"
 
@@ -99,6 +121,8 @@ echo.
 echo Mode:                  AI ComfyUI face/selfie profiles
 echo ComfyUI URL:           %COMFY_URL%
 echo Checkpoint:            %CHECKPOINT%
+echo Username mode:         %USERNAME_MODE%
+if /I "%USERNAME_MODE%"=="ollama" echo Ollama model:          %OLLAMA_MODEL%
 echo Output profile folder: %PFP_DIR%
 echo Username file:         %NAMES_FILE%
 echo Count:                 %COUNT%
@@ -108,9 +132,9 @@ echo Names mode:            %NAMES_MODE%
 echo.
 
 if "%CHECKPOINT%"=="" (
-  "%PYTHON_CMD%" tools\generate_comfy_profiles.py --count %COUNT% --size %SIZE% --pfp-dir "%PFP_DIR%" --names-file "%NAMES_FILE%" --prefix "%AI_PREFIX%" --comfy-url "%COMFY_URL%" --steps %STEPS% --cfg %CFG% %APPEND_FLAG%
+  "%PYTHON_CMD%" tools\generate_comfy_profiles.py --count %COUNT% --size %SIZE% --pfp-dir "%PFP_DIR%" --names-file "%NAMES_FILE%" --prefix "%AI_PREFIX%" --comfy-url "%COMFY_URL%" --steps %STEPS% --cfg %CFG% --username-mode %USERNAME_MODE% --ollama-url "%OLLAMA_URL%" --ollama-model "%OLLAMA_MODEL%" %APPEND_FLAG%
 ) else (
-  "%PYTHON_CMD%" tools\generate_comfy_profiles.py --count %COUNT% --size %SIZE% --pfp-dir "%PFP_DIR%" --names-file "%NAMES_FILE%" --prefix "%AI_PREFIX%" --comfy-url "%COMFY_URL%" --checkpoint "%CHECKPOINT%" --steps %STEPS% --cfg %CFG% %APPEND_FLAG%
+  "%PYTHON_CMD%" tools\generate_comfy_profiles.py --count %COUNT% --size %SIZE% --pfp-dir "%PFP_DIR%" --names-file "%NAMES_FILE%" --prefix "%AI_PREFIX%" --comfy-url "%COMFY_URL%" --checkpoint "%CHECKPOINT%" --steps %STEPS% --cfg %CFG% --username-mode %USERNAME_MODE% --ollama-url "%OLLAMA_URL%" --ollama-model "%OLLAMA_MODEL%" %APPEND_FLAG%
 )
 if errorlevel 1 (
   echo AI profile generation failed.
@@ -127,6 +151,7 @@ if not exist "tools\generate_profiles.py" (
 )
 
 echo.
+echo Procedural fallback uses fast random usernames only.
 set /p "COUNT=How many procedural profiles/usernames? [100]: "
 if "%COUNT%"=="" set "COUNT=100"
 
