@@ -26,7 +26,52 @@ public class LocalLlmTextGenerator {
     }
 
     public List<String> generateLines(String topic, int count) throws IOException, InterruptedException {
-        String prompt = buildPrompt(topic, count);
+        if (count <= 0) {
+            return List.of();
+        }
+
+        List<String> lines = new ArrayList<>();
+        int attempts = 0;
+        int maxAttempts = 4;
+
+        while (lines.size() < count && attempts < maxAttempts) {
+            attempts++;
+            int remaining = count - lines.size();
+            String prompt = attempts == 1
+                    ? buildPrompt(topic, count)
+                    : buildContinuationPrompt(topic, remaining, lines);
+
+            String generatedText = requestGeneration(prompt);
+            List<String> cleanedLines = cleanGeneratedLines(generatedText, remaining);
+
+            for (String line : cleanedLines) {
+                if (lines.size() >= count) {
+                    break;
+                }
+                if (!line.isBlank() && !lines.contains(line)) {
+                    lines.add(line);
+                }
+            }
+        }
+
+        if (lines.size() < count) {
+            throw new IOException("Local LLM returned only " + lines.size() + " usable lines out of " + count
+                    + ". Try again, lower the count, or use a stronger Ollama model.");
+        }
+
+        return new ArrayList<>(lines.subList(0, count));
+    }
+
+    public Path generateToFile(String topic, int count, Path outputFile) throws IOException, InterruptedException {
+        List<String> lines = generateLines(topic, count);
+        if (outputFile.getParent() != null) {
+            Files.createDirectories(outputFile.getParent());
+        }
+        Files.write(outputFile, lines, StandardCharsets.UTF_8);
+        return outputFile;
+    }
+
+    private String requestGeneration(String prompt) throws IOException, InterruptedException {
         String json = "{"
                 + "\"model\":\"" + escapeJson(model) + "\","
                 + "\"prompt\":\"" + escapeJson(prompt) + "\","
@@ -49,16 +94,7 @@ public class LocalLlmTextGenerator {
             throw new IOException("Ollama response did not include generated text.");
         }
 
-        return cleanGeneratedLines(generatedText, count);
-    }
-
-    public Path generateToFile(String topic, int count, Path outputFile) throws IOException, InterruptedException {
-        List<String> lines = generateLines(topic, count);
-        if (outputFile.getParent() != null) {
-            Files.createDirectories(outputFile.getParent());
-        }
-        Files.write(outputFile, lines, StandardCharsets.UTF_8);
-        return outputFile;
+        return generatedText;
     }
 
     private static String buildPrompt(String topic, int count) {
@@ -66,11 +102,29 @@ public class LocalLlmTextGenerator {
         return "Generate exactly " + count + " short Reddit-style comment posts for vertical short-form videos about: "
                 + safeTopic + "\n\n"
                 + "Rules:\n"
+                + "- Return exactly " + count + " lines.\n"
                 + "- Return one post per line.\n"
                 + "- No numbering, bullets, quotes, markdown, explanations, titles, or labels.\n"
                 + "- Each line should be 1 or 2 sentences.\n"
                 + "- Make each line punchy, readable aloud, and safe for a general audience.\n"
                 + "- Do not mention that you are an AI.\n";
+    }
+
+    private static String buildContinuationPrompt(String topic, int count, List<String> existingLines) {
+        String safeTopic = topic == null || topic.isBlank() ? "weird everyday stories" : topic.trim();
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Generate exactly ").append(count)
+                .append(" more short Reddit-style comment posts for vertical short-form videos about: ")
+                .append(safeTopic).append("\n\n")
+                .append("Rules:\n")
+                .append("- Return exactly ").append(count).append(" lines.\n")
+                .append("- Return one post per line.\n")
+                .append("- No numbering, bullets, quotes, markdown, explanations, titles, or labels.\n")
+                .append("- Do not repeat these already accepted lines:\n");
+        for (String existingLine : existingLines) {
+            prompt.append(existingLine).append("\n");
+        }
+        return prompt.toString();
     }
 
     private static List<String> cleanGeneratedLines(String text, int count) {
