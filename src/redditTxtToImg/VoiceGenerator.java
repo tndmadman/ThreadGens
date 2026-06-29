@@ -1,7 +1,9 @@
 package redditTxtToImg;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -126,20 +128,40 @@ public class VoiceGenerator {
         commandParts.add("--voice");
         commandParts.add(voiceName);
 
+        System.out.println("Starting Kokoro TTS: " + outputFile);
         ProcessBuilder processBuilder = new ProcessBuilder(commandParts);
         processBuilder.redirectErrorStream(true);
         Process process = processBuilder.start();
 
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(output);
+        StringBuilder output = new StringBuilder();
+        Thread outputThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    System.out.println(line);
+                    output.append(line).append(System.lineSeparator());
+                }
+            } catch (IOException e) {
+                output.append("Could not read Kokoro output: ").append(e.getMessage()).append(System.lineSeparator());
+            }
+        });
+        outputThread.setDaemon(true);
+        outputThread.start();
 
-        boolean finished = process.waitFor(Math.max(timeoutSeconds, 240), TimeUnit.SECONDS);
+        int kokoroTimeout = Math.max(timeoutSeconds, 600);
+        boolean finished = process.waitFor(kokoroTimeout, TimeUnit.SECONDS);
         if (!finished) {
             process.destroyForcibly();
-            throw new IOException("Kokoro timed out after " + Math.max(timeoutSeconds, 240) + " seconds.");
+            outputThread.join(1000);
+            throw new IOException("Kokoro timed out after " + kokoroTimeout + " seconds. Last output: " + output);
         }
+
+        outputThread.join(1000);
         if (process.exitValue() != 0) {
-            throw new IOException("Kokoro failed with exit code " + process.exitValue() + ": " + output.toString(StandardCharsets.UTF_8));
+            throw new IOException("Kokoro failed with exit code " + process.exitValue() + ": " + output);
+        }
+        if (!Files.exists(outputFile)) {
+            throw new IOException("Kokoro finished but did not create WAV: " + outputFile + ". Output: " + output);
         }
     }
 
