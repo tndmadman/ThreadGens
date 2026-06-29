@@ -28,10 +28,8 @@ public class RedditScreenshotGenerator {
     private static final int COMMENT_BOX_TOP = 260;
     private static final int COMMENT_BOX_BOTTOM_PADDING = 330;
 
-    private final Random random = new Random();
     private final Settings settings;
     private final Style style;
-
     private final String profileImageName;
     private final String userName;
     private final String postLocation;
@@ -215,7 +213,64 @@ public class RedditScreenshotGenerator {
     }
 
     private void drawComment(Graphics2D g2d) {
+        if (isOriginalPost() && settings.postTitle != null && !settings.postTitle.isBlank()) {
+            drawOriginalPostTitleAndBody(g2d);
+            return;
+        }
         int fontSize = isOriginalPost() ? Math.max(54, settings.commentFontSize - 2) : Math.max(48, settings.commentFontSize - 6);
+        drawPlainComment(g2d, fontSize);
+    }
+
+    private void drawOriginalPostTitleAndBody(Graphics2D g2d) {
+        int textX = contentLeft();
+        int maxTextWidth = boxWidth() - 84;
+        int textAreaTop = COMMENT_BOX_TOP + 215;
+        int textAreaBottom = boxBottom() - 150;
+
+        int titleFontSize = 46;
+        int bodyFontSize = Math.max(46, settings.commentFontSize - 12);
+        Font titleFont = new Font(settings.fontName, Font.BOLD, titleFontSize);
+        Font bodyFont = new Font(settings.fontName, Font.PLAIN, bodyFontSize);
+        FontMetrics titleMetrics = g2d.getFontMetrics(titleFont);
+        FontMetrics bodyMetrics = g2d.getFontMetrics(bodyFont);
+
+        List<String> titleLines = CommentWrapper.wrapComment(settings.postTitle.trim(), titleMetrics, maxTextWidth);
+        List<String> bodyLines = CommentWrapper.wrapComment(comment, bodyMetrics, maxTextWidth);
+
+        int titleLineHeight = titleFontSize + 9;
+        int bodyLineHeight = bodyFontSize + 10;
+        int gap = 34;
+        int textBlockHeight = titleLines.size() * titleLineHeight + gap + bodyLines.size() * bodyLineHeight;
+        int y = textAreaTop;
+        if (settings.centerShortComments) {
+            y = textAreaTop + Math.max(0, ((textAreaBottom - textAreaTop) - textBlockHeight) / 2);
+        }
+
+        g2d.setFont(titleFont);
+        g2d.setColor(style.text);
+        for (String line : titleLines) {
+            if (y > textAreaBottom) {
+                g2d.drawString("...", textX, y);
+                return;
+            }
+            g2d.drawString(line, textX, y);
+            y += titleLineHeight;
+        }
+
+        y += gap;
+        g2d.setFont(bodyFont);
+        g2d.setColor(style.text);
+        for (String line : bodyLines) {
+            if (y > textAreaBottom) {
+                g2d.drawString("...", textX, y);
+                return;
+            }
+            g2d.drawString(line, textX, y);
+            y += bodyLineHeight;
+        }
+    }
+
+    private void drawPlainComment(Graphics2D g2d, int fontSize) {
         Font commentFont = new Font(settings.fontName, Font.PLAIN, fontSize);
         g2d.setFont(commentFont);
         FontMetrics metrics = g2d.getFontMetrics(commentFont);
@@ -367,7 +422,7 @@ public class RedditScreenshotGenerator {
     private static void generateTextWithLocalLlm(Settings settings) throws IOException, InterruptedException {
         int requestedCount = settings.count > -1 ? settings.count : settings.autoTextCount;
         LocalLlmTextGenerator generator = new LocalLlmTextGenerator(settings.ollamaUrl, settings.llmModel);
-        Path generatedFile = generator.generateToFile(settings.topic, requestedCount, settings.generatedTextFile);
+        Path generatedFile = generator.generateToFile(settings.postTitle, settings.topic, requestedCount, settings.generatedTextFile);
         settings.commentsFile = generatedFile;
         if (settings.count < 0) {
             settings.count = requestedCount;
@@ -408,6 +463,9 @@ public class RedditScreenshotGenerator {
             String randomAuthor = authors.getRandomEntry(rand);
             String randomProfileImage = profileName.getRandomProfileName();
             String currentComment = commentLines.get(i);
+            String narrationText = i == 0 && settings.postTitle != null && !settings.postTitle.isBlank()
+                    ? settings.postTitle + ". " + currentComment
+                    : currentComment;
             String currentFileName = i + settings.outputPrefix;
             Path imagePath = settings.outputDirectory.resolve(currentFileName + ".png");
             Path audioPath = settings.audioDirectory.resolve(currentFileName + ".wav");
@@ -427,7 +485,7 @@ public class RedditScreenshotGenerator {
                     i,
                     total
             );
-            jobs.add(new FrameJob(currentComment, imagePath, audioPath, videoPath, generator));
+            jobs.add(new FrameJob(narrationText, imagePath, audioPath, videoPath, generator));
         }
 
         System.out.println("Phase 1/4: rendering all images...");
@@ -507,7 +565,7 @@ public class RedditScreenshotGenerator {
     private static void printUsage() {
         System.err.println("Usage: java -cp out redditTxtToImg.RedditScreenshotGenerator [comments.txt] [output] [options]");
         System.err.println("Image options: --count N --prefix NAME --style dark|light --shuffle --center --top --no-watermark --gui");
-        System.err.println("Local LLM options: --auto --topic TEXT --llm-model MODEL --llm-url URL --script-out FILE --keep-ollama-loaded");
+        System.err.println("Local LLM options: --auto --post-title TEXT --topic TEXT --llm-model MODEL --llm-url URL --script-out FILE --keep-ollama-loaded");
         System.err.println("Local TTS options: --tts none|piper|kokoro --voice NAME_OR_PATH --voice-dir DIR --list-voices --tts-command COMMAND --audio-dir DIR");
         System.err.println("Video options: --video --concat-video --video-dir DIR --video-command ffmpeg --fps 30 --final-video final.mp4");
     }
@@ -552,6 +610,7 @@ public class RedditScreenshotGenerator {
         boolean concatVideo = false;
         String fontName = "Arial";
         String postLocation = "/thread/comment";
+        String postTitle = "Finish this story in the comments";
         String outputPrefix = "aithread";
         String styleName = "dark";
         String watermarkText = "";
@@ -595,6 +654,7 @@ public class RedditScreenshotGenerator {
                 else if ("--gui".equals(arg)) settings.guiMode = true;
                 else if ("--auto".equals(arg)) settings.autoGenerateText = true;
                 else if ("--keep-ollama-loaded".equals(arg)) settings.unloadOllamaAfterText = false;
+                else if ("--post-title".equals(arg) && i + 1 < args.length) settings.postTitle = args[++i];
                 else if ("--topic".equals(arg) && i + 1 < args.length) settings.topic = args[++i];
                 else if ("--llm-model".equals(arg) && i + 1 < args.length) settings.llmModel = args[++i];
                 else if ("--llm-url".equals(arg) && i + 1 < args.length) settings.ollamaUrl = args[++i];
@@ -635,6 +695,7 @@ public class RedditScreenshotGenerator {
                 settings.outputPrefix = properties.getProperty("prefix", settings.outputPrefix);
                 settings.styleName = properties.getProperty("style", settings.styleName).replace("reddit_", "");
                 settings.centerShortComments = Boolean.parseBoolean(properties.getProperty("centerShortComments", "true"));
+                settings.postTitle = properties.getProperty("postTitle", settings.postTitle);
                 settings.topic = properties.getProperty("topic", settings.topic);
                 settings.llmModel = properties.getProperty("llmModel", settings.llmModel);
                 settings.ollamaUrl = properties.getProperty("ollamaUrl", settings.ollamaUrl);
