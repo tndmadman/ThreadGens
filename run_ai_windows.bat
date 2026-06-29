@@ -4,9 +4,10 @@ cd /d "%~dp0"
 
 set "MODEL=llama3.1:8b"
 set "COUNT=10"
+set "POST_TITLE=Finish this story in the comments"
 set "TOPIC=weird everyday stories"
-set "TTS=piper"
-set "VOICE=en_US-lessac-medium"
+set "TTS=kokoro"
+set "VOICE=af_heart"
 set "MAKE_VIDEO=N"
 set "VIDEO_FLAGS="
 set "VOICE_DIR=voices"
@@ -21,15 +22,17 @@ echo Branch: feature/kokoro-tts
 echo.
 
 echo Choose TTS engine:
-echo 1. Piper  - fast fallback, lower quality
-echo 2. Kokoro - better local voice, uses isolated .venv-kokoro
+echo 1. Kokoro - RECOMMENDED/default, better local voice, uses isolated .venv-kokoro
+echo 2. Piper  - fallback, faster/lower quality
 echo.
-set /p "TTS_CHOICE=Choice [1/2]: "
-if "%TTS_CHOICE%"=="2" set "TTS=kokoro"
+set /p "TTS_CHOICE=Choice [1/2, default 1]: "
+if "%TTS_CHOICE%"=="2" set "TTS=piper"
+if /I "%TTS_CHOICE%"=="piper" set "TTS=piper"
 if /I "%TTS_CHOICE%"=="kokoro" set "TTS=kokoro"
+if "%TTS_CHOICE%"=="" set "TTS=kokoro"
 
-if /I "%TTS%"=="kokoro" goto kokoro_setup
-goto piper_setup
+if /I "%TTS%"=="piper" goto piper_setup
+goto kokoro_setup
 
 :piper_setup
 set "TTS=piper"
@@ -176,11 +179,15 @@ if /I "%TTS%"=="piper" (
 )
 
 echo.
-set /p "TOPIC=Topic [weird everyday stories]: "
+set /p "POST_TITLE=Post title [Finish this story in the comments]: "
+if "%POST_TITLE%"=="" set "POST_TITLE=Finish this story in the comments"
+
+echo.
+set /p "TOPIC=Original story/body [weird everyday stories]: "
 if "%TOPIC%"=="" set "TOPIC=weird everyday stories"
 
 echo.
-set /p "COUNT=How many posts [10]: "
+set /p "COUNT=How many total slides/posts [10]: "
 if "%COUNT%"=="" set "COUNT=10"
 
 echo.
@@ -188,17 +195,18 @@ set /p "MAKE_VIDEO=Make stitched MP4 video with smooth transitions? y/N: "
 if /I "%MAKE_VIDEO%"=="Y" set "VIDEO_FLAGS=--video --concat-video"
 
 echo.
-echo Topic: %TOPIC%
-echo Count: %COUNT%
-echo TTS:   %TTS%
-echo Voice: %VOICE%
-echo Cmd:   %TTS_CMD%
-echo Video: %VIDEO_FLAGS%
-echo Watermark: off
-echo Pipeline: text/script first, then images, then audio, then video
+echo Post title: %POST_TITLE%
+echo Original:   %TOPIC%
+echo Count:      %COUNT%
+echo TTS:        %TTS%
+echo Voice:      %VOICE%
+echo Cmd:        %TTS_CMD%
+echo Video:      %VIDEO_FLAGS%
+echo Watermark:  off
+echo Pipeline:   text/script first, then images, then audio, then video
 echo.
 
-java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark %VIDEO_FLAGS%
+java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark %VIDEO_FLAGS%
 
 echo.
 echo Done.
