@@ -203,10 +203,11 @@ echo Voice:      %VOICE%
 echo Cmd:        %TTS_CMD%
 echo Video:      %VIDEO_FLAGS%
 echo Watermark:  off
+echo Layout:     body text starts at top
 echo Pipeline:   text/script first, then images, then audio, then video
 echo.
 
-java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark %VIDEO_FLAGS%
+java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
 
 echo.
 echo Done.
