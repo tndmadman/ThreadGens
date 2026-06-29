@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'tndmadman'
-version = '0.2.0-local-ai'
+version = '0.3.0-kokoro-tts'
 
 repositories {
     mavenCentral()
