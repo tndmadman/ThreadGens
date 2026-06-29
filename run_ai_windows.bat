@@ -5,21 +5,40 @@ cd /d "%~dp0"
 set "MODEL=llama3.1:8b"
 set "COUNT=10"
 set "TOPIC=weird everyday stories"
-set "VOICE=en_US-lessac-medium"
 set "TTS=piper"
+set "VOICE=en_US-lessac-medium"
 set "MAKE_VIDEO=N"
 set "VIDEO_FLAGS="
 set "VOICE_DIR=voices"
 set "PIPER_CMD=%~dp0piper\piper.exe"
+set "PYTHON_CMD=python"
+set "TTS_CMD="
 
 echo.
 echo ThreadGens local AI runner
+echo Branch: feature/kokoro-tts
 echo.
+
+echo Choose TTS engine:
+echo 1. Piper  - fast fallback, lower quality
+echo 2. Kokoro - better local voice, uses Python
+echo.
+set /p "TTS_CHOICE=Choice [1/2]: "
+if "%TTS_CHOICE%"=="2" set "TTS=kokoro"
+if /I "%TTS_CHOICE%"=="kokoro" set "TTS=kokoro"
+
+if /I "%TTS%"=="kokoro" goto kokoro_setup
+goto piper_setup
+
+:piper_setup
+set "TTS=piper"
+set "VOICE=en_US-lessac-medium"
+set "TTS_CMD=%PIPER_CMD%"
 
 if exist "%PIPER_CMD%" goto piper_ok
 where piper >nul 2>nul
 if not errorlevel 1 (
-  set "PIPER_CMD=piper"
+  set "TTS_CMD=piper"
   goto piper_ok
 )
 
@@ -27,28 +46,26 @@ echo Piper was not found.
 echo Checked: %~dp0piper\piper.exe
 echo Also checked Windows PATH.
 echo.
-echo Put piper.exe in the local piper folder, or install Piper and add it to PATH.
-echo You can also paste the full path now.
-set /p "PIPER_CMD=Full path to piper.exe, or blank to stop: "
-if "%PIPER_CMD%"=="" (
-  echo Stopping. Piper is required for voice/audio.
+echo Put piper.exe in the local piper folder, install Piper to PATH, or paste the full path now.
+set /p "TTS_CMD=Full path to piper.exe, or blank to stop: "
+if "%TTS_CMD%"=="" (
+  echo Stopping. Piper is required when using Piper TTS.
   pause
   exit /b 1
 )
 
 :piper_ok
-echo Piper command: %PIPER_CMD%
-
+echo Piper command: %TTS_CMD%
 if not exist "%VOICE_DIR%" mkdir "%VOICE_DIR%"
 
 echo.
 set /p "GETVOICE=Download another Piper voice? y/N: "
 if /I "%GETVOICE%"=="Y" goto voice_menu
-goto after_voice_download
+goto after_tts_setup
 
 :voice_menu
 echo.
-echo Choose a voice to download. You can type the number OR the exact voice name:
+echo Choose a Piper voice to download. You can type the number OR the exact voice name:
 echo 1. en_US-lessac-medium   female US medium
 echo 2. en_US-amy-medium      female US medium
 echo 3. en_US-ryan-high       male US high
@@ -89,7 +106,7 @@ set /p "DL_VOICE=Voice file name without .onnx: "
 set /p "DL_BASE=Base URL folder containing the .onnx and .onnx.json files: "
 if "%DL_BASE%"=="" (
   echo No URL entered. Skipping download.
-  goto after_voice_download
+  goto after_tts_setup
 )
 
 :download_voice
@@ -98,13 +115,48 @@ echo Downloading %DL_VOICE%...
 curl.exe -L -f -o "%VOICE_DIR%\%DL_VOICE%.onnx" "%DL_BASE%/%DL_VOICE%.onnx"
 if errorlevel 1 (
   echo Voice model download failed. Not selecting this voice.
-  goto after_voice_download
+  goto after_tts_setup
 )
 curl.exe -L -f -o "%VOICE_DIR%\%DL_VOICE%.onnx.json" "%DL_BASE%/%DL_VOICE%.onnx.json"
 if errorlevel 1 echo Warning: voice config download may have failed.
 set "VOICE=%DL_VOICE%"
+goto after_tts_setup
 
-:after_voice_download
+:kokoro_setup
+set "TTS=kokoro"
+set "VOICE=af_heart"
+set "TTS_CMD=%PYTHON_CMD%"
+
+where %PYTHON_CMD% >nul 2>nul
+if errorlevel 1 (
+  echo Python was not found in PATH.
+  set /p "TTS_CMD=Full path to python.exe, or blank to stop: "
+  if "%TTS_CMD%"=="" (
+    echo Stopping. Python is required for Kokoro TTS.
+    pause
+    exit /b 1
+  )
+)
+
+echo.
+echo Kokoro needs Python packages: kokoro soundfile numpy
+set /p "INSTALL_KOKORO=Install/update Kokoro packages now? y/N: "
+if /I "%INSTALL_KOKORO%"=="Y" (
+  "%TTS_CMD%" -m pip install --upgrade pip
+  "%TTS_CMD%" -m pip install --upgrade kokoro soundfile numpy
+)
+
+echo.
+echo Common Kokoro voices:
+echo af_heart   af_bella   af_nicole
+echo am_adam    am_michael
+echo bf_emma    bm_george
+echo.
+set /p "VOICE=Kokoro voice [af_heart]: "
+if "%VOICE%"=="" set "VOICE=af_heart"
+goto after_tts_setup
+
+:after_tts_setup
 echo.
 echo Building Java files...
 javac -d out src\redditTxtToImg\*.java
@@ -114,12 +166,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo.
-echo Available Piper voices:
-java -cp out redditTxtToImg.RedditScreenshotGenerator --list-voices
-echo.
-set /p "VOICE=Voice name or ONNX path [%VOICE%]: "
-if "%VOICE%"=="" set "VOICE=en_US-lessac-medium"
+if /I "%TTS%"=="piper" (
+  echo.
+  echo Available voices:
+  java -cp out redditTxtToImg.RedditScreenshotGenerator --list-voices
+  echo.
+  set /p "VOICE=Voice name or ONNX path [%VOICE%]: "
+  if "%VOICE%"=="" set "VOICE=en_US-lessac-medium"
+)
 
 echo.
 set /p "TOPIC=Topic [weird everyday stories]: "
@@ -136,13 +190,15 @@ if /I "%MAKE_VIDEO%"=="Y" set "VIDEO_FLAGS=--video --concat-video"
 echo.
 echo Topic: %TOPIC%
 echo Count: %COUNT%
+echo TTS:   %TTS%
 echo Voice: %VOICE%
-echo Piper: %PIPER_CMD%
+echo Cmd:   %TTS_CMD%
 echo Video: %VIDEO_FLAGS%
 echo Watermark: off
+echo Pipeline: text/script first, then images, then audio, then video
 echo.
 
-java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%PIPER_CMD%" --voice "%VOICE%" --no-watermark %VIDEO_FLAGS%
+java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark %VIDEO_FLAGS%
 
 echo.
 echo Done.
