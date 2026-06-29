@@ -10,6 +10,11 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
+$env:THREADGENS_KOKORO_VERBOSE = '0'
+$env:PYTHONWARNINGS = 'ignore'
+$env:HF_HUB_DISABLE_PROGRESS_BARS = '1'
+$env:TOKENIZERS_PARALLELISM = 'false'
+
 $TtsEngine = 'kokoro'
 $KokoroPython = Join-Path $RepoRoot '.venv-kokoro\Scripts\python.exe'
 $OutputRoot = Join-Path $RepoRoot ('output\batch_videos\' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
@@ -52,6 +57,7 @@ Write-Step 'ThreadGens batch video creator'
 Write-Host "Input file: $InputPath"
 Write-Host "Output root: $OutputRoot"
 Write-Host "Defaults: model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
+Write-Host 'Kokoro console: quiet'
 if ($KeepOllamaLoaded) {
     Write-Host 'Ollama unload: disabled, keeping model loaded between videos' -ForegroundColor Green
 } else {
