@@ -43,7 +43,14 @@ NOUNS = [
     "Mango", "Signal", "Lantern", "Skater", "Courier", "Fox", "Miner", "Runner",
 ]
 
-SEPARATORS = ["", "_", "", "", "x", "The"]
+REDDIT_WORDS = [
+    "coffee", "toast", "parking", "garage", "laundry", "couch", "fridge", "basement",
+    "neighbor", "mailbox", "receipt", "cereal", "soup", "noodles", "trash", "pickup",
+    "driveway", "keyboard", "headphones", "blanket", "porch", "window", "wallet", "folder",
+    "dog", "cat", "bird", "fish", "moth", "rat", "opossum", "pigeon", "mango", "potato",
+    "salt", "pepper", "static", "signal", "router", "bluetooth", "battery", "charger",
+    "sleep", "midnight", "morning", "Tuesday", "weekend", "shift", "break", "receipt",
+]
 
 FACE_DETAILS = [
     "messy hair", "short hair", "curly hair", "beanie", "hoodie", "round glasses",
@@ -56,6 +63,12 @@ BACKGROUND_DETAILS = [
     "bedroom background", "plain wall background", "desk setup background", "soft blurred room",
     "car seat background", "coffee shop background", "night street background", "apartment hallway background",
     "computer monitor glow", "bookshelf background", "garage background", "laundromat background",
+]
+
+BAD_USERNAME_WORDS = [
+    "ninja", "wizard", "dragon", "gamer", "epic", "pro", "legend", "king", "queen", "lord",
+    "master", "beast", "alpha", "sigma", "xoxo", "official", "real", "admin", "mod",
+    "reddit", "redditor", "username", "user", "ai", "bot", "chatgpt", "influencer",
 ]
 
 NEGATIVE_PROMPT = (
@@ -71,37 +84,54 @@ def seed_int(value: str) -> int:
 
 def make_random_username(rng: random.Random, used: set[str]) -> str:
     for _ in range(500):
-        adjective = rng.choice(ADJECTIVES)
-        noun = rng.choice(NOUNS)
-        sep = rng.choice(SEPARATORS)
-        number = rng.randint(2, 9999)
-        if sep == "":
-            name = f"{adjective}{noun}{number if rng.random() < 0.65 else ''}"
-        elif sep == "The":
-            name = f"{adjective}The{noun}{number if rng.random() < 0.45 else ''}"
-        else:
-            name = f"{adjective}{sep}{noun}{number if rng.random() < 0.55 else ''}"
+        word_a = rng.choice(REDDIT_WORDS).lower()
+        word_b = rng.choice(REDDIT_WORDS).lower()
+        number = rng.choice(["", "", "", str(rng.randint(7, 99)), str(rng.randint(1984, 2006))])
+        template = rng.choice([
+            f"{word_a}_{word_b}{number}",
+            f"{word_a}{word_b}{number}",
+            f"throwaway_{word_a}{number}",
+            f"{word_a}_alt",
+            f"not_{word_a}",
+            f"probably_{word_a}",
+            f"{word_a}_account{rng.randint(2, 9)}",
+        ])
+        name = clean_username(template)
         if is_valid_username(name, used):
             used.add(name)
             return name
-    fallback = f"User{rng.randint(100000, 999999)}"
+    fallback = f"throwaway_{rng.randint(1000, 9999)}"
     used.add(fallback)
     return fallback
 
 
 def is_valid_username(name: str, used: set[str]) -> bool:
-    return 5 <= len(name) <= 24 and name not in used and re.fullmatch(r"[A-Za-z0-9_]+", name) is not None
+    if name in used:
+        return False
+    if re.fullmatch(r"[a-z0-9_-]{5,20}", name) is None:
+        return False
+    if name.startswith(("_", "-")) or name.endswith(("_", "-")):
+        return False
+    if "__" in name or "--" in name or "_-" in name or "-_" in name:
+        return False
+    if re.search(r"\d{5,}$", name):
+        return False
+    if any(bad in name for bad in BAD_USERNAME_WORDS):
+        return False
+    return True
 
 
 def clean_username(raw: str) -> str:
-    name = raw.strip()
+    name = raw.strip().lower()
     name = re.sub(r"^[-*•\d.)\s]+", "", name)
     name = re.sub(r"^(username|user|name)\s*[:=-]\s*", "", name, flags=re.IGNORECASE)
     name = name.replace("u/", "").replace("@", "")
-    name = re.sub(r"[^A-Za-z0-9_ ]+", "", name)
-    name = re.sub(r"\s+", "", name)
-    if len(name) > 24:
-        name = name[:24]
+    name = re.sub(r"\s+", "_", name)
+    name = re.sub(r"[^a-z0-9_-]+", "", name)
+    name = re.sub(r"[_-]{2,}", "_", name)
+    name = name.strip("_-")
+    if len(name) > 20:
+        name = name[:20].strip("_-")
     return name
 
 
@@ -122,14 +152,34 @@ def request_bytes(url: str, timeout: int = 60) -> bytes:
 
 def request_ollama_usernames(ollama_url: str, model: str, count: int, used: set[str]) -> List[str]:
     prompt = (
-        f"Generate exactly {count} unique Reddit-style usernames for fictional social media profiles.\n"
-        "Rules:\n"
-        "- Return one username per line.\n"
-        "- Use only letters, numbers, and underscores.\n"
-        "- 5 to 24 characters each.\n"
-        "- No @ symbol, no u/ prefix, no bullets, no numbering, no explanations.\n"
-        "- Make them varied, casual, believable, and slightly funny.\n"
-        "- Do not use real people's names.\n"
+        f"Generate exactly {count} realistic Reddit usernames for fictional everyday users.\n"
+        "Return one username per line only. No bullets. No numbering. No explanations.\n\n"
+        "Style rules:\n"
+        "- Make them look like normal Reddit accounts, not gamer tags.\n"
+        "- Mostly lowercase.\n"
+        "- Use simple boring words, alt accounts, throwaways, habits, objects, mild jokes, or everyday phrases.\n"
+        "- Allowed characters: lowercase letters, numbers, underscores, and hyphens.\n"
+        "- 5 to 20 characters each.\n"
+        "- Optional small numbers are okay, but no huge random number strings.\n"
+        "- Do not use celebrity names, real full names, brands, Reddit, redditor, admin, mod, bot, AI, gamer, ninja, wizard, dragon, king, queen, legend, pro, official, or influencer.\n"
+        "- Avoid camelCase and TitleCase.\n\n"
+        "Good examples:\n"
+        "throwaway_couch\n"
+        "parking_lot_22\n"
+        "coffee_receipt\n"
+        "not_my_fridge\n"
+        "blue_civic_guy\n"
+        "soup_account3\n"
+        "probably_tuesday\n"
+        "old_router_9\n"
+        "porch_light\n"
+        "laundry_alt\n\n"
+        "Bad examples:\n"
+        "EpicDragonKing\n"
+        "CoolGamer420\n"
+        "RedditUser12345\n"
+        "xXShadowNinjaXx\n"
+        "InfluencerVibes\n"
     )
     payload = {"model": model, "prompt": prompt, "stream": False}
     response = request_json("POST", ollama_url, payload, timeout=180)
@@ -163,7 +213,7 @@ def generate_usernames(args: argparse.Namespace, rng: random.Random, used: set[s
             break
 
     if len(names) < args.count:
-        print(f"Ollama only produced {len(names)} usable usernames. Filling the rest with fast random names.")
+        print(f"Ollama only produced {len(names)} usable usernames. Filling the rest with fast random Reddit-like names.")
         while len(names) < args.count:
             names.append(make_random_username(rng, used))
     return names[:args.count]
@@ -190,7 +240,7 @@ def build_prompt(username: str, rng: random.Random, style_prompt: str) -> str:
     details = rng.sample(FACE_DETAILS, k=3)
     background = rng.choice(BACKGROUND_DETAILS)
     age = rng.choice(["adult in their 20s", "adult in their 30s", "adult in their 40s"])
-    vibe = username.replace("_", " ")
+    vibe = username.replace("_", " ").replace("-", " ")
     return (
         f"fictional {age}, close-up social media profile selfie, face centered, shoulders visible, "
         f"natural candid phone photo, {background}, {', '.join(details)}, "
