@@ -9,6 +9,8 @@ $VoiceConfigFile = Join-Path $VoiceDir "$VoiceName.onnx.json"
 $PiperDir = Join-Path $PSScriptRoot 'piper'
 $PiperExe = Join-Path $PiperDir 'piper.exe'
 $KokoroRequirements = Join-Path $PSScriptRoot 'requirements-kokoro.txt'
+$KokoroVenvDir = Join-Path $PSScriptRoot '.venv-kokoro'
+$KokoroPython = Join-Path $KokoroVenvDir 'Scripts\python.exe'
 
 function Write-Step($Message) {
     Write-Host "`n== $Message ==" -ForegroundColor Cyan
@@ -43,11 +45,6 @@ function Refresh-Path {
             $env:Path = "$path;$env:Path"
         }
     }
-
-    $pythonUserScripts = Join-Path $env:APPDATA 'Python\Python312\Scripts'
-    if (Test-Path $pythonUserScripts) {
-        $env:Path = "$pythonUserScripts;$env:Path"
-    }
 }
 
 function Install-WithWinget($Id, $Name) {
@@ -74,7 +71,7 @@ function Ensure-Java {
 }
 
 function Ensure-Python {
-    Write-Step 'Checking Python for Kokoro TTS'
+    Write-Step 'Checking Python for Kokoro TTS venv'
     Refresh-Path
     if (-not (Test-Command 'python')) {
         Install-WithWinget 'Python.Python.3.12' 'Python 3.12'
@@ -172,7 +169,7 @@ function Ensure-PiperVoice {
 }
 
 function Ensure-Kokoro {
-    Write-Step 'Installing Kokoro TTS dependencies'
+    Write-Step 'Installing Kokoro TTS in isolated venv'
     Ensure-Python
 
     if (-not (Test-Path $KokoroRequirements)) {
@@ -180,14 +177,25 @@ function Ensure-Kokoro {
         @('kokoro', 'soundfile', 'numpy') | Set-Content -Path $KokoroRequirements -Encoding UTF8
     }
 
-    Write-Host 'Upgrading pip...'
-    python -m pip install --upgrade pip
+    if (-not (Test-Path $KokoroPython)) {
+        Write-Host "Creating Kokoro venv: $KokoroVenvDir"
+        python -m venv $KokoroVenvDir
+    } else {
+        Write-Host "Using existing Kokoro venv: $KokoroVenvDir"
+    }
 
-    Write-Host 'Installing Kokoro Python packages...'
-    python -m pip install --upgrade -r $KokoroRequirements
+    if (-not (Test-Path $KokoroPython)) {
+        throw "Kokoro venv python was not created: $KokoroPython"
+    }
 
-    Write-Host 'Testing Kokoro imports...'
-    python -c "from kokoro import KPipeline; import soundfile; import numpy; print('Kokoro import test passed')"
+    Write-Host 'Upgrading pip inside Kokoro venv...'
+    & $KokoroPython -m pip install --upgrade pip
+
+    Write-Host 'Installing Kokoro Python packages inside Kokoro venv...'
+    & $KokoroPython -m pip install --upgrade -r $KokoroRequirements
+
+    Write-Host 'Testing Kokoro imports inside Kokoro venv...'
+    & $KokoroPython -c "from kokoro import KPipeline; import soundfile; import numpy; print('Kokoro venv import test passed')"
 }
 
 function Build-ThreadGens {
@@ -211,6 +219,9 @@ Build-ThreadGens
 Write-Step 'Setup complete'
 Write-Host 'Run this next:' -ForegroundColor Green
 Write-Host '  run_ai_windows.bat' -ForegroundColor Green
+Write-Host ''
+Write-Host 'Kokoro now uses this isolated Python:' -ForegroundColor Green
+Write-Host "  $KokoroPython" -ForegroundColor Green
 Write-Host ''
 Write-Host 'Generated images will go to output\'
 Write-Host 'Generated audio will go to output\audio\'
