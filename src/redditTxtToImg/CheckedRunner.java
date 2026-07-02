@@ -37,16 +37,17 @@ public class CheckedRunner {
     public static void runOrThrow(String[] args) throws IOException, InterruptedException {
         String[] normalizedArgs = normalizeArgsForRenderer(args);
         ExpectedOutputs expected = ExpectedOutputs.fromArgs(normalizedArgs);
+        String[] rendererArgs = stripPlatformArgs(normalizedArgs);
 
         if (expected.skipVerification) {
-            runSelectedPlatform(expected.platform, normalizedArgs);
+            runSelectedPlatform(expected.platform, rendererArgs);
             return;
         }
 
         expected.validateRequestedModes();
         expected.deleteExpectedArtifacts();
 
-        runSelectedPlatform(expected.platform, normalizedArgs);
+        runSelectedPlatform(expected.platform, rendererArgs);
 
         expected.verifyArtifactsExist();
     }
@@ -61,6 +62,28 @@ public class CheckedRunner {
             return;
         }
         throw new IllegalArgumentException("Unsupported platform: " + platform + ". Supported values: reddit, x.");
+    }
+
+    /**
+     * Platform is consumed by CheckedRunner. The raw renderers do not need it, and values like
+     * --platform x can otherwise be mistaken for positional output directories.
+     */
+    private static String[] stripPlatformArgs(String[] args) {
+        if (args == null || args.length == 0) {
+            return new String[0];
+        }
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if ("--platform".equals(arg)) {
+                if (i + 1 < args.length) {
+                    i++;
+                }
+                continue;
+            }
+            result.add(arg);
+        }
+        return result.toArray(new String[0]);
     }
 
     /**
