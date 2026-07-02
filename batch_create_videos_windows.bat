@@ -6,6 +6,7 @@ set "INPUT_FILE=data\batch_videos.txt"
 set "COUNT=10"
 set "MODEL=llama3.1:8b"
 set "VOICE=af_heart"
+set "PLATFORM=reddit"
 set "KEEP_OLLAMA=N"
 set "KEEP_OLLAMA_FLAG="
 set "THREADGENS_KOKORO_VERBOSE=0"
@@ -25,12 +26,23 @@ echo   line 2 = body text
 echo   line 3 = next title
 echo   line 4 = next body text
 echo.
+echo Choose platform/thread style:
+echo 1. Reddit thread
+echo 2. X post and replies
+echo.
+set /p "PLATFORM_CHOICE=Choice [1/2, default 1]: "
+if "%PLATFORM_CHOICE%"=="2" set "PLATFORM=x"
+if /I "%PLATFORM_CHOICE%"=="x" set "PLATFORM=x"
+if /I "%PLATFORM_CHOICE%"=="reddit" set "PLATFORM=reddit"
+if "%PLATFORM_CHOICE%"=="" set "PLATFORM=reddit"
+
 echo Defaults copied from run_ai_windows.bat:
-echo   model: %MODEL%
-echo   count: %COUNT%
-echo   tts:   kokoro
-echo   voice: %VOICE%
-echo   video: stitched MP4, watermark off, body text top-aligned
+echo   platform: %PLATFORM%
+echo   model:    %MODEL%
+echo   count:    %COUNT%
+echo   tts:      kokoro
+echo   voice:    %VOICE%
+echo   video:    stitched MP4, watermark off, body text top-aligned
 echo   kokoro console: quiet
 echo.
 set /p "KEEP_OLLAMA=Keep Ollama loaded between videos? y/N: "
@@ -50,7 +62,7 @@ if not exist "tools\batch_create_videos.ps1" (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" %KEEP_OLLAMA_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -Platform "%PLATFORM%" %KEEP_OLLAMA_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
