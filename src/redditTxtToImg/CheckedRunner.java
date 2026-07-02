@@ -4,8 +4,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
-import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 
@@ -24,6 +25,8 @@ public class CheckedRunner {
             "--video-dir", "--video-command", "--fps", "--video-timeout", "--final-video"
     );
 
+    private static final Set<String> VOICE_DEPENDENCY_OPTIONS = Set.of("--tts", "--voice-dir");
+
     public static void main(String[] args) {
         try {
             runOrThrow(args);
@@ -35,15 +38,51 @@ public class CheckedRunner {
     }
 
     public static void runOrThrow(String[] args) throws IOException, InterruptedException {
-        ExpectedOutputs expected = ExpectedOutputs.fromArgs(args);
-        Instant started = Instant.now().minusSeconds(2);
-
-        RedditScreenshotGenerator.main(args);
+        String[] normalizedArgs = normalizeArgsForRenderer(args);
+        ExpectedOutputs expected = ExpectedOutputs.fromArgs(normalizedArgs);
 
         if (expected.skipVerification) {
+            RedditScreenshotGenerator.main(normalizedArgs);
             return;
         }
-        expected.verifyFreshArtifacts(started);
+
+        expected.validateRequestedModes();
+        expected.deleteExpectedArtifacts();
+
+        RedditScreenshotGenerator.main(normalizedArgs);
+
+        expected.verifyArtifactsExist();
+    }
+
+    /**
+     * The renderer resolves --voice immediately using the current --tts and --voice-dir values.
+     * Moving those dependencies before --voice makes CLI argument order forgiving while leaving
+     * RedditScreenshotGenerator untouched.
+     */
+    private static String[] normalizeArgsForRenderer(String[] args) {
+        if (args == null || args.length == 0 || !Arrays.asList(args).contains("--voice")) {
+            return args == null ? new String[0] : args.clone();
+        }
+
+        List<String> dependencies = new ArrayList<>();
+        List<String> rest = new ArrayList<>();
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if (VOICE_DEPENDENCY_OPTIONS.contains(arg) && i + 1 < args.length) {
+                dependencies.add(arg);
+                dependencies.add(args[++i]);
+                continue;
+            }
+            rest.add(arg);
+        }
+
+        int voiceIndex = rest.indexOf("--voice");
+        if (voiceIndex < 0 || dependencies.isEmpty()) {
+            return args.clone();
+        }
+
+        rest.addAll(voiceIndex, dependencies);
+        return rest.toArray(new String[0]);
     }
 
     private static class ExpectedOutputs {
@@ -127,22 +166,44 @@ public class CheckedRunner {
             return expected;
         }
 
-        void verifyFreshArtifacts(Instant started) throws IOException {
+        void validateRequestedModes() throws IOException {
+            if (createVideo && !ttsEnabled()) {
+                throw new IOException("Video was requested, but TTS is disabled. Use --tts kokoro or --tts piper before --video.");
+            }
+        }
+
+        void deleteExpectedArtifacts() throws IOException {
+            for (Path path : expectedArtifactPaths()) {
+                Files.deleteIfExists(path);
+            }
+        }
+
+        void verifyArtifactsExist() throws IOException {
+            for (Path path : expectedArtifactPaths()) {
+                if (!Files.exists(path)) {
+                    throw new IOException("Expected output was not created: " + path);
+                }
+            }
+        }
+
+        private List<Path> expectedArtifactPaths() throws IOException {
             int expectedCount = expectedCount();
+            List<Path> paths = new ArrayList<>();
             for (int i = 0; i < expectedCount; i++) {
                 String baseName = i + outputPrefix;
-                requireFresh(outputDirectory.resolve(baseName + ".png"), started, "image");
+                paths.add(outputDirectory.resolve(baseName + ".png"));
                 if (ttsEnabled()) {
-                    requireFresh(audioDirectory.resolve(baseName + ".wav"), started, "audio");
+                    paths.add(audioDirectory.resolve(baseName + ".wav"));
                     if (createVideo) {
-                        requireFresh(videoDirectory.resolve(baseName + ".mp4"), started, "video clip");
+                        paths.add(videoDirectory.resolve(baseName + ".mp4"));
                     }
                 }
             }
 
             if (ttsEnabled() && createVideo && concatVideo && expectedCount > 0) {
-                requireFresh(videoDirectory.resolve(finalVideoName), started, "final video");
+                paths.add(videoDirectory.resolve(finalVideoName));
             }
+            return paths;
         }
 
         private int expectedCount() throws IOException {
@@ -168,16 +229,6 @@ public class CheckedRunner {
 
         private boolean ttsEnabled() {
             return ttsEngine != null && !ttsEngine.isBlank() && !"none".equalsIgnoreCase(ttsEngine);
-        }
-
-        private static void requireFresh(Path path, Instant started, String label) throws IOException {
-            if (!Files.exists(path)) {
-                throw new IOException("Expected " + label + " was not created: " + path);
-            }
-            FileTime modified = Files.getLastModifiedTime(path);
-            if (modified.toInstant().isBefore(started)) {
-                throw new IOException("Expected " + label + " was not refreshed during this run: " + path);
-            }
         }
 
         private static int parseInt(String value, int fallback) {
