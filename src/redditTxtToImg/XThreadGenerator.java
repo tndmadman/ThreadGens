@@ -24,14 +24,14 @@ import java.util.Random;
 import javax.imageio.ImageIO;
 
 /**
- * X/Twitter-style post and reply renderer.
+ * X-style post and reply renderer.
  *
- * This intentionally stays separate from RedditScreenshotGenerator so the existing Reddit renderer
- * remains stable. It follows the same pipeline: optional local LLM script generation, PNG frames,
- * optional TTS WAVs, optional MP4 clips, and optional final stitched MP4.
+ * Kept separate from the Reddit renderer so the original Reddit path stays stable.
  */
 public class XThreadGenerator {
     private static final int MARGIN = 64;
+    private static final int PHONE_TOP = 76;
+    private static final int TOP_BAR_HEIGHT = 132;
     private static final int CARD_TOP = 210;
     private static final int CARD_BOTTOM_PADDING = 260;
 
@@ -70,7 +70,6 @@ public class XThreadGenerator {
     public static void main(String[] args) {
         Settings settings = Settings.fromArgs(args);
         System.setProperty("java.awt.headless", "true");
-
         try {
             if (settings.listVoices) {
                 VoiceCatalog.printVoices(settings.voiceDirectory);
@@ -89,7 +88,6 @@ public class XThreadGenerator {
 
     public void generateImage() throws IOException {
         Files.createDirectories(outputDirectory);
-
         BufferedImage image = new BufferedImage(settings.width, settings.height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g2d = image.createGraphics();
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -131,27 +129,25 @@ public class XThreadGenerator {
 
     private void drawPhoneFrame(Graphics2D g2d) {
         g2d.setColor(Color.BLACK);
-        g2d.fillRoundRect(cardLeft(), 76, cardWidth(), settings.height - 152, 46, 46);
+        g2d.fillRoundRect(cardLeft(), PHONE_TOP, cardWidth(), settings.height - (PHONE_TOP * 2), 46, 46);
         g2d.setColor(new Color(47, 51, 54));
         g2d.setStroke(new BasicStroke(2));
-        g2d.drawRoundRect(cardLeft(), 76, cardWidth(), settings.height - 152, 46, 46);
+        g2d.drawRoundRect(cardLeft(), PHONE_TOP, cardWidth(), settings.height - (PHONE_TOP * 2), 46, 46);
     }
 
     private void drawTopBar(Graphics2D g2d) {
         int x = cardLeft();
-        int y = 76;
+        int y = PHONE_TOP;
         int w = cardWidth();
-
         g2d.setColor(Color.BLACK);
-        g2d.fillRoundRect(x, y, w, 132, 46, 46);
+        g2d.fillRoundRect(x, y, w, TOP_BAR_HEIGHT, 46, 46);
         g2d.setColor(new Color(47, 51, 54));
         g2d.setStroke(new BasicStroke(2));
-        g2d.drawLine(x, y + 132, x + w, y + 132);
+        g2d.drawLine(x, y + TOP_BAR_HEIGHT, x + w, y + TOP_BAR_HEIGHT);
 
         g2d.setColor(Color.WHITE);
         g2d.setFont(new Font(settings.fontName, Font.BOLD, 42));
         g2d.drawString(isOriginalPost() ? "Post" : "Thread", x + 52, y + 84);
-
         g2d.setFont(new Font(settings.fontName, Font.BOLD, 48));
         g2d.drawString("X", x + (w / 2) - 16, y + 86);
     }
@@ -180,15 +176,12 @@ public class XThreadGenerator {
         drawHeader(g2d, contentX, avatarY + 30);
         drawMoreDots(g2d, contentRight - 34, avatarY + 26);
 
-        int textTop = avatarY + avatarSize + (isOriginalPost() ? 54 : 38);
-        int maxTextWidth = contentRight - x - 46;
-        if (!isOriginalPost()) {
-            textTop = avatarY + 126;
-            maxTextWidth = contentRight - contentX;
-        }
-        drawTweetText(g2d, isOriginalPost() ? x + 46 : contentX, textTop, maxTextWidth, bottom - 260);
+        int textX = isOriginalPost() ? x + 46 : contentX;
+        int textTop = isOriginalPost() ? avatarY + avatarSize + 54 : avatarY + 172;
+        int maxTextWidth = isOriginalPost() ? contentRight - x - 46 : contentRight - contentX;
+        drawTweetText(g2d, textX, textTop, maxTextWidth, bottom - 260);
 
-        drawTimestampAndViews(g2d, x + 46, bottom - 205, contentRight);
+        drawTimestampAndViews(g2d, x + 46, bottom - 205);
         drawDivider(g2d, x + 46, bottom - 170, contentRight);
         drawActionRow(g2d, x + 64, bottom - 110, contentRight - 40);
         drawDivider(g2d, x + 46, bottom - 58, contentRight);
@@ -211,12 +204,12 @@ public class XThreadGenerator {
             g2d.drawString(meta, x, baseline + 36);
         } else {
             g2d.drawString(meta, x, baseline + 32);
-            g2d.drawString("Replying to @" + settings.originalHandle, x, baseline + 68);
+            g2d.drawString("Replying to @" + settings.originalHandle, x, baseline + 74);
         }
     }
 
     private void drawTweetText(Graphics2D g2d, int x, int y, int maxWidth, int maxBottom) {
-        int fontSize = isOriginalPost() ? 56 : 46;
+        int fontSize = isOriginalPost() ? 56 : 44;
         Font textFont = new Font(settings.fontName, Font.PLAIN, fontSize);
         g2d.setFont(textFont);
         g2d.setColor(Color.WHITE);
@@ -234,7 +227,7 @@ public class XThreadGenerator {
         }
     }
 
-    private void drawTimestampAndViews(Graphics2D g2d, int x, int y, int right) {
+    private void drawTimestampAndViews(Graphics2D g2d, int x, int y) {
         g2d.setFont(new Font(settings.fontName, Font.PLAIN, 26));
         g2d.setColor(new Color(113, 118, 123));
         String line = isOriginalPost()
@@ -398,7 +391,7 @@ public class XThreadGenerator {
         List<FrameJob> jobs = new ArrayList<>();
         Random rand = new Random();
 
-        List<String> lines = comments.getLines();
+        List<String> lines = new ArrayList<>(comments.getLines());
         if (settings.shuffle) {
             Collections.shuffle(lines, rand);
         }
@@ -428,20 +421,8 @@ public class XThreadGenerator {
                     : currentText;
 
             XThreadGenerator generator = new XThreadGenerator(
-                    currentFileName,
-                    author,
-                    handle,
-                    profileName.getRandomProfileName(),
-                    currentText,
-                    i,
-                    total,
-                    replies,
-                    reposts,
-                    likes,
-                    views,
-                    settings.outputDirectory,
-                    settings
-            );
+                    currentFileName, author, handle, profileName.getRandomProfileName(), currentText,
+                    i, total, replies, reposts, likes, views, settings.outputDirectory, settings);
             jobs.add(new FrameJob(narrationText, imagePath, audioPath, videoPath, generator));
         }
 
@@ -548,7 +529,6 @@ public class XThreadGenerator {
         int width = 1080;
         int height = 1920;
         int maxViews = 50000;
-        int maxLikes = 15000;
         int count = -1;
         int autoTextCount = 10;
         int ttsTimeoutSeconds = 120;
