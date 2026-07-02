@@ -22,7 +22,7 @@ set "TOKENIZERS_PARALLELISM=false"
 
 echo.
 echo ThreadGens local AI runner
-echo Branch: main
+echo Branch: fix/runtime-hardening
 echo.
 
 echo Choose TTS engine:
@@ -177,7 +177,7 @@ if errorlevel 1 (
 if /I "%TTS%"=="piper" (
   echo.
   echo Available voices:
-  java -cp out redditTxtToImg.RedditScreenshotGenerator --list-voices
+  java -cp out redditTxtToImg.CheckedRunner --list-voices
   echo.
   set /p "VOICE=Voice name or ONNX path [%VOICE%]: "
   if "%VOICE%"=="" set "VOICE=en_US-lessac-medium"
@@ -213,7 +213,13 @@ echo Kokoro log: quiet
 echo Pipeline:   text/script first, then images, then audio, then video
 echo.
 
-java -cp out redditTxtToImg.RedditScreenshotGenerator --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+java -cp out redditTxtToImg.CheckedRunner --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+if errorlevel 1 (
+  echo.
+  echo Generation failed. Check the error above.
+  pause
+  exit /b 1
+)
 
 echo.
 echo Done.
