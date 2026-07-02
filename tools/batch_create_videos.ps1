@@ -3,6 +3,7 @@ param(
     [int]$Count = 10,
     [string]$Model = 'llama3.1:8b',
     [string]$Voice = 'af_heart',
+    [string]$Platform = 'reddit',
     [switch]$KeepOllamaLoaded
 )
 
@@ -15,9 +16,14 @@ $env:PYTHONWARNINGS = 'ignore'
 $env:HF_HUB_DISABLE_PROGRESS_BARS = '1'
 $env:TOKENIZERS_PARALLELISM = 'false'
 
+$Platform = $Platform.ToLowerInvariant()
+if ($Platform -notin @('reddit', 'x')) {
+    throw "Unsupported platform: $Platform. Use reddit or x."
+}
+
 $TtsEngine = 'kokoro'
 $KokoroPython = Join-Path $RepoRoot '.venv-kokoro\Scripts\python.exe'
-$OutputRoot = Join-Path $RepoRoot ('output\batch_videos\' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+$OutputRoot = Join-Path $RepoRoot ('output\batch_videos\' + $Platform + '_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
 $FinalDir = Join-Path $OutputRoot 'final_videos'
 $InputPath = if ([System.IO.Path]::IsPathRooted($InputFile)) { $InputFile } else { Join-Path $RepoRoot $InputFile }
 
@@ -56,7 +62,7 @@ function Create-SampleInput($Path) {
 Write-Step 'ThreadGens batch video creator'
 Write-Host "Input file: $InputPath"
 Write-Host "Output root: $OutputRoot"
-Write-Host "Defaults: model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
+Write-Host "Defaults: platform=$Platform, model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
 Write-Host 'Kokoro console: quiet'
 if ($KeepOllamaLoaded) {
     Write-Host 'Ollama unload: disabled, keeping model loaded between videos' -ForegroundColor Green
@@ -127,6 +133,7 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
     $javaArgs = @(
         '-cp', 'out', 'redditTxtToImg.CheckedRunner',
         'data\comments.txt', $imageDir,
+        '--platform', $Platform,
         '--auto',
         '--post-title', $title,
         '--topic', $body,
