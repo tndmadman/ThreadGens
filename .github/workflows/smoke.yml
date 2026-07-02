@@ -26,3 +26,16 @@ jobs:
       - name: Verify smoke image
         shell: bash
         run: test -f output/0smoke.png
+
+      - name: Fail when requested input cannot regenerate stale output
+        shell: bash
+        run: |
+          mkdir -p output
+          touch output/0missing.png
+          ! java -cp out redditTxtToImg.CheckedRunner missing.txt output --count 1 --prefix missing
+          test ! -f output/0missing.png
+
+      - name: Fail when video is requested without TTS
+        shell: bash
+        run: |
+          ! java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --count 1 --prefix badvideo --video
