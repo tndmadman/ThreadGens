@@ -1,0 +1,28 @@
+name: Smoke Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Compile Java sources
+        run: javac -d out src/redditTxtToImg/*.java
+
+      - name: Run checked image generation smoke test
+        run: java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --count 1 --prefix smoke
+
+      - name: Verify smoke image
+        shell: bash
+        run: test -f output/0smoke.png
