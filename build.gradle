@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'tndmadman'
-version = '0.3.1-runtime-hardening'
+version = '0.4.0-x-platform'
 
 repositories {
     mavenCentral()
