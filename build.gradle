@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'tndmadman'
-version = '0.3.0-kokoro-tts'
+version = '0.3.1-runtime-hardening'
 
 repositories {
     mavenCentral()
@@ -12,12 +12,12 @@ repositories {
 sourceSets.main.java.srcDirs = ['src']
 
 application {
-    mainClass = 'redditTxtToImg.RedditScreenshotGenerator'
+    mainClass = 'redditTxtToImg.CheckedRunner'
 }
 
 jar {
     archiveBaseName = 'ThreadGens'
     manifest {
-        attributes 'Main-Class': 'redditTxtToImg.RedditScreenshotGenerator'
+        attributes 'Main-Class': 'redditTxtToImg.CheckedRunner'
     }
 }

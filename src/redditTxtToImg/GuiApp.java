@@ -8,10 +8,11 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 
 public class GuiApp {
     public static void main(String[] args) {
-        javax.swing.SwingUtilities.invokeLater(new Runnable() {
+        SwingUtilities.invokeLater(new Runnable() {
             public void run() {
                 open();
             }
@@ -46,15 +47,16 @@ public class GuiApp {
 
         JButton runButton = new JButton("Generate");
         runButton.addActionListener(event -> {
+            runButton.setEnabled(false);
             status.setText("Generating...");
             new Thread(() -> {
                 try {
-                    RedditScreenshotGenerator.main(new String[]{inputField.getText(), outputField.getText()});
-                    status.setText("Done: " + outputField.getText());
+                    CheckedRunner.runOrThrow(new String[]{inputField.getText(), outputField.getText()});
+                    setStatus(status, runButton, "Done: " + outputField.getText());
                 } catch (Exception ex) {
-                    status.setText("Failed: " + ex.getMessage());
+                    setStatus(status, runButton, "Failed: " + ex.getMessage());
                 }
-            }).start();
+            }, "threadgens-gui-runner").start();
         });
 
         JPanel form = new JPanel(new GridLayout(3, 2, 8, 8));
@@ -68,5 +70,12 @@ public class GuiApp {
         frame.add(form, BorderLayout.CENTER);
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
+    }
+
+    private static void setStatus(JLabel status, JButton runButton, String message) {
+        SwingUtilities.invokeLater(() -> {
+            status.setText(message);
+            runButton.setEnabled(true);
+        });
     }
 }

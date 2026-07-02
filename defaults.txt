@@ -1,5 +1,25 @@
+# Render defaults
 width=1080
 height=1920
 prefix=aithread
 style=reddit_dark
 centerShortComments=true
+
+# Local AI defaults
+postTitle=Finish this story in the comments
+topic=weird everyday stories
+llmModel=llama3.1:8b
+ollamaUrl=http://localhost:11434/api/generate
+unloadOllamaAfterText=true
+
+# TTS defaults
+ttsEngine=none
+ttsCommand=piper
+voiceDirectory=voices
+voiceModel=voices/en_US-lessac-medium.onnx
+audioDirectory=output/audio
+
+# Video defaults
+videoDirectory=output/video
+videoCommand=ffmpeg
+finalVideoName=final.mp4

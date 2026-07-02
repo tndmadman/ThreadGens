@@ -125,7 +125,7 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
     Write-Host "Final MP4: $finalVideoName"
 
     $javaArgs = @(
-        '-cp', 'out', 'redditTxtToImg.RedditScreenshotGenerator',
+        '-cp', 'out', 'redditTxtToImg.CheckedRunner',
         'data\comments.txt', $imageDir,
         '--auto',
         '--post-title', $title,
