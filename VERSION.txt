@@ -11,6 +11,9 @@ Included in this version:
 - updates batch video creation to call CheckedRunner
 - refreshes README coverage for Kokoro, Piper, video, batch mode, and profile generation
 - expands defaults.txt to document local AI, TTS, and video defaults
+- deletes expected output artifacts before each checked run so stale files cannot false-pass
+- fails fast when video output is requested while TTS is disabled
+- normalizes --tts and --voice-dir before --voice so CLI voice selection is order-forgiving through CheckedRunner
 
 Still included from 0.3.0:
 - keeps Piper TTS fully functional as the fallback engine
