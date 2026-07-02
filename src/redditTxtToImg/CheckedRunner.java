@@ -7,19 +7,16 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 
 /**
- * Runs the existing generator and verifies that the expected fresh artifacts were created.
- *
- * RedditScreenshotGenerator.main intentionally prints errors for interactive use, but that makes
- * shell scripts and the GUI think failed runs succeeded. This wrapper gives callers a hard failure
- * signal without changing the renderer internals.
+ * Runs the selected platform generator and verifies that the expected artifacts were created.
  */
 public class CheckedRunner {
     private static final Set<String> VALUE_OPTIONS = Set.of(
-            "--count", "--prefix", "--style", "--names", "--profiles",
+            "--platform", "--count", "--prefix", "--style", "--names", "--profiles",
             "--post-title", "--topic", "--llm-model", "--llm-url", "--script-out",
             "--tts", "--voice", "--voice-dir", "--tts-command", "--audio-dir", "--tts-timeout",
             "--video-dir", "--video-command", "--fps", "--video-timeout", "--final-video"
@@ -42,22 +39,33 @@ public class CheckedRunner {
         ExpectedOutputs expected = ExpectedOutputs.fromArgs(normalizedArgs);
 
         if (expected.skipVerification) {
-            RedditScreenshotGenerator.main(normalizedArgs);
+            runSelectedPlatform(expected.platform, normalizedArgs);
             return;
         }
 
         expected.validateRequestedModes();
         expected.deleteExpectedArtifacts();
 
-        RedditScreenshotGenerator.main(normalizedArgs);
+        runSelectedPlatform(expected.platform, normalizedArgs);
 
         expected.verifyArtifactsExist();
     }
 
+    private static void runSelectedPlatform(String platform, String[] args) {
+        if ("x".equals(platform) || "twitter".equals(platform)) {
+            XThreadGenerator.main(args);
+            return;
+        }
+        if ("reddit".equals(platform)) {
+            RedditScreenshotGenerator.main(args);
+            return;
+        }
+        throw new IllegalArgumentException("Unsupported platform: " + platform + ". Supported values: reddit, x.");
+    }
+
     /**
-     * The renderer resolves --voice immediately using the current --tts and --voice-dir values.
-     * Moving those dependencies before --voice makes CLI argument order forgiving while leaving
-     * RedditScreenshotGenerator untouched.
+     * The renderers resolve --voice immediately using the current --tts and --voice-dir values.
+     * Moving those dependencies before --voice makes CLI argument order forgiving.
      */
     private static String[] normalizeArgsForRenderer(String[] args) {
         if (args == null || args.length == 0 || !Arrays.asList(args).contains("--voice")) {
@@ -86,6 +94,7 @@ public class CheckedRunner {
     }
 
     private static class ExpectedOutputs {
+        String platform = "reddit";
         Path commentsFile = Path.of("data", "comments.txt");
         Path outputDirectory = Path.of("output");
         Path audioDirectory = Path.of("output", "audio");
@@ -112,6 +121,8 @@ public class CheckedRunner {
                 if (arg.startsWith("--")) {
                     if ("--list-voices".equals(arg) || "--gui".equals(arg)) {
                         expected.skipVerification = true;
+                    } else if ("--platform".equals(arg) && i + 1 < args.length) {
+                        expected.platform = normalizePlatform(args[++i]);
                     } else if ("--auto".equals(arg)) {
                         expected.autoGenerateText = true;
                     } else if ("--video".equals(arg)) {
@@ -124,7 +135,7 @@ public class CheckedRunner {
                     } else if ("--prefix".equals(arg) && i + 1 < args.length) {
                         expected.outputPrefix = args[++i];
                     } else if ("--tts".equals(arg) && i + 1 < args.length) {
-                        expected.ttsEngine = args[++i].toLowerCase();
+                        expected.ttsEngine = args[++i].toLowerCase(Locale.ROOT);
                     } else if ("--audio-dir".equals(arg) && i + 1 < args.length) {
                         expected.audioDirectory = Path.of(args[++i]);
                     } else if ("--video-dir".equals(arg) && i + 1 < args.length) {
@@ -158,8 +169,9 @@ public class CheckedRunner {
             try (InputStream input = Files.newInputStream(defaults)) {
                 properties.load(input);
             }
+            expected.platform = normalizePlatform(properties.getProperty("platform", expected.platform));
             expected.outputPrefix = properties.getProperty("prefix", expected.outputPrefix);
-            expected.ttsEngine = properties.getProperty("ttsEngine", expected.ttsEngine).toLowerCase();
+            expected.ttsEngine = properties.getProperty("ttsEngine", expected.ttsEngine).toLowerCase(Locale.ROOT);
             expected.audioDirectory = Path.of(properties.getProperty("audioDirectory", expected.audioDirectory.toString()));
             expected.videoDirectory = Path.of(properties.getProperty("videoDirectory", expected.videoDirectory.toString()));
             expected.finalVideoName = properties.getProperty("finalVideoName", expected.finalVideoName);
@@ -232,6 +244,17 @@ public class CheckedRunner {
 
         private boolean ttsEnabled() {
             return ttsEngine != null && !ttsEngine.isBlank() && !"none".equalsIgnoreCase(ttsEngine);
+        }
+
+        private static String normalizePlatform(String value) {
+            if (value == null || value.isBlank()) {
+                return "reddit";
+            }
+            String cleaned = value.trim().toLowerCase(Locale.ROOT);
+            if ("twitter".equals(cleaned)) {
+                return "x";
+            }
+            return cleaned;
         }
 
         private static int parseInt(String value, int fallback) {
