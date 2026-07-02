@@ -173,21 +173,21 @@ public class CheckedRunner {
         }
 
         void deleteExpectedArtifacts() throws IOException {
-            for (Path path : expectedArtifactPaths()) {
+            for (Path path : expectedArtifactPaths(true)) {
                 Files.deleteIfExists(path);
             }
         }
 
         void verifyArtifactsExist() throws IOException {
-            for (Path path : expectedArtifactPaths()) {
+            for (Path path : expectedArtifactPaths(false)) {
                 if (!Files.exists(path)) {
                     throw new IOException("Expected output was not created: " + path);
                 }
             }
         }
 
-        private List<Path> expectedArtifactPaths() throws IOException {
-            int expectedCount = expectedCount();
+        private List<Path> expectedArtifactPaths(boolean forDeletion) throws IOException {
+            int expectedCount = expectedCount(forDeletion);
             List<Path> paths = new ArrayList<>();
             for (int i = 0; i < expectedCount; i++) {
                 String baseName = i + outputPrefix;
@@ -206,9 +206,12 @@ public class CheckedRunner {
             return paths;
         }
 
-        private int expectedCount() throws IOException {
+        private int expectedCount(boolean forDeletion) throws IOException {
             if (autoGenerateText) {
                 return count >= 0 ? count : 10;
+            }
+            if (forDeletion && count >= 0) {
+                return count;
             }
 
             int availableLines = countInputLines();
