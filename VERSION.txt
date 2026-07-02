@@ -1,12 +1,20 @@
-ThreadGens 0.3.0-kokoro-tts
+ThreadGens 0.3.1-runtime-hardening
 
-Branch: feature/kokoro-tts
+Branch: fix/runtime-hardening
 
 Included in this version:
+- adds CheckedRunner as the safe CLI/script entrypoint
+- points Gradle and runnable jars at CheckedRunner
+- keeps RedditScreenshotGenerator available as the raw renderer entrypoint
+- makes the GUI use checked generation and report missing-output failures
+- updates the Windows AI runner to stop on checked generation errors
+- updates batch video creation to call CheckedRunner
+- refreshes README coverage for Kokoro, Piper, video, batch mode, and profile generation
+- expands defaults.txt to document local AI, TTS, and video defaults
+
+Still included from 0.3.0:
 - keeps Piper TTS fully functional as the fallback engine
 - adds Kokoro TTS through tools/kokoro_tts.py
-- adds requirements-kokoro.txt for Python dependencies
-- updates the Windows runner to choose Piper or Kokoro
 - uses the user prompt as the original post
 - generates AI replies/comments after the original post
 - generates all text first, then all PNG images, then all WAV audio, then all MP4 clips, then the final stitched video
