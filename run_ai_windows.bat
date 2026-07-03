@@ -22,7 +22,7 @@ set "TOKENIZERS_PARALLELISM=false"
 
 echo.
 echo ThreadGens local AI runner
-echo Branch: feature/x-platform
+echo Branch: fix/runtime-cleanup-image-ready
 echo.
 
 echo Choose platform/thread style:
