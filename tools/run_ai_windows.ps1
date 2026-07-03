@@ -9,6 +9,7 @@ $Tts = 'kokoro'
 $Voice = 'af_heart'
 $VideoFlags = @()
 $ImageFlags = @()
+$KeepOllamaFlags = @('--keep-ollama-loaded')
 $KokoroPython = Join-Path $RepoRoot '.venv-kokoro\Scripts\python.exe'
 $PythonCmd = 'python'
 $TtsCmd = ''
@@ -86,6 +87,11 @@ if ($makeVideo.ToLowerInvariant() -eq 'y' -or $makeVideo.ToLowerInvariant() -eq 
     $VideoFlags = @('--video', '--concat-video')
 }
 
+$unloadOllama = Read-Host 'Unload Ollama after text generation? y/N [default N, keeps model loaded]'
+if ($unloadOllama.ToLowerInvariant() -eq 'y' -or $unloadOllama.ToLowerInvariant() -eq 'yes') {
+    $KeepOllamaFlags = @()
+}
+
 Write-Host ''
 Write-Host "Platform:     $Platform"
 Write-Host "Reply style:  $postTitle"
@@ -96,6 +102,7 @@ Write-Host "Voice:        $Voice"
 Write-Host "Cmd:          $TtsCmd"
 Write-Host "OP image:     $($ImageFlags -join ' ')"
 Write-Host "Video:        $($VideoFlags -join ' ')"
+Write-Host "Ollama:       $(if ($KeepOllamaFlags.Count -gt 0) { 'keep loaded' } else { 'unload after text' })"
 Write-Host ''
 
 $javaArgs = @(
@@ -117,6 +124,7 @@ if ($Platform -ne 'x' -or -not [string]::IsNullOrWhiteSpace($postTitle)) {
 }
 $javaArgs += $ImageFlags
 $javaArgs += $VideoFlags
+$javaArgs += $KeepOllamaFlags
 
 & java @javaArgs
 if ($LASTEXITCODE -ne 0) { throw "Generation failed with exit code $LASTEXITCODE." }
