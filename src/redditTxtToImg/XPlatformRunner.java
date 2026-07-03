@@ -29,6 +29,11 @@ public class XPlatformRunner {
         }
 
         int requestedCount = settings.count > -1 ? settings.count : 10;
+        System.out.println("X visible original post: " + settings.originalPost);
+        if (settings.replyInstruction != null && !settings.replyInstruction.isBlank()) {
+            System.out.println("X hidden reply style: " + settings.replyInstruction);
+        }
+
         XLocalLlmTextGenerator generator = new XLocalLlmTextGenerator(settings.ollamaUrl, settings.llmModel);
         Path generatedFile = generator.generateToFile(settings.replyInstruction, settings.originalPost, requestedCount, settings.generatedTextFile);
         System.out.println("Generated X script: " + generatedFile);
