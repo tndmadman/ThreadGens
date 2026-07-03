@@ -94,8 +94,8 @@ if errorlevel 1 (
 
 echo.
 if /I "%PLATFORM%"=="x" (
-  set /p "POST_TITLE=Reply instruction, not visible on X [Finish this story in the replies]: "
-  if "%POST_TITLE%"=="" set "POST_TITLE=Finish this story in the replies"
+  set "POST_TITLE="
+  set /p "POST_TITLE=Optional X reply style, ex wrong answers only/advice/finish story [normal replies]: "
 ) else (
   set /p "POST_TITLE=Reddit post title [Finish this story in the comments]: "
   if "%POST_TITLE%"=="" set "POST_TITLE=Finish this story in the comments"
@@ -120,7 +120,7 @@ if /I "%MAKE_VIDEO%"=="Y" set "VIDEO_FLAGS=--video --concat-video"
 
 echo.
 echo Platform:     %PLATFORM%
-echo Reply/title:  %POST_TITLE%
+echo Reply style:  %POST_TITLE%
 echo Original:     %TOPIC%
 echo Count:        %COUNT%
 echo TTS:          %TTS%
