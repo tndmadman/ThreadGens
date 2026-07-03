@@ -12,6 +12,10 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
+if (-not $PSBoundParameters.ContainsKey('KeepOllamaLoaded')) {
+    $KeepOllamaLoaded = $true
+}
+
 $env:THREADGENS_KOKORO_VERBOSE = '0'
 $env:PYTHONWARNINGS = 'ignore'
 $env:HF_HUB_DISABLE_PROGRESS_BARS = '1'
@@ -80,7 +84,7 @@ if ($GenerateOpImage) {
 if ($KeepOllamaLoaded) {
     Write-Host 'Ollama unload: disabled, keeping model loaded between videos' -ForegroundColor Green
 } else {
-    Write-Host 'Ollama unload: enabled after each script (default)'
+    Write-Host 'Ollama unload: enabled after each script'
 }
 
 if (-not (Test-Path $InputPath)) {
