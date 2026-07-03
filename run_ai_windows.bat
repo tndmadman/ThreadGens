@@ -11,6 +11,7 @@ set "TTS=kokoro"
 set "VOICE=af_heart"
 set "MAKE_VIDEO=N"
 set "VIDEO_FLAGS="
+set "IMAGE_FLAGS="
 set "PIPER_CMD=%~dp0piper\piper.exe"
 set "KOKORO_PYTHON=%~dp0.venv-kokoro\Scripts\python.exe"
 set "PYTHON_CMD=python"
@@ -119,6 +120,10 @@ set /p "COUNT=How many total slides/posts [10]: "
 if "%COUNT%"=="" set "COUNT=10"
 
 echo.
+set /p "MAKE_IMAGE=Generate an OP image with local ComfyUI RealVisXL? y/N: "
+if /I "%MAKE_IMAGE%"=="Y" set "IMAGE_FLAGS=--image-mode comfyui"
+
+echo.
 set /p "MAKE_VIDEO=Make stitched MP4 video with smooth transitions? y/N: "
 if /I "%MAKE_VIDEO%"=="Y" set "VIDEO_FLAGS=--video --concat-video"
 
@@ -130,6 +135,7 @@ echo Count:        %COUNT%
 echo TTS:          %TTS%
 echo Voice:        %VOICE%
 echo Cmd:          %TTS_CMD%
+echo OP image:     %IMAGE_FLAGS%
 echo Video:        %VIDEO_FLAGS%
 echo.
 
@@ -138,15 +144,15 @@ if /I "%PLATFORM%"=="x" goto run_x_with_style
 goto run_reddit
 
 :run_x_without_style
-java -cp out redditTxtToImg.CheckedRunner --platform x --auto --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %IMAGE_FLAGS% %VIDEO_FLAGS%
 goto after_java_run
 
 :run_x_with_style
-java -cp out redditTxtToImg.CheckedRunner --platform x --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %IMAGE_FLAGS% %VIDEO_FLAGS%
 goto after_java_run
 
 :run_reddit
-java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %IMAGE_FLAGS% %VIDEO_FLAGS%
 goto after_java_run
 
 :after_java_run
@@ -161,6 +167,7 @@ echo.
 echo Done.
 echo Text:        output\script\generated_comments.txt
 echo Images:      output\
+echo OP images:   output\images\
 echo Audio:       output\audio\
 echo Clips:       output\video\
 echo Final video: output\video\final.mp4
