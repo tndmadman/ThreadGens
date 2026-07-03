@@ -19,6 +19,7 @@ public class XPlatformRunner {
         } catch (Exception e) {
             System.err.println("Failed: " + e.getMessage());
             e.printStackTrace();
+            throw new IllegalStateException("X platform run failed", e);
         }
     }
 
@@ -62,7 +63,7 @@ public class XPlatformRunner {
                 if ("--auto".equals(arg) || "--keep-ollama-loaded".equals(arg)) {
                     continue;
                 }
-                if (isLlmOnlyValueOption(arg)) {
+                if (CliOptions.isLlmOnlyValueOption(arg)) {
                     if (i + 1 < args.length && args[i + 1] != null && !args[i + 1].isBlank() && !args[i + 1].startsWith("--")) {
                         i++;
                     }
@@ -81,31 +82,8 @@ public class XPlatformRunner {
         return rebuilt.toArray(new String[0]);
     }
 
-    private static boolean isLlmOnlyValueOption(String arg) {
-        return "--post-title".equals(arg)
-                || "--topic".equals(arg)
-                || "--llm-model".equals(arg)
-                || "--llm-url".equals(arg)
-                || "--script-out".equals(arg);
-    }
-
     private static boolean hasValue(String arg) {
-        return "--count".equals(arg)
-                || "--prefix".equals(arg)
-                || "--style".equals(arg)
-                || "--names".equals(arg)
-                || "--profiles".equals(arg)
-                || "--tts".equals(arg)
-                || "--voice".equals(arg)
-                || "--voice-dir".equals(arg)
-                || "--tts-command".equals(arg)
-                || "--audio-dir".equals(arg)
-                || "--tts-timeout".equals(arg)
-                || "--video-dir".equals(arg)
-                || "--video-command".equals(arg)
-                || "--fps".equals(arg)
-                || "--video-timeout".equals(arg)
-                || "--final-video".equals(arg);
+        return CliOptions.isValueOption(arg);
     }
 
     private static class Settings {
