@@ -145,7 +145,10 @@ public class LocalLlmTextGenerator {
                 .append("- Do not repeat the original post body.\n")
                 .append("- No numbering, bullets, quotes, markdown, explanations, titles, or labels.\n")
                 .append("- Do not prefix lines with POST, OP, COMMENT, or REPLY.\n")
-                .append("- Each line should be 1 or 2 sentences and readable aloud.\n")
+                .append("- Each line should be 2 or 3 sentences and readable aloud.\n")
+                .append("- Aim for roughly 25 to 55 words per line unless the idea needs less.\n")
+                .append("- Add one concrete detail per line, such as a place, object, reaction, sound, smell, time, or small action.\n")
+                .append("- Keep it punchy; do not turn one line into a full paragraph.\n")
                 .append("- Do not repeat these already accepted lines:\n");
         for (String existingLine : existingLines) {
             prompt.append(existingLine).append("\n");
@@ -159,33 +162,39 @@ public class LocalLlmTextGenerator {
                 prompt.append("- The replies must collectively finish the story as a chronological chain.\n")
                         .append("- Each reply must continue from the original post or the previous accepted reply.\n")
                         .append("- Every reply must add a new event, escalation, discovery, reveal, twist, or ending.\n")
+                        .append("- Include specific details that make the next beat feel visual and believable.\n")
                         .append("- Do not merely react, judge, summarize, warn, call authorities, or say the story is wild unless the reply also adds the next story beat.\n")
                         .append("- The final reply in this batch should feel like an ending, cliffhanger, or strong twist.\n");
                 break;
             case ABSURD_JOKES:
                 prompt.append("- The replies should be intentionally wrong, absurd, and funny.\n")
                         .append("- Each reply should answer or react in a clearly ridiculous way.\n")
+                        .append("- Add a specific object, action, or fake explanation so the joke has a visual hook.\n")
                         .append("- Do not give serious advice unless it is obviously part of the joke.\n");
                 break;
             case ROAST:
                 prompt.append("- The replies should roast the original poster or situation.\n")
                         .append("- Keep the roasts playful, punchy, and varied.\n")
+                        .append("- Add a specific detail from the situation so each roast feels custom.\n")
                         .append("- Do not continue the story unless the roast adds a joke beat.\n");
                 break;
             case ADVICE:
                 prompt.append("- The replies should give advice, options, warnings, or practical next steps.\n")
                         .append("- Make the comments feel like different Reddit users with different perspectives.\n")
+                        .append("- Include at least one concrete reason or example in each reply.\n")
                         .append("- Do not force a chronological story chain.\n");
                 break;
             case DEBATE_SUPPORT:
                 prompt.append("- The replies should debate whether the original poster is right, wrong, or missing something.\n")
                         .append("- Mix support, skepticism, questions, and alternate explanations.\n")
+                        .append("- Give each reply a clear reason, clue, or example instead of a bare reaction.\n")
                         .append("- Do not force a chronological story chain.\n");
                 break;
             case REDDIT_REACTIONS:
             default:
                 prompt.append("- The replies should feel like normal Reddit comments reacting to the original post.\n")
                         .append("- Mix jokes, observations, questions, and short personal reactions.\n")
+                        .append("- Add enough context or detail that each reply feels like a complete thought.\n")
                         .append("- Do not force a chronological story chain unless the title asks for one.\n");
                 break;
         }
