@@ -15,13 +15,6 @@ import java.util.Set;
  * Runs the selected platform generator and verifies that the expected artifacts were created.
  */
 public class CheckedRunner {
-    private static final Set<String> VALUE_OPTIONS = Set.of(
-            "--platform", "--count", "--prefix", "--style", "--names", "--profiles",
-            "--post-title", "--topic", "--llm-model", "--llm-url", "--script-out",
-            "--tts", "--voice", "--voice-dir", "--tts-command", "--audio-dir", "--tts-timeout",
-            "--video-dir", "--video-command", "--fps", "--video-timeout", "--final-video"
-    );
-
     private static final Set<String> VOICE_DEPENDENCY_OPTIONS = Set.of("--tts", "--voice-dir");
 
     public static void main(String[] args) {
@@ -165,7 +158,7 @@ public class CheckedRunner {
                         expected.videoDirectory = Path.of(args[++i]);
                     } else if ("--final-video".equals(arg) && i + 1 < args.length) {
                         expected.finalVideoName = args[++i];
-                    } else if (VALUE_OPTIONS.contains(arg) && i + 1 < args.length) {
+                    } else if (CliOptions.isValueOption(arg) && i + 1 < args.length) {
                         i++;
                     }
                     continue;
