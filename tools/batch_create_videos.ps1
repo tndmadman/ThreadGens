@@ -50,17 +50,23 @@ function Create-SampleInput($Path) {
         New-Item -ItemType Directory -Force -Path $folder | Out-Null
     }
     @(
-        'Finish this story in the comments',
-        'I opened my fridge at 3 AM and found a sticky note in someone else''s handwriting.',
         'Wrong answers only',
         'Why is there a shopping cart in my living room?',
-        'What would you do?',
-        'My neighbor keeps leaving one orange on my porch every morning.'
+        'Give practical advice',
+        'My neighbor keeps leaving one orange on my porch every morning.',
+        'Finish this story in the replies',
+        'I opened my fridge at 3 AM and found a sticky note in someone else''s handwriting.'
     ) | Set-Content -Path $Path -Encoding UTF8
 }
 
 Write-Step 'ThreadGens batch video creator'
 Write-Host "Input file: $InputPath"
+Write-Host 'Input format: 2 non-empty lines per video.'
+if ($Platform -eq 'x') {
+    Write-Host 'X format: line 1 = hidden reply style, line 2 = visible X post text.'
+} else {
+    Write-Host 'Reddit format: line 1 = post title, line 2 = post body.'
+}
 Write-Host "Output root: $OutputRoot"
 Write-Host "Defaults: platform=$Platform, model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
 Write-Host 'Kokoro console: quiet'
@@ -95,7 +101,7 @@ if ($LASTEXITCODE -ne 0) {
 $rawLines = Get-Content -Path $InputPath -Encoding UTF8
 $lines = @($rawLines | Where-Object { $_.Trim().Length -gt 0 })
 if ($lines.Count -lt 2) {
-    throw 'Batch file needs at least 2 non-empty lines: title first, body second.'
+    throw 'Batch file needs at least 2 non-empty lines: Reddit title/X style line first, Reddit body/X post text second.'
 }
 
 if (($lines.Count % 2) -ne 0) {
@@ -126,8 +132,13 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
 
     New-Item -ItemType Directory -Force -Path $imageDir, $audioDir, $videoDir, $scriptDir | Out-Null
 
-    Write-Step "[$jobLabel/$jobCountLabel] $title"
-    Write-Host "Body: $body"
+    if ($Platform -eq 'x') {
+        Write-Step "[$jobLabel/$jobCountLabel] X style: $title"
+        Write-Host "Visible X post: $body"
+    } else {
+        Write-Step "[$jobLabel/$jobCountLabel] Reddit title: $title"
+        Write-Host "Reddit body: $body"
+    }
     Write-Host "Final MP4: $finalVideoName"
 
     $javaArgs = @(
