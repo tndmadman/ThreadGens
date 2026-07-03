@@ -93,12 +93,22 @@ if errorlevel 1 (
 )
 
 echo.
-set /p "POST_TITLE=Prompt/title for AI replies [Finish this story in the comments]: "
-if "%POST_TITLE%"=="" set "POST_TITLE=Finish this story in the comments"
+if /I "%PLATFORM%"=="x" (
+  set /p "POST_TITLE=Reply instruction, not visible on X [Finish this story in the replies]: "
+  if "%POST_TITLE%"=="" set "POST_TITLE=Finish this story in the replies"
+) else (
+  set /p "POST_TITLE=Reddit post title [Finish this story in the comments]: "
+  if "%POST_TITLE%"=="" set "POST_TITLE=Finish this story in the comments"
+)
 
 echo.
-set /p "TOPIC=Original post/body [weird everyday stories]: "
-if "%TOPIC%"=="" set "TOPIC=weird everyday stories"
+if /I "%PLATFORM%"=="x" (
+  set /p "TOPIC=Visible original X post text [I just saw something weird and I need someone else to explain it.]: "
+  if "%TOPIC%"=="" set "TOPIC=I just saw something weird and I need someone else to explain it."
+) else (
+  set /p "TOPIC=Original post/body [weird everyday stories]: "
+  if "%TOPIC%"=="" set "TOPIC=weird everyday stories"
+)
 
 echo.
 set /p "COUNT=How many total slides/posts [10]: "
@@ -109,14 +119,14 @@ set /p "MAKE_VIDEO=Make stitched MP4 video with smooth transitions? y/N: "
 if /I "%MAKE_VIDEO%"=="Y" set "VIDEO_FLAGS=--video --concat-video"
 
 echo.
-echo Platform:   %PLATFORM%
-echo Post title: %POST_TITLE%
-echo Original:   %TOPIC%
-echo Count:      %COUNT%
-echo TTS:        %TTS%
-echo Voice:      %VOICE%
-echo Cmd:        %TTS_CMD%
-echo Video:      %VIDEO_FLAGS%
+echo Platform:     %PLATFORM%
+echo Reply/title:  %POST_TITLE%
+echo Original:     %TOPIC%
+echo Count:        %COUNT%
+echo TTS:          %TTS%
+echo Voice:        %VOICE%
+echo Cmd:          %TTS_CMD%
+echo Video:        %VIDEO_FLAGS%
 echo.
 
 java -cp out redditTxtToImg.CheckedRunner --platform %PLATFORM% --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
