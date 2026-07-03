@@ -8,7 +8,9 @@ final class CliOptions {
             "--post-title", "--topic", "--llm-model", "--llm-url", "--script-out",
             "--tts", "--voice", "--voice-dir", "--tts-command", "--audio-dir", "--tts-timeout",
             "--video-dir", "--video-command", "--fps", "--video-timeout", "--final-video",
-            "--image-mode", "--op-image", "--image-dir", "--image-cache-dir", "--comfy-url"
+            "--image-mode", "--op-image", "--image-dir", "--image-cache-dir", "--comfy-url",
+            "--image-checkpoint", "--image-width", "--image-height", "--image-steps", "--image-cfg",
+            "--image-sampler", "--image-scheduler", "--image-negative", "--image-timeout"
     );
 
     static final Set<String> LLM_ONLY_VALUE_OPTIONS = Set.of(
