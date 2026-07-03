@@ -27,6 +27,8 @@ public class RandomProfileName {
 
     private final List<String> profileImageNames = new ArrayList<>();
     private final Random random = new Random();
+    private boolean hasFirstRandomProfileName = false;
+    private String firstRandomProfileName = "";
 
     public RandomProfileName(Path profileDirectory) {
         Set<String> seen = new HashSet<>();
@@ -52,7 +54,26 @@ public class RandomProfileName {
         if (profileImageNames.isEmpty()) {
             return "";
         }
-        return profileImageNames.get(random.nextInt(profileImageNames.size()));
+
+        String selected = profileImageNames.get(random.nextInt(profileImageNames.size()));
+        if (!hasFirstRandomProfileName) {
+            hasFirstRandomProfileName = true;
+            firstRandomProfileName = selected;
+            return selected;
+        }
+
+        if (!sameProfileName(selected, firstRandomProfileName)) {
+            return selected;
+        }
+
+        for (int attempt = 0; attempt < 25; attempt++) {
+            String candidate = profileImageNames.get(random.nextInt(profileImageNames.size()));
+            if (!sameProfileName(candidate, firstRandomProfileName)) {
+                return candidate;
+            }
+        }
+
+        return "";
     }
 
     private void scanProfileDirectory(Path profileDirectory, Set<String> seen) {
@@ -176,6 +197,13 @@ public class RandomProfileName {
             return false;
         }
         return a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
+    }
+
+    private static boolean sameProfileName(String left, String right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return left.trim().equalsIgnoreCase(right.trim());
     }
 
     private static String toForwardSlashes(String value) {
