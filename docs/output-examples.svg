@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="620" viewBox="0 0 980 620" role="img" aria-label="ThreadGens Reddit and X output examples">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101113"/>
+      <stop offset="1" stop-color="#1d1f22"/>
+    </linearGradient>
+    <linearGradient id="street" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e0c0a"/>
+      <stop offset="0.55" stop-color="#8a5517"/>
+      <stop offset="1" stop-color="#1a1009"/>
+    </linearGradient>
+    <linearGradient id="diner" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8fa0aa"/>
+      <stop offset="0.55" stop-color="#d1d4d3"/>
+      <stop offset="1" stop-color="#111111"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="980" height="620" rx="28" fill="url(#bg)"/>
+  <text x="490" y="52" fill="#f2f2f2" font-family="Arial, sans-serif" font-size="30" font-weight="700" text-anchor="middle">ThreadGens example output</text>
+  <text x="490" y="84" fill="#9aa1aa" font-family="Arial, sans-serif" font-size="17" text-anchor="middle">Local Ollama text generation, local TTS/video, and optional OP image generation</text>
+
+  <g transform="translate(78 115)" filter="url(#shadow)">
+    <rect x="0" y="0" width="380" height="460" rx="20" fill="#050505" stroke="#2f3338" stroke-width="2"/>
+    <rect x="0" y="0" width="380" height="62" rx="20" fill="#050505"/>
+    <line x1="0" y1="62" x2="380" y2="62" stroke="#2f3338" stroke-width="2"/>
+    <text x="33" y="43" fill="#fff" font-family="Arial, sans-serif" font-size="25" font-weight="700">Post</text>
+    <text x="190" y="43" fill="#fff" font-family="Arial, sans-serif" font-size="26" font-weight="700" text-anchor="middle">X</text>
+
+    <circle cx="42" cy="96" r="25" fill="#78c4b0"/>
+    <circle cx="42" cy="90" r="11" fill="#222"/>
+    <rect x="32" y="101" width="20" height="20" rx="8" fill="#f0c6a2"/>
+    <text x="80" y="93" fill="#fff" font-family="Arial, sans-serif" font-size="20" font-weight="700">SyntaxBandit</text>
+    <circle cx="178" cy="87" r="10" fill="#1d9bf0"/>
+    <path d="M173 87l4 4 8-9" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="80" y="116" fill="#838a93" font-family="Arial, sans-serif" font-size="16">@syntaxbandit684 · 2h</text>
+    <text x="340" y="103" fill="#838a93" font-family="Arial, sans-serif" font-size="23">•••</text>
+
+    <text x="33" y="154" fill="#fff" font-family="Arial, sans-serif" font-size="27">I just saw something weird and I</text>
+    <text x="33" y="190" fill="#fff" font-family="Arial, sans-serif" font-size="27">need someone else to explain it.</text>
+
+    <rect x="33" y="260" width="314" height="145" rx="9" fill="url(#street)" stroke="#4c5156" stroke-width="2"/>
+    <rect x="105" y="260" width="7" height="145" fill="#20150c" opacity="0.9"/>
+    <rect x="215" y="260" width="8" height="145" fill="#1b1008" opacity="0.9"/>
+    <circle cx="205" cy="280" r="9" fill="#f1b24f" opacity="0.7"/>
+    <path d="M125 405L190 262L242 405" fill="#000" opacity="0.23"/>
+    <rect x="155" y="325" width="24" height="44" rx="5" fill="#161616"/>
+    <circle cx="168" cy="372" r="5" fill="#070707"/>
+    <path d="M235 380q9-38 2-70q22 7 30 70z" fill="#050505" opacity="0.85"/>
+
+    <line x1="33" y1="420" x2="347" y2="420" stroke="#2f3338" stroke-width="2"/>
+    <text x="45" y="450" fill="#838a93" font-family="Arial, sans-serif" font-size="16">💬 529</text>
+    <text x="122" y="450" fill="#838a93" font-family="Arial, sans-serif" font-size="16">↻ 1,139</text>
+    <text x="218" y="450" fill="#838a93" font-family="Arial, sans-serif" font-size="16">♡ 6,129</text>
+    <text x="303" y="450" fill="#838a93" font-family="Arial, sans-serif" font-size="16">34.9K</text>
+  </g>
+
+  <g transform="translate(522 115)" filter="url(#shadow)">
+    <rect x="0" y="0" width="380" height="460" rx="16" fill="#242425"/>
+    <rect x="0" y="0" width="380" height="5" rx="3" fill="#ff4500"/>
+    <circle cx="42" cy="50" r="25" fill="#8fc3cf"/>
+    <circle cx="42" cy="44" r="11" fill="#333"/>
+    <rect x="32" y="55" width="20" height="20" rx="8" fill="#f0c6a2"/>
+    <text x="80" y="45" fill="#fff" font-family="Arial, sans-serif" font-size="20" font-weight="700">BitwiseBob</text>
+    <text x="80" y="68" fill="#c6c8cb" font-family="Arial, sans-serif" font-size="15">r/AskReddit · posted 2h ago</text>
+    <rect x="292" y="34" width="58" height="34" rx="9" fill="#ff4500"/>
+    <text x="321" y="57" fill="#fff" font-family="Arial, sans-serif" font-size="16" font-weight="700" text-anchor="middle">reddit</text>
+    <rect x="80" y="82" width="64" height="22" rx="6" fill="#ff4500"/>
+    <text x="112" y="98" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="700" text-anchor="middle">ORIGINAL</text>
+
+    <rect x="33" y="122" width="314" height="52" rx="8" fill="#282829" stroke="#5b5d60" stroke-width="2"/>
+    <rect x="33" y="122" width="5" height="52" rx="3" fill="#ff4500"/>
+    <text x="52" y="157" fill="#fff" font-family="Arial, sans-serif" font-size="25" font-weight="700">Finish this story...</text>
+    <text x="33" y="213" fill="#fff" font-family="Arial, sans-serif" font-size="28">weird everyday stories</text>
+
+    <rect x="33" y="292" width="314" height="140" rx="9" fill="url(#diner)" stroke="#101010" stroke-width="2"/>
+    <rect x="33" y="292" width="314" height="140" fill="#000" opacity="0.16" rx="9"/>
+    <line x1="184" y1="292" x2="184" y2="432" stroke="#d9e2e5" stroke-width="4" opacity="0.55"/>
+    <rect x="62" y="394" width="92" height="22" rx="11" fill="#38190e" opacity="0.8"/>
+    <circle cx="237" cy="358" r="24" fill="#1b1715"/>
+    <path d="M205 432q10-78 55-78q45 0 54 78z" fill="#14110f" opacity="0.88"/>
+    <circle cx="91" cy="367" r="13" fill="#f0e3cf"/>
+  </g>
+</svg>
