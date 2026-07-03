@@ -25,9 +25,18 @@ videoDirectory=output/video
 videoCommand=ffmpeg
 finalVideoName=final.mp4
 
-# Future OP image integration defaults
-# These are reserved now so future ComfyUI image generation can be added without changing CLI shape.
+# OP image integration defaults
+# Leave this off for smoke tests / text-only runs. Use --image-mode comfyui to enable.
 imageMode=none
 imageDirectory=output/images
 imageCacheDirectory=output/cache/images
 comfyUrl=http://127.0.0.1:8188
+imageCheckpoint=RealVisXL_V5.0_fp32.safetensors
+imageWidth=1024
+imageHeight=768
+imageSteps=30
+imageCfg=5.0
+imageSampler=dpmpp_2m_sde
+imageScheduler=karras
+imageTimeout=900
+imageNegative=low quality, blurry, distorted, deformed, cartoon, anime, text, captions, watermark, logo, signature, bad anatomy, extra fingers
