@@ -63,7 +63,9 @@ public class XPlatformRunner {
                     continue;
                 }
                 if (isLlmOnlyValueOption(arg)) {
-                    i++;
+                    if (i + 1 < args.length && args[i + 1] != null && !args[i + 1].isBlank() && !args[i + 1].startsWith("--")) {
+                        i++;
+                    }
                     continue;
                 }
                 rebuilt.add(arg);
@@ -131,8 +133,10 @@ public class XPlatformRunner {
                         settings.autoGenerateText = true;
                     } else if ("--keep-ollama-loaded".equals(arg)) {
                         settings.unloadOllamaAfterText = false;
-                    } else if ("--post-title".equals(arg) && i + 1 < args.length) {
-                        settings.replyInstruction = normalizeReplyInstruction(args[++i]);
+                    } else if ("--post-title".equals(arg)) {
+                        if (i + 1 < args.length && args[i + 1] != null && !args[i + 1].isBlank() && !args[i + 1].startsWith("--")) {
+                            settings.replyInstruction = normalizeReplyInstruction(args[++i]);
+                        }
                     } else if ("--topic".equals(arg) && i + 1 < args.length) {
                         settings.originalPost = normalizeOriginalPost(args[++i]);
                     } else if ("--llm-model".equals(arg) && i + 1 < args.length) {
