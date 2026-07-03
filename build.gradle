@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'tndmadman'
-version = '0.4.1-runtime-cleanup-image-ready'
+version = '0.4.2-op-image-generation'
 
 repositories {
     mavenCentral()
