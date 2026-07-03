@@ -1,10 +1,8 @@
 package redditTxtToImg;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -79,26 +77,7 @@ public class VoiceGenerator {
         commandParts.add("--output_file");
         commandParts.add(outputFile.toString());
 
-        ProcessBuilder processBuilder = new ProcessBuilder(commandParts);
-        processBuilder.redirectErrorStream(true);
-        Process process = processBuilder.start();
-
-        try (OutputStream stdin = process.getOutputStream()) {
-            stdin.write(text.getBytes(StandardCharsets.UTF_8));
-            stdin.write('\n');
-        }
-
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(output);
-
-        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!finished) {
-            process.destroyForcibly();
-            throw new IOException("Piper timed out after " + timeoutSeconds + " seconds.");
-        }
-        if (process.exitValue() != 0) {
-            throw new IOException("Piper failed with exit code " + process.exitValue() + ": " + output.toString(StandardCharsets.UTF_8));
-        }
+        ProcessRunner.runAndCapture(commandParts, "Piper", timeoutSeconds, text + System.lineSeparator());
     }
 
     private void generateWithKokoro(String text, Path outputFile) throws IOException, InterruptedException {
@@ -479,21 +458,6 @@ class VideoGenerator {
     }
 
     private String runAndCapture(List<String> parts, String label) throws IOException, InterruptedException {
-        ProcessBuilder processBuilder = new ProcessBuilder(parts);
-        processBuilder.redirectErrorStream(true);
-        Process process = processBuilder.start();
-
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(output);
-
-        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!finished) {
-            process.destroyForcibly();
-            throw new IOException(label + " timed out after " + timeoutSeconds + " seconds.");
-        }
-        if (process.exitValue() != 0) {
-            throw new IOException(label + " failed with exit code " + process.exitValue() + ": " + output.toString(StandardCharsets.UTF_8));
-        }
-        return output.toString(StandardCharsets.UTF_8);
+        return ProcessRunner.runAndCapture(parts, label, timeoutSeconds);
     }
 }
