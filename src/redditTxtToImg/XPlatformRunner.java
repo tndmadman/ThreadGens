@@ -43,6 +43,8 @@ public class XPlatformRunner {
         List<String> rebuilt = new ArrayList<>();
         rebuilt.add(generatedFile.toString());
         rebuilt.add(outputDirectory.toString());
+        rebuilt.add("--post-title");
+        rebuilt.add("");
 
         int positional = 0;
         for (int i = 0; i < args.length; i++) {
