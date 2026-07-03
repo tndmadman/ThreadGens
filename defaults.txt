@@ -24,3 +24,10 @@ audioDirectory=output/audio
 videoDirectory=output/video
 videoCommand=ffmpeg
 finalVideoName=final.mp4
+
+# Future OP image integration defaults
+# These are reserved now so future ComfyUI image generation can be added without changing CLI shape.
+imageMode=none
+imageDirectory=output/images
+imageCacheDirectory=output/cache/images
+comfyUrl=http://127.0.0.1:8188
