@@ -15,13 +15,15 @@ It can:
 
 The default layout is built for TikTok, YouTube Shorts, and Reels-style vertical videos.
 
-![Sample preview](docs/sample-preview.svg)
-
 ## Example output
 
-These examples show the current OP-image layout for X and Reddit output.
+X output with OP image:
 
-![ThreadGens Reddit and X output examples](docs/output-examples.svg)
+![ThreadGens X OP image example](docs/x-op-image-example.png)
+
+Reddit output with OP image:
+
+![ThreadGens Reddit OP image example](docs/reddit-op-image-example.png)
 
 ## Windows one-click setup
 
@@ -448,7 +450,8 @@ data/author_names.txt
 - `defaults.txt` contains default render and local pipeline settings.
 - `templates/` contains simple Reddit color templates.
 - `assets/` contains optional images.
-- `docs/output-examples.svg` shows README output examples.
+- `docs/x-op-image-example.png` shows the X README output example.
+- `docs/reddit-op-image-example.png` shows the Reddit README output example.
 - `tools/kokoro_tts.py` is the Kokoro helper used by Java.
 - `tools/generate_profiles.py` creates procedural avatars and usernames.
 - `tools/generate_comfy_profiles.py` creates ComfyUI profile images and usernames.
