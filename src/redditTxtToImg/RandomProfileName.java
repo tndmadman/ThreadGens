@@ -22,7 +22,7 @@ import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 
 public class RandomProfileName {
-    private static final Path RENDER_PROFILE_ROOT = Path.of("assets", "pfp");
+    private static final Path RENDER_PROFILE_ROOT = ProfileImages.CACHE_ROOT;
     private static final int MAX_SCAN_DEPTH = 6;
 
     private final List<String> profileImageNames = new ArrayList<>();
