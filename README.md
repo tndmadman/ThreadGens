@@ -1,15 +1,16 @@
 # ThreadGens
 
-ThreadGens is a local Java tool for turning Reddit-style text threads into 9:16 short-form video assets.
+ThreadGens is a local Java tool for turning Reddit-style threads or X-style posts/replies into 9:16 short-form video assets.
 
 It can:
 
 - read one text file and create one 1080x1920 PNG frame per line
-- generate a fresh thread locally with Ollama
+- generate a fresh Reddit thread locally with Ollama
+- generate a fresh X post and replies locally with Ollama
 - generate local voice audio with Kokoro or Piper
 - render per-frame MP4 clips with FFmpeg
 - stitch clips into one final MP4
-- generate profile pictures and usernames for fake Reddit-style accounts
+- generate profile pictures and usernames for fake Reddit/X-style accounts
 
 The default layout is built for TikTok, YouTube Shorts, and Reels-style vertical videos.
 
@@ -42,7 +43,21 @@ After setup finishes, double-click:
 run_ai_windows.bat
 ```
 
-That runner asks for a post title, body text, count, TTS engine, and optional final video output.
+That runner asks for platform/thread style, TTS engine, prompt text, count, and optional final video output.
+
+For Reddit:
+
+```text
+post title
+post body
+```
+
+For X:
+
+```text
+optional hidden reply style
+visible original X post text
+```
 
 Default outputs:
 
@@ -74,15 +89,29 @@ Use `CheckedRunner` for scripts and normal command-line runs:
 java -cp out redditTxtToImg.CheckedRunner data/comments.txt output
 ```
 
-`CheckedRunner` delegates to the renderer, then verifies that the expected fresh PNG/WAV/MP4 files were actually created. This prevents failed runs from looking successful.
+`CheckedRunner` delegates to the selected renderer, then verifies that the expected fresh PNG/WAV/MP4 files were actually created. This prevents failed runs from looking successful.
 
-The older renderer entrypoint still exists:
+Select a platform with `--platform`:
+
+```bash
+java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform reddit
+java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform x
+```
+
+Supported values:
+
+- `reddit`
+- `x`
+- `twitter` as an alias for `x`
+
+The older renderer entrypoints still exist:
 
 ```bash
 java -cp out redditTxtToImg.RedditScreenshotGenerator data/comments.txt output
+java -cp out redditTxtToImg.XThreadGenerator data/comments.txt output
 ```
 
-Use it only when you want raw renderer behavior without checked artifact validation.
+Use them only when you want raw renderer behavior without checked artifact validation.
 
 ## GUI
 
@@ -94,20 +123,27 @@ The GUI lets you choose an input text file, choose an output folder, and generat
 
 ## CLI options
 
-Basic image generation:
+Basic Reddit image generation:
 
 ```bash
-java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --count 3 --prefix sample --style light --shuffle --center
+java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform reddit --count 3 --prefix sample --style light --shuffle --center
+```
+
+Basic X image generation:
+
+```bash
+java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform x --count 3 --prefix xsample --top
 ```
 
 Image options:
 
+- `--platform reddit|x` chooses the screenshot/thread style. Default: `reddit`.
 - `--count N` limits how many frames are generated.
 - `--prefix NAME` changes output file names. Files are named like `0NAME.png`, `1NAME.png`, etc.
-- `--style dark|light` chooses a template from `templates/`.
+- `--style dark|light` chooses a Reddit template from `templates/`.
 - `--shuffle` shuffles input lines before rendering.
-- `--center` centers comments in the vertical card.
-- `--top` keeps comments closer to the top of the card.
+- `--center` centers Reddit comments in the vertical card.
+- `--top` keeps text closer to the top of the card.
 - `--no-watermark` hides the small watermark.
 - `--gui` opens the GUI.
 
@@ -117,14 +153,33 @@ Make sure Ollama is running locally and the model is already pulled:
 
 ```bash
 ollama pull llama3.1:8b
-java -cp out redditTxtToImg.CheckedRunner --auto --post-title "Finish this story in the comments" --topic "I found a locked box behind my dryer." --count 10 --llm-model llama3.1:8b
+```
+
+Reddit auto-generation:
+
+```bash
+java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto --post-title "Finish this story in the comments" --topic "I found a locked box behind my dryer." --count 10 --llm-model llama3.1:8b
+```
+
+X auto-generation:
+
+```bash
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto --post-title "Wrong answers only" --topic "Why is there a shopping cart in my living room?" --count 10 --llm-model llama3.1:8b
+```
+
+For X, `--post-title` is not displayed. It is only a hidden reply style/instruction. The visible X post is `--topic`.
+
+X example with no hidden style:
+
+```bash
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto --topic "What the fuck do I do with my life now?" --count 5 --llm-model llama3.1:8b
 ```
 
 Local AI options:
 
 - `--auto` asks the local LLM to generate a fresh script before rendering.
-- `--post-title TEXT` sets the visible post title.
-- `--topic TEXT` sets the original post body/story.
+- `--post-title TEXT` sets the visible Reddit title, or hidden X reply style.
+- `--topic TEXT` sets the Reddit post body/story, or visible X post text.
 - `--llm-model MODEL` sets the Ollama model name. Default: `llama3.1:8b`.
 - `--llm-url URL` sets the Ollama generate endpoint. Default: `http://localhost:11434/api/generate`.
 - `--script-out FILE` changes where generated text is saved.
@@ -138,12 +193,24 @@ ThreadGens supports:
 - `--tts piper` for Piper `.onnx` voice models.
 - `--tts none` to skip audio.
 
-Kokoro example:
+Kokoro Reddit example:
 
 ```bash
-java -cp out redditTxtToImg.CheckedRunner --auto \
+java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto \
   --post-title "Finish this story in the comments" \
   --topic "I found a second phone hidden in my car." \
+  --count 10 \
+  --tts kokoro \
+  --tts-command .venv-kokoro/Scripts/python.exe \
+  --voice af_heart
+```
+
+Kokoro X example:
+
+```bash
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto \
+  --post-title "Wrong answers only" \
+  --topic "Why is there a shopping cart in my living room?" \
   --count 10 \
   --tts kokoro \
   --tts-command .venv-kokoro/Scripts/python.exe \
@@ -153,7 +220,7 @@ java -cp out redditTxtToImg.CheckedRunner --auto \
 Piper example:
 
 ```bash
-java -cp out redditTxtToImg.CheckedRunner --auto \
+java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto \
   --post-title "Finish this story in the comments" \
   --topic "creepy small town stories" \
   --count 10 \
@@ -176,7 +243,7 @@ TTS options:
 Video generation requires FFmpeg and FFprobe on PATH, or a direct path passed with `--video-command`.
 
 ```bash
-java -cp out redditTxtToImg.CheckedRunner --auto \
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto \
   --post-title "Wrong answers only" \
   --topic "Why is there a shopping cart in my living room?" \
   --count 10 \
@@ -205,13 +272,24 @@ Create or edit:
 data/batch_videos.txt
 ```
 
-Format:
+Format uses two non-empty lines per video.
+
+For Reddit:
 
 ```text
-line 1 = title
-line 2 = body text
-line 3 = next title
-line 4 = next body text
+line 1 = post title
+line 2 = post body
+line 3 = next post title
+line 4 = next post body
+```
+
+For X:
+
+```text
+line 1 = hidden reply style
+line 2 = visible X post text
+line 3 = next hidden reply style
+line 4 = next visible X post text
 ```
 
 Then run:
@@ -223,13 +301,13 @@ batch_create_videos_windows.bat
 Batch outputs go under:
 
 ```text
-output/batch_videos/<timestamp>/
+output/batch_videos/<platform>_<timestamp>/
 ```
 
 Final MP4 copies are collected in:
 
 ```text
-output/batch_videos/<timestamp>/final_videos/
+output/batch_videos/<platform>_<timestamp>/final_videos/
 ```
 
 ## Profile pictures and usernames
@@ -273,10 +351,14 @@ data/author_names.txt
 
 - `src/redditTxtToImg/` contains the Java source.
 - `src/redditTxtToImg/CheckedRunner.java` is the safe CLI/script entrypoint.
+- `src/redditTxtToImg/RedditScreenshotGenerator.java` renders Reddit-style frames.
+- `src/redditTxtToImg/XThreadGenerator.java` renders X-style frames.
+- `src/redditTxtToImg/LocalLlmTextGenerator.java` handles Reddit Ollama generation.
+- `src/redditTxtToImg/XLocalLlmTextGenerator.java` handles X Ollama generation.
 - `data/author_names.txt` contains sample names.
 - `data/comments.txt` contains sample input lines.
 - `defaults.txt` contains default render and local pipeline settings.
-- `templates/` contains simple color templates.
+- `templates/` contains simple Reddit color templates.
 - `assets/` contains optional images.
 - `tools/kokoro_tts.py` is the Kokoro helper used by Java.
 - `tools/generate_profiles.py` creates procedural avatars and usernames.
@@ -289,11 +371,11 @@ data/author_names.txt
 
 ```bash
 gradle jar
-java -jar build/libs/ThreadGens-0.3.1-runtime-hardening.jar data/comments.txt output
+java -jar build/libs/ThreadGens-0.4.0-x-platform.jar data/comments.txt output
 ```
 
 Runnable jar with local AI:
 
 ```bash
-java -jar build/libs/ThreadGens-0.3.1-runtime-hardening.jar --auto --post-title "Finish this story in the comments" --topic "strange customer stories" --count 10 --tts kokoro --voice af_heart
+java -jar build/libs/ThreadGens-0.4.0-x-platform.jar --platform x --auto --post-title "Wrong answers only" --topic "Why is there a shopping cart in my living room?" --count 10 --tts kokoro --voice af_heart
 ```
