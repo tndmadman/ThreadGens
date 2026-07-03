@@ -69,6 +69,12 @@ public class LocalLlmTextGenerator {
     }
 
     public Path generateToFile(String postTitle, String originalStory, int count, Path outputFile) throws IOException, InterruptedException {
+        if (calledFromXThreadGenerator()) {
+            System.out.println("Detected direct XThreadGenerator auto mode; using X-specific Ollama prompt.");
+            XLocalLlmTextGenerator generator = new XLocalLlmTextGenerator(endpoint.toString(), model);
+            return generator.generateToFile(postTitle, originalStory, count, outputFile);
+        }
+
         List<String> lines = generateLines(postTitle, originalStory, count);
         if (outputFile.getParent() != null) {
             Files.createDirectories(outputFile.getParent());
@@ -289,6 +295,15 @@ public class LocalLlmTextGenerator {
             }
         }
         return value;
+    }
+
+    private static boolean calledFromXThreadGenerator() {
+        for (StackTraceElement element : Thread.currentThread().getStackTrace()) {
+            if ("redditTxtToImg.XThreadGenerator".equals(element.getClassName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String extractJsonString(String json, String key) throws IOException {
