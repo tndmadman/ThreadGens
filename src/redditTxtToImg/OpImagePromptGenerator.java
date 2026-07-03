@@ -77,7 +77,7 @@ final class OpImagePromptGenerator {
 
     private static String cleanPrompt(String value) {
         String cleaned = value.replace('\r', ' ').replace('\n', ' ').replaceAll("\\s+", " ").trim();
-        cleaned = cleaned.replaceAll("^(?i)(prompt|image prompt|final prompt)\\s*[:.-]\\s*", "").trim();
+        cleaned = cleaned.replaceAll("(?i)^(prompt|image prompt|final prompt)\\s*[:.-]\\s*", "").trim();
         if ((cleaned.startsWith("\"") && cleaned.endsWith("\"")) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
             cleaned = cleaned.substring(1, cleaned.length() - 1).trim();
         }
