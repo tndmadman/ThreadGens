@@ -93,23 +93,27 @@ if errorlevel 1 (
 )
 
 echo.
-if /I "%PLATFORM%"=="x" (
-  set "POST_TITLE="
-  set /p "POST_TITLE=Optional X reply style, ex wrong answers only/advice/finish story [normal replies]: "
-) else (
-  set /p "POST_TITLE=Reddit post title [Finish this story in the comments]: "
-  if "%POST_TITLE%"=="" set "POST_TITLE=Finish this story in the comments"
-)
+if /I "%PLATFORM%"=="x" goto x_prompts
+goto reddit_prompts
 
+:x_prompts
+set "POST_TITLE="
+set "TOPIC="
+set /p "POST_TITLE=Optional X reply style, ex wrong answers only/advice/finish story [normal replies]: "
 echo.
-if /I "%PLATFORM%"=="x" (
-  set /p "TOPIC=Visible original X post text [I just saw something weird and I need someone else to explain it.]: "
-  if "%TOPIC%"=="" set "TOPIC=I just saw something weird and I need someone else to explain it."
-) else (
-  set /p "TOPIC=Original post/body [weird everyday stories]: "
-  if "%TOPIC%"=="" set "TOPIC=weird everyday stories"
-)
+set /p "TOPIC=Visible original X post text [I just saw something weird and I need someone else to explain it.]: "
+if "%TOPIC%"=="" set "TOPIC=I just saw something weird and I need someone else to explain it."
+goto after_text_prompts
 
+:reddit_prompts
+set /p "POST_TITLE=Reddit post title [Finish this story in the comments]: "
+if "%POST_TITLE%"=="" set "POST_TITLE=Finish this story in the comments"
+echo.
+set /p "TOPIC=Original post/body [weird everyday stories]: "
+if "%TOPIC%"=="" set "TOPIC=weird everyday stories"
+goto after_text_prompts
+
+:after_text_prompts
 echo.
 set /p "COUNT=How many total slides/posts [10]: "
 if "%COUNT%"=="" set "COUNT=10"
