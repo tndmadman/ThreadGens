@@ -54,7 +54,7 @@ public class CheckedRunner {
 
     private static void runSelectedPlatform(String platform, String[] args) {
         if ("x".equals(platform) || "twitter".equals(platform)) {
-            XThreadGenerator.main(args);
+            XPlatformRunner.main(args);
             return;
         }
         if ("reddit".equals(platform)) {
