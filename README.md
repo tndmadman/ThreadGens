@@ -19,11 +19,11 @@ The default layout is built for TikTok, YouTube Shorts, and Reels-style vertical
 
 X output with OP image:
 
-![ThreadGens X OP image example](docs/x-op-image-example.png)
+<img src="docs/x-op-image-example.png" alt="ThreadGens X OP image example" width="360">
 
 Reddit output with OP image:
 
-![ThreadGens Reddit OP image example](docs/reddit-op-image-example.png)
+<img src="docs/reddit-op-image-example.png" alt="ThreadGens Reddit OP image example" width="360">
 
 ## Windows one-click setup
 
