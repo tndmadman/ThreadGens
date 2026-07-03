@@ -4,12 +4,17 @@ param(
     [string]$Model = 'llama3.1:8b',
     [string]$Voice = 'af_heart',
     [string]$Platform = 'reddit',
-    [switch]$KeepOllamaLoaded
+    [switch]$KeepOllamaLoaded,
+    [switch]$GenerateOpImage
 )
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
+
+if (-not $PSBoundParameters.ContainsKey('KeepOllamaLoaded')) {
+    $KeepOllamaLoaded = $true
+}
 
 $env:THREADGENS_KOKORO_VERBOSE = '0'
 $env:PYTHONWARNINGS = 'ignore'
@@ -70,10 +75,16 @@ if ($Platform -eq 'x') {
 Write-Host "Output root: $OutputRoot"
 Write-Host "Defaults: platform=$Platform, model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
 Write-Host 'Kokoro console: quiet'
+if ($GenerateOpImage) {
+    Write-Host 'OP image generation: enabled through local ComfyUI RealVisXL' -ForegroundColor Green
+    Write-Host 'ComfyUI must already be running at http://127.0.0.1:8188 with RealVisXL_V5.0_fp32.safetensors installed.' -ForegroundColor Yellow
+} else {
+    Write-Host 'OP image generation: disabled'
+}
 if ($KeepOllamaLoaded) {
     Write-Host 'Ollama unload: disabled, keeping model loaded between videos' -ForegroundColor Green
 } else {
-    Write-Host 'Ollama unload: enabled after each script (default)'
+    Write-Host 'Ollama unload: enabled after each script'
 }
 
 if (-not (Test-Path $InputPath)) {
@@ -128,9 +139,14 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
     $audioDir = Join-Path $jobRoot 'audio'
     $videoDir = Join-Path $jobRoot 'video'
     $scriptDir = Join-Path $jobRoot 'script'
+    $opImageDir = Join-Path $jobRoot 'op_images'
+    $opImageCacheDir = Join-Path $jobRoot 'image_cache'
     $scriptOut = Join-Path $scriptDir 'generated_comments.txt'
 
     New-Item -ItemType Directory -Force -Path $imageDir, $audioDir, $videoDir, $scriptDir | Out-Null
+    if ($GenerateOpImage) {
+        New-Item -ItemType Directory -Force -Path $opImageDir, $opImageCacheDir | Out-Null
+    }
 
     if ($Platform -eq 'x') {
         Write-Step "[$jobLabel/$jobCountLabel] X style: $title"
@@ -139,10 +155,13 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
         Write-Step "[$jobLabel/$jobCountLabel] Reddit title: $title"
         Write-Host "Reddit body: $body"
     }
+    if ($GenerateOpImage) {
+        Write-Host "OP image: ComfyUI RealVisXL enabled"
+    }
     Write-Host "Final MP4: $finalVideoName"
 
     $javaArgs = @(
-        '-cp', 'out', 'redditTxtToImg.CheckedRunner',
+        '-cp', 'out', 'redditTxtToImg.OpImageVideoSafeRunner',
         'data\comments.txt', $imageDir,
         '--platform', $Platform,
         '--auto',
@@ -162,6 +181,14 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
         '--no-watermark',
         '--top'
     )
+
+    if ($GenerateOpImage) {
+        $javaArgs += @(
+            '--image-mode', 'comfyui',
+            '--image-dir', $opImageDir,
+            '--image-cache-dir', $opImageCacheDir
+        )
+    }
 
     if ($KeepOllamaLoaded) {
         $javaArgs += '--keep-ollama-loaded'

@@ -11,9 +11,15 @@ $PiperExe = Join-Path $PiperDir 'piper.exe'
 $KokoroRequirements = Join-Path $PSScriptRoot 'requirements-kokoro.txt'
 $KokoroVenvDir = Join-Path $PSScriptRoot '.venv-kokoro'
 $KokoroPython = Join-Path $KokoroVenvDir 'Scripts\python.exe'
+$PiperReleaseApi = 'https://api.github.com/repos/rhasspy/piper/releases/latest'
+$PiperVoiceBase = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium'
 
 function Write-Step($Message) {
     Write-Host "`n== $Message ==" -ForegroundColor Cyan
+}
+
+function Write-DownloadNotice($Name) {
+    Write-Host "Note: $Name is a best-effort third-party download. If upstream changes or the download fails, install it manually and rerun setup." -ForegroundColor Yellow
 }
 
 function Test-Command($Name) {
@@ -117,10 +123,11 @@ function Ensure-Piper {
         return
     }
 
+    Write-DownloadNotice 'Piper Windows release'
     Write-Host 'Downloading latest Piper Windows release from GitHub...'
     New-Item -ItemType Directory -Force -Path $PiperDir | Out-Null
     $headers = @{ 'User-Agent' = 'ThreadGens-Setup' }
-    $release = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/rhasspy/piper/releases/latest'
+    $release = Invoke-RestMethod -Headers $headers -Uri $PiperReleaseApi
     $asset = $release.assets |
         Where-Object { $_.name -match 'windows.*(amd64|x64).*\.zip$' } |
         Select-Object -First 1
@@ -151,18 +158,18 @@ function Ensure-Piper {
 function Ensure-PiperVoice {
     Write-Step 'Checking Piper voice model'
     New-Item -ItemType Directory -Force -Path $VoiceDir | Out-Null
+    Write-DownloadNotice 'Piper voice model and config'
 
-    $base = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium'
     if (-not (Test-Path $VoiceFile)) {
         Write-Host "Downloading voice model: $VoiceName"
-        Invoke-WebRequest -Uri "$base/$VoiceName.onnx" -OutFile $VoiceFile
+        Invoke-WebRequest -Uri "$PiperVoiceBase/$VoiceName.onnx" -OutFile $VoiceFile
     } else {
         Write-Host "Voice model already exists: $VoiceFile"
     }
 
     if (-not (Test-Path $VoiceConfigFile)) {
         Write-Host "Downloading voice config: $VoiceName.onnx.json"
-        Invoke-WebRequest -Uri "$base/$VoiceName.onnx.json" -OutFile $VoiceConfigFile
+        Invoke-WebRequest -Uri "$PiperVoiceBase/$VoiceName.onnx.json" -OutFile $VoiceConfigFile
     } else {
         Write-Host "Voice config already exists: $VoiceConfigFile"
     }

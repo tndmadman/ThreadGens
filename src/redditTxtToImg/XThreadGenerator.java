@@ -83,6 +83,7 @@ public class XThreadGenerator {
             System.err.println("Failed: " + e.getMessage());
             printUsage();
             e.printStackTrace();
+            throw new IllegalStateException("X rendering failed", e);
         }
     }
 
@@ -330,11 +331,8 @@ public class XThreadGenerator {
     }
 
     private BufferedImage loadProfileImage(String imageName) {
-        if (imageName == null || imageName.isBlank()) {
-            return null;
-        }
-        Path path = Path.of("assets", "pfp", imageName);
-        if (!Files.exists(path)) {
+        Path path = ProfileImages.resolve(imageName);
+        if (path == null || !Files.exists(path)) {
             return null;
         }
         try {
@@ -354,7 +352,8 @@ public class XThreadGenerator {
     }
 
     private String dateText() {
-        return "Jul 2, 2026";
+        return java.time.LocalDate.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US));
     }
 
     private static String compactNumber(int value) {

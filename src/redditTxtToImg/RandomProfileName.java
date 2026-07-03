@@ -22,7 +22,7 @@ import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 
 public class RandomProfileName {
-    private static final Path RENDER_PROFILE_ROOT = Path.of("assets", "pfp");
+    private static final Path RENDER_PROFILE_ROOT = ProfileImages.CACHE_ROOT;
     private static final int MAX_SCAN_DEPTH = 6;
 
     private final List<String> profileImageNames = new ArrayList<>();
@@ -110,7 +110,7 @@ public class RandomProfileName {
         Path renderRoot = RENDER_PROFILE_ROOT.toAbsolutePath().normalize();
 
         if (source.startsWith(renderRoot)) {
-            return toForwardSlashes(renderRoot.relativize(source).toString());
+            return toRendererRelativeName(renderRoot.relativize(source).toString());
         }
 
         Path importDir = RENDER_PROFILE_ROOT.resolve("imported_profiles");
@@ -126,7 +126,7 @@ public class RandomProfileName {
             Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
 
-        return toForwardSlashes(RENDER_PROFILE_ROOT.toAbsolutePath().normalize().relativize(target.toAbsolutePath().normalize()).toString());
+        return toRendererRelativeName(RENDER_PROFILE_ROOT.toAbsolutePath().normalize().relativize(target.toAbsolutePath().normalize()).toString());
     }
 
     private void createFallbackProfileImages(Set<String> seen) {
@@ -139,7 +139,7 @@ public class RandomProfileName {
                 if (!Files.exists(output)) {
                     writeFallbackAvatar(output, i);
                 }
-                String renderName = toForwardSlashes(RENDER_PROFILE_ROOT.relativize(output).toString());
+                String renderName = toRendererRelativeName(RENDER_PROFILE_ROOT.relativize(output).toString());
                 if (seen.add(renderName)) {
                     profileImageNames.add(renderName);
                 }
@@ -204,6 +204,11 @@ public class RandomProfileName {
             return left == right;
         }
         return left.trim().equalsIgnoreCase(right.trim());
+    }
+
+    private static String toRendererRelativeName(String cacheRelativeName) {
+        Path rendererRelativePath = Path.of("..", "..", RENDER_PROFILE_ROOT.toString(), cacheRelativeName);
+        return toForwardSlashes(rendererRelativePath.toString());
     }
 
     private static String toForwardSlashes(String value) {

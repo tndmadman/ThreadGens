@@ -1,33 +1,33 @@
-ThreadGens 0.3.1-runtime-hardening
+ThreadGens 0.4.2-op-image-generation
 
-Branch: fix/runtime-hardening
+Branch: fix/runtime-cleanup-image-ready
 
 Included in this version:
-- adds CheckedRunner as the safe CLI/script entrypoint
-- points Gradle and runnable jars at CheckedRunner
-- keeps RedditScreenshotGenerator available as the raw renderer entrypoint
-- makes the GUI use checked generation and report missing-output failures
-- updates the Windows AI runner to stop on checked generation errors
-- updates batch video creation to call CheckedRunner
-- refreshes README coverage for Kokoro, Piper, video, batch mode, and profile generation
-- expands defaults.txt to document local AI, TTS, and video defaults
-- deletes expected output artifacts before each checked run so stale files cannot false-pass
-- fails fast when video output is requested while TTS is disabled
-- normalizes --tts and --voice-dir before --voice so CLI voice selection is order-forgiving through CheckedRunner
+- starts OP-only image generation for Reddit and X
+- keeps image generation disabled by default with imageMode=none
+- adds --image-mode comfyui for local ComfyUI generation
+- adds --image-mode local --op-image path for testing an existing image overlay
+- uses Ollama to expand the OP body into a detailed SDXL/RealVisXL prompt
+- generates images through local ComfyUI with RealVisXL_V5.0_fp32.safetensors defaults
+- saves generated OP images under output/images/
+- saves generated image prompts under output/cache/images/
+- overlays the generated image only onto the OP screenshot, never replies
+- adds a Windows runner prompt for OP image generation
 
-Still included from 0.3.0:
-- keeps Piper TTS fully functional as the fallback engine
-- adds Kokoro TTS through tools/kokoro_tts.py
-- uses the user prompt as the original post
-- generates AI replies/comments after the original post
-- generates all text first, then all PNG images, then all WAV audio, then all MP4 clips, then the final stitched video
-- requests Ollama model unload after script generation by default
-- keeps reply views below original post views
-- keeps likes below views
-- keeps final stitched MP4 output with transitions
+Still included from 0.4.1:
+- fixes process timeout handling for Piper and FFmpeg helpers
+- uses the checked runner as the safe CLI/script entrypoint
+- aligns Gradle, runner, and version labels on one release name
+- keeps X post dates dynamic instead of hard-coded
+- shares CLI value-option handling
+- moves generated/imported profile image runtime assets under output/cache/pfp
+- documents setup downloads as best-effort third-party downloads
 
 Default output folders:
 - generated script: output/script/generated_comments.txt
-- images: output/
+- screenshots: output/
+- generated/imported profile cache: output/cache/pfp/
+- OP image prompts/cache: output/cache/images/
+- OP images: output/images/
 - audio: output/audio/
 - video clips and final video: output/video/

@@ -7,8 +7,8 @@ set "COUNT=10"
 set "MODEL=llama3.1:8b"
 set "VOICE=af_heart"
 set "PLATFORM=reddit"
-set "KEEP_OLLAMA=N"
-set "KEEP_OLLAMA_FLAG="
+set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
+set "OP_IMAGE_FLAG="
 set "THREADGENS_KOKORO_VERBOSE=0"
 set "PYTHONWARNINGS=ignore"
 set "HF_HUB_DISABLE_PROGRESS_BARS=1"
@@ -35,6 +35,16 @@ if /I "%PLATFORM_CHOICE%"=="x" set "PLATFORM=x"
 if /I "%PLATFORM_CHOICE%"=="reddit" set "PLATFORM=reddit"
 if "%PLATFORM_CHOICE%"=="" set "PLATFORM=reddit"
 
+echo.
+set /p "MAKE_OP_IMAGE=Generate an OP image for each %PLATFORM% video with local ComfyUI RealVisXL? y/N: "
+if /I "%MAKE_OP_IMAGE%"=="Y" set "OP_IMAGE_FLAG=-GenerateOpImage"
+if /I "%MAKE_OP_IMAGE%"=="YES" set "OP_IMAGE_FLAG=-GenerateOpImage"
+
+echo.
+set /p "UNLOAD_OLLAMA=Unload Ollama after each video? y/N [default N, keeps model loaded]: "
+if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="
+if /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
+
 echo Defaults copied from run_ai_windows.bat:
 echo   platform: %PLATFORM%
 echo   model:    %MODEL%
@@ -42,16 +52,20 @@ echo   count:    %COUNT%
 echo   tts:      kokoro
 echo   voice:    %VOICE%
 echo   video:    stitched MP4, watermark off, body text top-aligned
-echo   kokoro console: quiet
-echo.
-set /p "KEEP_OLLAMA=Keep Ollama loaded between videos? y/N: "
-if /I "%KEEP_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
-if /I "%KEEP_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
-echo.
-if "%KEEP_OLLAMA_FLAG%"=="" (
-  echo Ollama unload: enabled after each script ^(default^)
+if "%OP_IMAGE_FLAG%"=="" (
+  echo   OP image: disabled
 ) else (
-  echo Ollama unload: disabled, keeping model loaded between videos
+  echo   OP image: ComfyUI RealVisXL enabled for each OP post
+)
+echo   kokoro console: quiet
+if "%KEEP_OLLAMA_FLAG%"=="" (
+  echo   Ollama: unload after each video
+) else (
+  echo   Ollama: keep loaded between videos
+)
+echo.
+if not "%OP_IMAGE_FLAG%"=="" (
+  echo OP images: enabled. Make sure ComfyUI is already running at http://127.0.0.1:8188 and RealVisXL_V5.0_fp32.safetensors is installed.
 )
 echo.
 
@@ -61,7 +75,7 @@ if not exist "tools\batch_create_videos.ps1" (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -Platform "%PLATFORM%" %KEEP_OLLAMA_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -Platform "%PLATFORM%" %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

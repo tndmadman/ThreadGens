@@ -34,6 +34,13 @@ jobs:
         shell: bash
         run: test -f output/0xsmoke.png
 
+      - name: Run local OP image overlay smoke test
+        shell: bash
+        run: |
+          printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP8z8BQDwAFgwJ/lP4PPwAAAABJRU5ErkJggg==' | base64 -d > op.png
+          java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform reddit --count 1 --prefix localimg --image-mode local --op-image op.png
+          test -f output/0localimg.png
+
       - name: Fail when requested input cannot regenerate stale output
         shell: bash
         run: |

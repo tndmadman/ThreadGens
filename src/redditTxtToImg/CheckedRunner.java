@@ -15,13 +15,6 @@ import java.util.Set;
  * Runs the selected platform generator and verifies that the expected artifacts were created.
  */
 public class CheckedRunner {
-    private static final Set<String> VALUE_OPTIONS = Set.of(
-            "--platform", "--count", "--prefix", "--style", "--names", "--profiles",
-            "--post-title", "--topic", "--llm-model", "--llm-url", "--script-out",
-            "--tts", "--voice", "--voice-dir", "--tts-command", "--audio-dir", "--tts-timeout",
-            "--video-dir", "--video-command", "--fps", "--video-timeout", "--final-video"
-    );
-
     private static final Set<String> VOICE_DEPENDENCY_OPTIONS = Set.of("--tts", "--voice-dir");
 
     public static void main(String[] args) {
@@ -48,6 +41,7 @@ public class CheckedRunner {
         expected.deleteExpectedArtifacts();
 
         runSelectedPlatform(expected.platform, rendererArgs);
+        expected.generateAndOverlayOpImageIfRequested();
 
         expected.verifyArtifactsExist();
     }
@@ -125,6 +119,9 @@ public class CheckedRunner {
         String outputPrefix = "aithread";
         String ttsEngine = "none";
         String finalVideoName = "final.mp4";
+        String postTitle = "Finish this story in the comments";
+        String topic = "weird everyday stories";
+        OpImageSettings opImageSettings = new OpImageSettings();
         int count = -1;
         boolean autoGenerateText = false;
         boolean createVideo = false;
@@ -157,6 +154,10 @@ public class CheckedRunner {
                         expected.count = parseInt(args[++i], expected.count);
                     } else if ("--prefix".equals(arg) && i + 1 < args.length) {
                         expected.outputPrefix = args[++i];
+                    } else if ("--post-title".equals(arg) && i + 1 < args.length) {
+                        expected.postTitle = args[++i];
+                    } else if ("--topic".equals(arg) && i + 1 < args.length) {
+                        expected.topic = args[++i];
                     } else if ("--tts".equals(arg) && i + 1 < args.length) {
                         expected.ttsEngine = args[++i].toLowerCase(Locale.ROOT);
                     } else if ("--audio-dir".equals(arg) && i + 1 < args.length) {
@@ -165,8 +166,8 @@ public class CheckedRunner {
                         expected.videoDirectory = Path.of(args[++i]);
                     } else if ("--final-video".equals(arg) && i + 1 < args.length) {
                         expected.finalVideoName = args[++i];
-                    } else if (VALUE_OPTIONS.contains(arg) && i + 1 < args.length) {
-                        i++;
+                    } else if (CliOptions.isValueOption(arg) && i + 1 < args.length) {
+                        expected.opImageSettings.applyArg(arg, args[++i]);
                     }
                     continue;
                 }
@@ -198,6 +199,9 @@ public class CheckedRunner {
             expected.audioDirectory = Path.of(properties.getProperty("audioDirectory", expected.audioDirectory.toString()));
             expected.videoDirectory = Path.of(properties.getProperty("videoDirectory", expected.videoDirectory.toString()));
             expected.finalVideoName = properties.getProperty("finalVideoName", expected.finalVideoName);
+            expected.postTitle = properties.getProperty("postTitle", expected.postTitle);
+            expected.topic = properties.getProperty("topic", expected.topic);
+            expected.opImageSettings = OpImageSettings.from(properties);
             return expected;
         }
 
@@ -211,6 +215,22 @@ public class CheckedRunner {
             for (Path path : expectedArtifactPaths(true)) {
                 Files.deleteIfExists(path);
             }
+        }
+
+        void generateAndOverlayOpImageIfRequested() throws IOException, InterruptedException {
+            if (!opImageSettings.isEnabled() || expectedCount(false) <= 0) {
+                return;
+            }
+            Path opScreenshotPath = outputDirectory.resolve("0" + outputPrefix + ".png");
+            String visibleTitle = "reddit".equals(platform) ? postTitle : "";
+            OpImagePipeline.generateAndOverlay(
+                    platform,
+                    visibleTitle,
+                    originalPostBodyForImagePrompt(),
+                    opScreenshotPath,
+                    outputPrefix,
+                    opImageSettings
+            );
         }
 
         void verifyArtifactsExist() throws IOException {
@@ -254,6 +274,21 @@ public class CheckedRunner {
                 return Math.min(availableLines, count);
             }
             return availableLines;
+        }
+
+        private String originalPostBodyForImagePrompt() throws IOException {
+            if (autoGenerateText) {
+                return topic;
+            }
+            if (!Files.exists(commentsFile)) {
+                throw new IOException("Input comments file was not found: " + commentsFile);
+            }
+            try (var lines = Files.lines(commentsFile)) {
+                return lines.map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .findFirst()
+                        .orElse(topic);
+            }
         }
 
         private int countInputLines() throws IOException {
