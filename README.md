@@ -7,6 +7,7 @@ It can:
 - read one text file and create one 1080x1920 PNG frame per line
 - generate a fresh Reddit thread locally with Ollama
 - generate a fresh X post and replies locally with Ollama
+- generate an optional AI image for the original post through local ComfyUI / RealVisXL
 - generate local voice audio with Kokoro or Piper
 - render per-frame MP4 clips with FFmpeg
 - stitch clips into one final MP4
@@ -15,6 +16,12 @@ It can:
 The default layout is built for TikTok, YouTube Shorts, and Reels-style vertical videos.
 
 ![Sample preview](docs/sample-preview.svg)
+
+## Example output
+
+These examples show the current OP-image layout for X and Reddit output.
+
+![ThreadGens Reddit and X output examples](docs/output-examples.svg)
 
 ## Windows one-click setup
 
@@ -43,7 +50,7 @@ After setup finishes, double-click:
 run_ai_windows.bat
 ```
 
-That runner asks for platform/thread style, TTS engine, prompt text, count, and optional final video output.
+That runner asks for platform/thread style, TTS engine, prompt text, count, optional OP image generation, and optional final video output.
 
 For Reddit:
 
@@ -59,11 +66,15 @@ optional hidden reply style
 visible original X post text
 ```
 
+Normal and batch Windows runners keep Ollama loaded by default so repeated generations are faster. They only unload Ollama if you choose that option.
+
 Default outputs:
 
 ```text
 output/script/generated_comments.txt
 output/*.png
+output/images/*.png
+output/cache/images/*.txt
 output/audio/*.wav
 output/video/*.mp4
 output/video/final.mp4
@@ -90,6 +101,12 @@ java -cp out redditTxtToImg.CheckedRunner data/comments.txt output
 ```
 
 `CheckedRunner` delegates to the selected renderer, then verifies that the expected fresh PNG/WAV/MP4 files were actually created. This prevents failed runs from looking successful.
+
+Use `OpImageVideoSafeRunner` when OP image generation and video creation are both enabled. It delays MP4 creation until after the OP image has been overlaid onto the original post PNG.
+
+```bash
+java -cp out redditTxtToImg.OpImageVideoSafeRunner --platform x --auto --topic "I just saw something weird and I need someone else to explain it." --count 10 --image-mode comfyui --tts kokoro --tts-command .venv-kokoro/Scripts/python.exe --voice af_heart --video --concat-video
+```
 
 Select a platform with `--platform`:
 
@@ -172,7 +189,7 @@ For X, `--post-title` is not displayed. It is only a hidden reply style/instruct
 X example with no hidden style:
 
 ```bash
-java -cp out redditTxtToImg.CheckedRunner --platform x --auto --topic "What the fuck do I do with my life now?" --count 5 --llm-model llama3.1:8b
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto --topic "I just saw something weird and I need someone else to explain it." --count 5 --llm-model llama3.1:8b
 ```
 
 Local AI options:
@@ -183,7 +200,70 @@ Local AI options:
 - `--llm-model MODEL` sets the Ollama model name. Default: `llama3.1:8b`.
 - `--llm-url URL` sets the Ollama generate endpoint. Default: `http://localhost:11434/api/generate`.
 - `--script-out FILE` changes where generated text is saved.
-- `--keep-ollama-loaded` skips the default unload request after script generation.
+- `--keep-ollama-loaded` keeps Ollama loaded after script generation. The Windows runners and `defaults.txt` already use keep-loaded behavior by default.
+
+## OP image generation
+
+OP image generation is optional and off by default for smoke tests and text-only runs.
+
+Two modes are supported:
+
+- `--image-mode comfyui` generates an OP image locally through ComfyUI.
+- `--image-mode local --op-image path/to/image.png` uses an existing local image for testing the overlay.
+
+ComfyUI mode uses Ollama to expand the OP title/body into an SDXL prompt, then sends that prompt to local ComfyUI. The default checkpoint is:
+
+```text
+RealVisXL_V5.0_fp32.safetensors
+```
+
+ComfyUI must already be running at:
+
+```text
+http://127.0.0.1:8188
+```
+
+Reddit OP image example:
+
+```bash
+java -cp out redditTxtToImg.OpImageVideoSafeRunner --platform reddit --auto \
+  --post-title "Finish this story in the comments" \
+  --topic "weird everyday stories" \
+  --count 10 \
+  --image-mode comfyui \
+  --tts kokoro \
+  --tts-command .venv-kokoro/Scripts/python.exe \
+  --voice af_heart \
+  --video \
+  --concat-video
+```
+
+X OP image example:
+
+```bash
+java -cp out redditTxtToImg.OpImageVideoSafeRunner --platform x --auto \
+  --topic "I just saw something weird and I need someone else to explain it." \
+  --count 10 \
+  --image-mode comfyui \
+  --tts kokoro \
+  --tts-command .venv-kokoro/Scripts/python.exe \
+  --voice af_heart \
+  --video \
+  --concat-video
+```
+
+OP image options:
+
+- `--image-mode none|local|comfyui` controls OP image behavior.
+- `--op-image FILE` supplies a local test image when using `--image-mode local`.
+- `--image-dir DIR` changes where generated OP images are saved.
+- `--image-cache-dir DIR` changes where generated prompt cache files are saved.
+- `--comfy-url URL` changes the ComfyUI server URL.
+- `--image-checkpoint NAME` changes the ComfyUI checkpoint name.
+- `--image-width N` and `--image-height N` change generated image dimensions.
+- `--image-steps N`, `--image-cfg N`, `--image-sampler NAME`, and `--image-scheduler NAME` tune ComfyUI generation.
+- `--image-negative TEXT` changes the negative prompt.
+- `--image-timeout SECONDS` changes the ComfyUI polling timeout.
 
 ## Local TTS
 
@@ -254,6 +334,8 @@ java -cp out redditTxtToImg.CheckedRunner --platform x --auto \
   --concat-video
 ```
 
+When `--image-mode comfyui` and video are both enabled, prefer `OpImageVideoSafeRunner` so the final MP4 includes the OP image overlay.
+
 Video options:
 
 - `--video` renders one MP4 clip per PNG/WAV pair.
@@ -297,6 +379,8 @@ Then run:
 ```text
 batch_create_videos_windows.bat
 ```
+
+The batch runner asks whether to generate OP images for each video. It keeps Ollama loaded between videos by default.
 
 Batch outputs go under:
 
@@ -351,31 +435,37 @@ data/author_names.txt
 
 - `src/redditTxtToImg/` contains the Java source.
 - `src/redditTxtToImg/CheckedRunner.java` is the safe CLI/script entrypoint.
+- `src/redditTxtToImg/OpImageVideoSafeRunner.java` is the safe entrypoint for OP-image plus video runs.
 - `src/redditTxtToImg/RedditScreenshotGenerator.java` renders Reddit-style frames.
 - `src/redditTxtToImg/XThreadGenerator.java` renders X-style frames.
 - `src/redditTxtToImg/LocalLlmTextGenerator.java` handles Reddit Ollama generation.
 - `src/redditTxtToImg/XLocalLlmTextGenerator.java` handles X Ollama generation.
+- `src/redditTxtToImg/OpImagePipeline.java` coordinates OP image prompting, generation, and overlay.
+- `src/redditTxtToImg/ComfyUiImageGenerator.java` calls the local ComfyUI API.
+- `src/redditTxtToImg/OpImagePromptGenerator.java` asks Ollama to write the image prompt.
 - `data/author_names.txt` contains sample names.
 - `data/comments.txt` contains sample input lines.
 - `defaults.txt` contains default render and local pipeline settings.
 - `templates/` contains simple Reddit color templates.
 - `assets/` contains optional images.
+- `docs/output-examples.svg` shows README output examples.
 - `tools/kokoro_tts.py` is the Kokoro helper used by Java.
 - `tools/generate_profiles.py` creates procedural avatars and usernames.
 - `tools/generate_comfy_profiles.py` creates ComfyUI profile images and usernames.
 - `tools/batch_create_videos.ps1` powers batch video creation.
+- `tools/run_ai_windows.ps1` powers the normal Windows AI runner.
 - `setup_windows.bat` launches Windows setup.
-- `run_ai_windows.bat` runs the normal local AI pipeline.
+- `run_ai_windows.bat` launches the normal local AI pipeline.
 
 ## Runnable jar
 
 ```bash
 gradle jar
-java -jar build/libs/ThreadGens-0.4.0-x-platform.jar data/comments.txt output
+java -jar build/libs/ThreadGens-0.4.2-op-image-generation.jar data/comments.txt output
 ```
 
 Runnable jar with local AI:
 
 ```bash
-java -jar build/libs/ThreadGens-0.4.0-x-platform.jar --platform x --auto --post-title "Wrong answers only" --topic "Why is there a shopping cart in my living room?" --count 10 --tts kokoro --voice af_heart
+java -jar build/libs/ThreadGens-0.4.2-op-image-generation.jar --platform x --auto --post-title "Wrong answers only" --topic "Why is there a shopping cart in my living room?" --count 10 --tts kokoro --voice af_heart
 ```
