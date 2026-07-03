@@ -11,7 +11,7 @@ postTitle=Finish this story in the comments
 topic=weird everyday stories
 llmModel=llama3.1:8b
 ollamaUrl=http://localhost:11434/api/generate
-unloadOllamaAfterText=true
+unloadOllamaAfterText=false
 
 # TTS defaults
 ttsEngine=none
