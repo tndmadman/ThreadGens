@@ -136,25 +136,33 @@ public class XLocalLlmTextGenerator {
                 .append("- Do not prefix lines with post, reply, tweet, title, user, or comment.\n")
                 .append("- No numbering, bullets, markdown, quotes, labels, or explanations.\n")
                 .append("- Make each reply sound like a different X user.\n")
-                .append("- Keep replies casual, direct, short, and readable aloud.\n");
+                .append("- Keep replies casual, direct, and readable aloud.\n")
+                .append("- Each reply should usually be 2 sentences, or 3 short sentences if the idea needs it.\n")
+                .append("- Aim for roughly 22 to 48 words per reply.\n")
+                .append("- Add one concrete detail per reply, such as a place, object, reaction, sound, time, or small action.\n")
+                .append("- Keep it tight enough to still feel like X, not a full paragraph.\n");
 
         switch (replyMode) {
             case STORY:
                 prompt.append("- The replies should continue the story beat by beat.\n")
-                        .append("- Each reply should add a new event, reveal, escalation, or ending.\n");
+                        .append("- Each reply should add a new event, reveal, escalation, or ending with a specific detail.\n");
                 break;
             case WRONG_ANSWERS:
-                prompt.append("- The replies should be intentionally wrong, absurd, and funny.\n");
+                prompt.append("- The replies should be intentionally wrong, absurd, and funny.\n")
+                        .append("- Give each joke a concrete image or fake explanation so it is more than a one-liner.\n");
                 break;
             case ADVICE:
-                prompt.append("- Mix practical advice, warnings, questions, and short opinions.\n");
+                prompt.append("- Mix practical advice, warnings, questions, and short opinions.\n")
+                        .append("- Include a specific reason, example, or consequence in each reply.\n");
                 break;
             case DEBATE:
-                prompt.append("- Mix agreement, skepticism, questions, and alternate explanations.\n");
+                prompt.append("- Mix agreement, skepticism, questions, and alternate explanations.\n")
+                        .append("- Give each reply a clear clue, reason, or example instead of a bare reaction.\n");
                 break;
             case NORMAL:
             default:
-                prompt.append("- Mix jokes, reactions, observations, and questions.\n");
+                prompt.append("- Mix jokes, reactions, observations, and questions.\n")
+                        .append("- Make each reply feel like a complete thought with a small detail or angle.\n");
                 break;
         }
 
