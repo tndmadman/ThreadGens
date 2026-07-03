@@ -20,11 +20,10 @@ if not "%~2"=="" set "COUNT=%~2"
 echo.
 echo ThreadGens batch video creator
 echo.
-echo Input format:
-echo   line 1 = title
-echo   line 2 = body text
-echo   line 3 = next title
-echo   line 4 = next body text
+echo Input format uses 2 non-empty lines per video:
+echo   Reddit: line 1 = post title, line 2 = post body
+echo   X:      line 1 = hidden reply style, line 2 = visible X post text
+echo   Repeat those 2 lines for each next video.
 echo.
 echo Choose platform/thread style:
 echo 1. Reddit thread
