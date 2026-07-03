@@ -1,34 +1,33 @@
-ThreadGens 0.4.1-runtime-cleanup-image-ready
+ThreadGens 0.4.2-op-image-generation
 
 Branch: fix/runtime-cleanup-image-ready
 
 Included in this version:
+- starts OP-only image generation for Reddit and X
+- keeps image generation disabled by default with imageMode=none
+- adds --image-mode comfyui for local ComfyUI generation
+- adds --image-mode local --op-image path for testing an existing image overlay
+- uses Ollama to expand the OP body into a detailed SDXL/RealVisXL prompt
+- generates images through local ComfyUI with RealVisXL_V5.0_fp32.safetensors defaults
+- saves generated OP images under output/images/
+- saves generated image prompts under output/cache/images/
+- overlays the generated image only onto the OP screenshot, never replies
+- adds a Windows runner prompt for OP image generation
+
+Still included from 0.4.1:
 - fixes process timeout handling for Piper and FFmpeg helpers
 - uses the checked runner as the safe CLI/script entrypoint
-- keeps raw renderer entrypoints available, but makes failures non-zero
 - aligns Gradle, runner, and version labels on one release name
 - keeps X post dates dynamic instead of hard-coded
-- shares CLI value-option handling and reserves future image flags
+- shares CLI value-option handling
 - moves generated/imported profile image runtime assets under output/cache/pfp
 - documents setup downloads as best-effort third-party downloads
-- adds non-functional image integration prep notes for future ComfyUI OP images
-
-Still included from 0.4.0:
-- supports Reddit and X-style vertical frames
-- keeps Piper TTS fully functional as the fallback engine
-- adds Kokoro TTS through tools/kokoro_tts.py
-- uses the user prompt as the original post
-- generates AI replies/comments after the original post
-- generates all text first, then all PNG images, then all WAV audio, then all MP4 clips, then the final stitched video
-- requests Ollama model unload after script generation by default
-- keeps reply views below original post views
-- keeps likes below views
-- keeps final stitched MP4 output with transitions
 
 Default output folders:
 - generated script: output/script/generated_comments.txt
-- images: output/
+- screenshots: output/
 - generated/imported profile cache: output/cache/pfp/
-- future OP image cache: output/cache/images/
+- OP image prompts/cache: output/cache/images/
+- OP images: output/images/
 - audio: output/audio/
 - video clips and final video: output/video/
