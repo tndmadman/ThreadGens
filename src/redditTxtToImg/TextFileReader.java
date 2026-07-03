@@ -41,7 +41,12 @@ public class TextFileReader {
 
     public String getRandomEntry(Random random) {
         if (lines.isEmpty()) {
-            return "UnknownUser";
+            if (!hasFirstRandomEntry) {
+                hasFirstRandomEntry = true;
+                firstRandomEntry = "UnknownUser";
+                return firstRandomEntry;
+            }
+            return nextFallbackUser();
         }
 
         String selected = lines.get(random.nextInt(lines.size()));
@@ -62,11 +67,7 @@ public class TextFileReader {
             }
         }
 
-        String fallback;
-        do {
-            fallback = "reply_user_" + fallbackUserCounter++;
-        } while (sameText(fallback, firstRandomEntry));
-        return fallback;
+        return nextFallbackUser();
     }
 
     public List<String> getLines() {
@@ -75,6 +76,14 @@ public class TextFileReader {
 
     public int getSize() {
         return lines.size();
+    }
+
+    private String nextFallbackUser() {
+        String fallback;
+        do {
+            fallback = "reply_user_" + fallbackUserCounter++;
+        } while (sameText(fallback, firstRandomEntry));
+        return fallback;
     }
 
     private static boolean sameText(String left, String right) {
