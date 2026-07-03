@@ -1,21 +1,20 @@
-ThreadGens 0.3.1-runtime-hardening
+ThreadGens 0.4.1-runtime-cleanup-image-ready
 
-Branch: fix/runtime-hardening
+Branch: fix/runtime-cleanup-image-ready
 
 Included in this version:
-- adds CheckedRunner as the safe CLI/script entrypoint
-- points Gradle and runnable jars at CheckedRunner
-- keeps RedditScreenshotGenerator available as the raw renderer entrypoint
-- makes the GUI use checked generation and report missing-output failures
-- updates the Windows AI runner to stop on checked generation errors
-- updates batch video creation to call CheckedRunner
-- refreshes README coverage for Kokoro, Piper, video, batch mode, and profile generation
-- expands defaults.txt to document local AI, TTS, and video defaults
-- deletes expected output artifacts before each checked run so stale files cannot false-pass
-- fails fast when video output is requested while TTS is disabled
-- normalizes --tts and --voice-dir before --voice so CLI voice selection is order-forgiving through CheckedRunner
+- fixes process timeout handling for Piper and FFmpeg helpers
+- uses the checked runner as the safe CLI/script entrypoint
+- keeps raw renderer entrypoints available, but makes failures non-zero
+- aligns Gradle, runner, and version labels on one release name
+- keeps X post dates dynamic instead of hard-coded
+- shares CLI value-option handling and reserves future image flags
+- moves generated/imported profile image runtime assets under output/cache/pfp
+- documents setup downloads as best-effort third-party downloads
+- adds non-functional image integration prep notes for future ComfyUI OP images
 
-Still included from 0.3.0:
+Still included from 0.4.0:
+- supports Reddit and X-style vertical frames
 - keeps Piper TTS fully functional as the fallback engine
 - adds Kokoro TTS through tools/kokoro_tts.py
 - uses the user prompt as the original post
@@ -29,5 +28,7 @@ Still included from 0.3.0:
 Default output folders:
 - generated script: output/script/generated_comments.txt
 - images: output/
+- generated/imported profile cache: output/cache/pfp/
+- future OP image cache: output/cache/images/
 - audio: output/audio/
 - video clips and final video: output/video/
