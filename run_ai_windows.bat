@@ -133,7 +133,23 @@ echo Cmd:          %TTS_CMD%
 echo Video:        %VIDEO_FLAGS%
 echo.
 
-java -cp out redditTxtToImg.CheckedRunner --platform %PLATFORM% --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+if /I "%PLATFORM%"=="x" if "%POST_TITLE%"=="" goto run_x_without_style
+if /I "%PLATFORM%"=="x" goto run_x_with_style
+goto run_reddit
+
+:run_x_without_style
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+goto after_java_run
+
+:run_x_with_style
+java -cp out redditTxtToImg.CheckedRunner --platform x --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+goto after_java_run
+
+:run_reddit
+java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto --post-title "%POST_TITLE%" --topic "%TOPIC%" --count %COUNT% --llm-model %MODEL% --tts %TTS% --tts-command "%TTS_CMD%" --voice "%VOICE%" --no-watermark --top %VIDEO_FLAGS%
+goto after_java_run
+
+:after_java_run
 if errorlevel 1 (
   echo.
   echo Generation failed. Check the error above.
