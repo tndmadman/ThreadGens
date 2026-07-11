@@ -24,8 +24,10 @@ import javax.imageio.ImageIO;
 public class RandomProfileName {
     private static final Path RENDER_PROFILE_ROOT = ProfileImages.CACHE_ROOT;
     private static final int MAX_SCAN_DEPTH = 6;
+    private static final String DEFAULT_AI_PROFILE_PREFIX = "tg_ai_profile_";
 
     private final List<String> profileImageNames = new ArrayList<>();
+    private final List<String> aiProfileImageNames = new ArrayList<>();
     private final Random random = new Random();
     private boolean hasFirstRandomProfileName = false;
     private String firstRandomProfileName = "";
@@ -55,25 +57,35 @@ public class RandomProfileName {
             return "";
         }
 
-        String selected = profileImageNames.get(random.nextInt(profileImageNames.size()));
         if (!hasFirstRandomProfileName) {
+            List<String> originalPostPool = aiProfileImageNames.isEmpty()
+                    ? profileImageNames
+                    : aiProfileImageNames;
+            String selected = chooseRandom(originalPostPool);
             hasFirstRandomProfileName = true;
             firstRandomProfileName = selected;
+            String profileType = aiProfileImageNames.contains(selected) ? "AI" : "fallback";
+            System.out.println("Original post profile selected: " + selected + " [" + profileType + "]");
             return selected;
         }
 
+        String selected = chooseRandom(profileImageNames);
         if (!sameProfileName(selected, firstRandomProfileName)) {
             return selected;
         }
 
         for (int attempt = 0; attempt < 25; attempt++) {
-            String candidate = profileImageNames.get(random.nextInt(profileImageNames.size()));
+            String candidate = chooseRandom(profileImageNames);
             if (!sameProfileName(candidate, firstRandomProfileName)) {
                 return candidate;
             }
         }
 
         return "";
+    }
+
+    private String chooseRandom(List<String> profileNames) {
+        return profileNames.get(random.nextInt(profileNames.size()));
     }
 
     private void scanProfileDirectory(Path profileDirectory, Set<String> seen) {
@@ -99,6 +111,9 @@ public class RandomProfileName {
             }
             if (seen.add(renderName)) {
                 profileImageNames.add(renderName);
+                if (isAiProfileSource(sourcePath)) {
+                    aiProfileImageNames.add(renderName);
+                }
             }
         } catch (IOException e) {
             System.err.println("Could not prepare profile image: " + sourcePath);
@@ -190,6 +205,22 @@ public class RandomProfileName {
     private static boolean isSupportedImage(String filename) {
         String lower = filename.toLowerCase(Locale.ROOT);
         return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif");
+    }
+
+    private static boolean isAiProfileSource(Path sourcePath) {
+        if (sourcePath == null || sourcePath.getFileName() == null) {
+            return false;
+        }
+        String filename = sourcePath.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (filename.startsWith(DEFAULT_AI_PROFILE_PREFIX)) {
+            return true;
+        }
+        for (Path part : sourcePath) {
+            if ("ai".equalsIgnoreCase(part.toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean samePath(Path a, Path b) {
