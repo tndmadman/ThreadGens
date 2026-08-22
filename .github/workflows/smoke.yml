@@ -20,6 +20,9 @@ jobs:
       - name: Compile Java sources
         run: javac -d out src/redditTxtToImg/*.java
 
+      - name: Run P0 unit smoke tests
+        run: java -Djava.awt.headless=true -cp out redditTxtToImg.P0SmokeTest
+
       - name: Run checked Reddit image generation smoke test
         run: java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform reddit --count 1 --prefix smoke
 
@@ -33,6 +36,13 @@ jobs:
       - name: Verify X smoke image
         shell: bash
         run: test -f output/0xsmoke.png
+
+      - name: Run P0 Reddit integrity smoke test
+        run: java -Djava.awt.headless=true -cp out redditTxtToImg.P0Runner data/comments.txt output --platform reddit --count 1 --prefix p0smoke --format debate --no-novelty
+
+      - name: Verify P0 smoke image
+        shell: bash
+        run: test -f output/0p0smoke.png
 
       - name: Run local OP image overlay smoke test
         shell: bash
@@ -52,4 +62,4 @@ jobs:
       - name: Fail when video is requested without TTS
         shell: bash
         run: |
-          ! java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --count 1 --prefix badvideo --video
+          ! java -cp out redditTxtToImg.P0Runner data/comments.txt output --count 1 --prefix badvideo --video
