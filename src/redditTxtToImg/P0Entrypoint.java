@@ -29,10 +29,21 @@ public final class P0Entrypoint {
 
     static void runOrThrow(String[] args) throws IOException, InterruptedException {
         String[] safeArgs = args == null ? new String[0] : args.clone();
-        if (!contains(safeArgs, "--auto")
-                || contains(safeArgs, "--list-voices")
-                || contains(safeArgs, "--gui")) {
+        if (contains(safeArgs, "--list-voices") || contains(safeArgs, "--gui")) {
             P0Runner.runOrThrow(protectManualScriptInput(safeArgs));
+            return;
+        }
+        if (!contains(safeArgs, "--auto")) {
+            P0Runner.RunConfig manualConfig = P0Runner.RunConfig.fromArgs(safeArgs);
+            NoveltyGuard manualHistory = new NoveltyGuard(
+                    manualConfig.historyFile, manualConfig.noveltyThreshold, manualConfig.historyLimit);
+            ContentFormat manualFormat = FormatSelector.resolve(
+                    manualConfig.requestedFormat,
+                    manualHistory,
+                    manualConfig.postTitle,
+                    manualConfig.topic + " " + manualConfig.readCurrentScript());
+            P0Runner.runOrThrow(applyResolvedFormat(
+                    protectManualScriptInput(safeArgs), manualFormat));
             return;
         }
 
@@ -45,6 +56,7 @@ public final class P0Entrypoint {
         FormatAwareTextGenerator generator = new FormatAwareTextGenerator(auto.ollamaUrl, auto.llmModel);
 
         int requestedCount = config.count >= 0 ? config.count : 10;
+        P0Runner.clearVideoOutputs(config, requestedCount);
         int maxAttempts = config.noveltyEnabled ? Math.max(1, config.noveltyRetries + 1) : 1;
         String feedback = "";
         NoveltyGuard.Result last = null;
@@ -88,6 +100,29 @@ public final class P0Entrypoint {
 
         String[] renderedArgs = prepareGeneratedScriptArgs(safeArgs, config.scriptOut, format);
         P0Runner.runOrThrow(renderedArgs);
+    }
+
+    static String[] applyResolvedFormat(String[] args, ContentFormat format) {
+        List<String> result = new ArrayList<>();
+        boolean written = false;
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if ("--format".equals(arg)) {
+                if (i + 1 < args.length) {
+                    i++;
+                }
+                result.add("--format");
+                result.add(format.id());
+                written = true;
+                continue;
+            }
+            result.add(arg);
+        }
+        if (!written) {
+            result.add("--format");
+            result.add(format.id());
+        }
+        return result.toArray(new String[0]);
     }
 
     static String[] prepareGeneratedScriptArgs(String[] args, Path generatedScript, ContentFormat format) {
