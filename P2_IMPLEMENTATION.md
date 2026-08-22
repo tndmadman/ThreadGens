@@ -6,7 +6,7 @@
 
 1. P0 generates/renders the video and records generation novelty history.
 2. P2 locates the exact script, rendered screenshots, narration audio, and final MP4/segment MP4s.
-3. `PublishFingerprint` builds a canonical fingerprint of what the viewer receives.
+3. `PublishFingerprint` builds a canonical fingerprint of what the viewer actually receives, including sampled frames from the finished MP4.
 4. `PublishAuditHistory` strictly loads recently approved publish fingerprints from `data/publish_history.jsonl`.
 5. Ollama semantic embeddings compare the completed script against approved publish history when semantic novelty is enabled.
 6. `PrePublishAuditor` scores content, visuals, voice/TTS, format, pacing, and optional metadata/provenance similarity.
@@ -23,13 +23,18 @@ P0 generation history and P2 publish history are intentionally separate. A P2-re
 The P2 fingerprint includes:
 
 - normalized script SHA-256 and full script for similarity comparisons;
-- final video/clip byte hash;
+- final video/clip byte hash that is independent of output filename;
 - 64-bit perceptual dHash values from the rendered social frames;
-- actual selected content format (resolved from P0 history when `--format auto` was used);
-- TTS engine and selected voice;
+- three perceptual samples from each completed MP4, so burned captions, overlays, motion composition, and other final-video presentation differences are included;
+- actual selected content format;
+- TTS engine and selected known voice;
 - real per-segment audio durations from ffprobe;
-- total duration;
+- real completed-artifact duration from ffprobe;
 - optional metadata signature.
+
+For `--format auto`, P2 first resolves the exact P0 history row for the rendered script. If P0 history recording was explicitly disabled, P2 reruns the same deterministic format selector against the unchanged history so the fingerprint records the actual selected format instead of the literal value `auto`.
+
+Unknown/missing voice identifiers do not count as repeated voices and do not create a voice streak penalty.
 
 The optional metadata signature is deliberately P1-compatible without a compile-time dependency. P2 captures relevant caption/identity/profile/provenance/voice-style CLI options when present and automatically hashes any of these sidecars when they exist:
 
@@ -37,7 +42,7 @@ The optional metadata signature is deliberately P1-compatible without a compile-
 - `p1_manifest.json` in the image/output or video directory;
 - any file explicitly supplied with `--publish-metadata PATH`.
 
-This lets the P1 branch later expose richer caption/identity/provenance state without requiring P2 to duplicate those systems.
+The final-MP4 perceptual samples also allow later P1 caption and overlay changes to influence visual similarity even before a stable P1 manifest schema is available.
 
 ## Risk model
 
@@ -50,7 +55,7 @@ Per closest approved output, the aggregate score currently weights:
 - normalized segment pacing: 18%
 - optional P1 metadata signature: 10%
 
-Ollama semantic premise similarity can raise the content component above lexical similarity. Recent same-format and same-voice streaks add up to 12 risk points to catch feed-level repetition that is not severe enough to make any one pair a duplicate.
+Ollama semantic premise similarity can raise the content component above lexical similarity. Recent same-format and same-known-voice streaks add up to 12 risk points to catch feed-level repetition that is not severe enough to make any one pair a duplicate.
 
 Default thresholds:
 
@@ -100,6 +105,8 @@ An existing malformed `publish_history.jsonl` is an error. P2 never treats corru
 
 When semantic comparison is enabled and approved history exists, an Ollama embedding failure also fails the publish audit instead of silently skipping semantic comparison.
 
+If P2 cannot probe or sample a completed video artifact, the audit fails instead of silently omitting final-video evidence.
+
 ## Validation
 
 `P2SmokeTest` covers:
@@ -107,7 +114,9 @@ When semantic comparison is enabled and approved history exists, an Ollama embed
 - empty history PASS;
 - exact artifact BLOCK;
 - exact script BLOCK;
-- same voice alone does not hard-block distinct content;
+- semantic premise hard BLOCK;
+- same known voice alone does not hard-block distinct content;
+- unknown voice identifiers do not create false voice reuse;
 - publish-history round trip;
 - malformed history fails closed;
 - report creation.
@@ -115,8 +124,10 @@ When semantic comparison is enabled and approved history exists, an Ollama embed
 `P2ArtifactSmokeTest` uses real FFmpeg/ffprobe media and validates:
 
 - actual final artifact hashing;
-- rendered-image perceptual hashing;
+- source-image perceptual hashing;
+- sampled finished-MP4 perceptual hashing;
 - real audio duration capture;
+- real final-video duration capture;
 - publish-history integration;
 - exact finished-artifact duplicate blocking.
 
