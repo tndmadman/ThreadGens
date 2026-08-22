@@ -18,6 +18,14 @@ set "TOKENIZERS_PARALLELISM=false"
 if not "%~1"=="" set "INPUT_FILE=%~1"
 if not "%~2"=="" set "COUNT=%~2"
 
+call :EnsureBatchRunner
+if errorlevel 1 (
+  echo.
+  echo Batch launcher cannot continue until tools\batch_create_videos.ps1 is current.
+  pause
+  exit /b 1
+)
+
 echo.
 echo ThreadGens batch video creator
 echo.
@@ -43,8 +51,7 @@ if /I "%MAKE_OP_IMAGE%"=="YES" set "OP_IMAGE_FLAG=-GenerateOpImage"
 
 echo.
 set /p "UNLOAD_OLLAMA=Unload Ollama after each video? y/N [default N, keeps model loaded]: "
-if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="
-if /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
+if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="nif /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
 
 echo Defaults copied from run_ai_windows.bat:
 echo   platform: %PLATFORM%
@@ -73,12 +80,6 @@ if not "%OP_IMAGE_FLAG%"=="" (
 )
 echo.
 
-if not exist "tools\batch_create_videos.ps1" (
-  echo Missing tools\batch_create_videos.ps1
-  pause
-  exit /b 1
-)
-
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -Platform "%PLATFORM%" %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
@@ -93,3 +94,64 @@ if "%EXITCODE%"=="0" (
 echo.
 pause
 exit /b %EXITCODE%
+
+:EnsureBatchRunner
+set "PS_SCRIPT=tools\batch_create_videos.ps1"
+set "CONTINUE_MARKER=Continuing to the next batch job."
+
+if not exist "%PS_SCRIPT%" (
+  echo Missing %PS_SCRIPT%
+  exit /b 1
+)
+
+findstr /C:"%CONTINUE_MARKER%" "%PS_SCRIPT%" >nul 2>&1
+if not errorlevel 1 exit /b 0
+
+echo.
+echo Detected an outdated local %PS_SCRIPT%.
+echo Attempting to refresh only that launcher script from origin/main...
+
+where git >nul 2>&1
+if errorlevel 1 (
+  echo Git was not found, so the stale PowerShell runner cannot be repaired automatically.
+  exit /b 1
+)
+
+if not exist ".git" (
+  echo This folder is not a Git checkout, so the stale PowerShell runner cannot be repaired automatically.
+  exit /b 1
+)
+
+git diff --quiet -- "%PS_SCRIPT%"
+if errorlevel 1 (
+  echo Local edits exist in %PS_SCRIPT%.
+  echo Refusing to overwrite them automatically. Commit/stash those edits or restore the file from origin/main.
+  exit /b 1
+)
+
+git fetch origin main --quiet
+if errorlevel 1 (
+  echo Could not fetch origin/main.
+  exit /b 1
+)
+
+git rev-parse --verify origin/main >nul 2>&1
+if errorlevel 1 (
+  echo origin/main could not be resolved after fetch.
+  exit /b 1
+)
+
+git restore --source origin/main --worktree -- "%PS_SCRIPT%"
+if errorlevel 1 (
+  echo Failed to refresh %PS_SCRIPT% from origin/main.
+  exit /b 1
+)
+
+findstr /C:"%CONTINUE_MARKER%" "%PS_SCRIPT%" >nul 2>&1
+if errorlevel 1 (
+  echo The refreshed PowerShell runner is still missing the required batch-continuation behavior.
+  exit /b 1
+)
+
+echo Refreshed %PS_SCRIPT% successfully.
+exit /b 0
