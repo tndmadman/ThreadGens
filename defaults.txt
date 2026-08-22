@@ -13,6 +13,15 @@ llmModel=llama3.1:8b
 ollamaUrl=http://localhost:11434/api/generate
 unloadOllamaAfterText=false
 
+# P0 originality / recommendation-safety defaults
+format=auto
+historyFile=data/generation_history.jsonl
+historyLimit=500
+noveltyThreshold=48
+noveltyRetries=4
+noveltyEnabled=true
+integritySanitize=true
+
 # TTS defaults
 ttsEngine=none
 ttsCommand=piper
