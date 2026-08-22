@@ -66,6 +66,7 @@ if "%KEEP_OLLAMA_FLAG%"=="" (
 ) else (
   echo   Ollama: keep loaded between videos
 )
+echo   batch failures: continue to later jobs; failed/rejected jobs are summarized at the end
 echo.
 if not "%OP_IMAGE_FLAG%"=="" (
   echo OP images: enabled. Make sure ComfyUI is already running at http://127.0.0.1:8188 and RealVisXL_V5.0_fp32.safetensors is installed.
@@ -84,6 +85,8 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 if "%EXITCODE%"=="0" (
   echo Batch video creation finished.
+) else if "%EXITCODE%"=="2" (
+  echo Batch video creation finished with one or more failed/rejected jobs. See the summary and failed_jobs.txt above.
 ) else (
   echo Batch video creation stopped with exit code %EXITCODE%.
 )
