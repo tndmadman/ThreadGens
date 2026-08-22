@@ -1,19 +1,20 @@
 # P0 content-originality pipeline
 
-`P0Runner` is the production/default ThreadGens entry point for the P0 content-quality work. `CheckedRunner` remains available as the low-level/raw compatibility renderer and smoke-test target.
+`P0Entrypoint` is the production/default ThreadGens entry point for the P0 content-quality work. It owns hidden format-aware auto generation, then delegates the accepted script to `P0Runner` for rendering, integrity cleanup, dynamic video, and history persistence. `CheckedRunner` remains available as the low-level/raw compatibility renderer and smoke-test target.
 
 ## Production flow
 
 1. Resolve a genuinely different content format (`--format auto` by default).
-2. For auto-generated scripts, add format-specific narrative instructions to the local LLM prompt.
-3. Render the normal platform images and TTS audio through the existing checked renderer. Video flags are intentionally delayed so OP-image overlays are complete first.
-4. Compare the candidate script against persistent local generation history.
-5. If an auto-generated candidate is too repetitive, regenerate it with explicit anti-repeat feedback. Repeated failure stops the run instead of silently publishing a low-novelty script.
-6. Remove synthetic engagement claims and synthetic X verification markers from the rendered output images.
-7. Build a format-specific presentation composition.
-8. Render each narrated segment with continuous motion instead of holding a static PNG for the full narration.
-9. Stitch the dynamic clips using the existing H.264/AAC final-video path.
-10. Only after a successful run, append the accepted script/format/topic fingerprint to local history.
+2. For `--auto`, generate replies with `FormatAwareTextGenerator`. Format/originality instructions are placed only in the hidden Ollama prompt; the visible title and original post body are preserved exactly.
+3. Compare each auto-generated candidate against persistent local generation history before rendering.
+4. If a candidate is too repetitive, regenerate it with explicit anti-repeat feedback. Repeated failure stops the run instead of silently publishing a low-novelty script.
+5. Pass the accepted generated script to the normal checked platform renderer as explicit input, so the legacy auto generator cannot leak hidden prompt guidance into visible content.
+6. Render platform images and TTS audio. Video flags are intentionally delayed so OP-image overlays are complete first.
+7. Remove synthetic engagement claims and synthetic X verification markers from the rendered output images.
+8. Build a format-specific presentation composition.
+9. Render each narrated segment with continuous motion instead of holding a static PNG for the full narration.
+10. Stitch the dynamic clips using the existing H.264/AAC final-video path.
+11. Only after a successful production run, append the accepted script/format/topic fingerprint to local history.
 
 ## Content formats
 
@@ -25,7 +26,15 @@
 - `best_answers` — independent ranked responses.
 - `escalating_conversation` — short, directly responsive conversation turns with alternating message bubbles.
 
-These formats change both the generation guidance and the video composition. They are not just background/color variants.
+These formats change both the hidden generation prompt and the video composition. They are not just background/color variants.
+
+## Hidden-prompt isolation
+
+The visible OP/title must never be used as a transport for internal generation instructions. `P0Entrypoint` therefore generates the auto script before the platform renderer runs, preserving the original `--post-title` and `--topic` values for display while sending format and novelty guidance only to Ollama.
+
+After generation, `--auto` is removed and the generated script file replaces the comments input. This prevents the legacy platform-specific auto generator from running a second time.
+
+Manual runs are also isolated from stale `output/script/generated_comments.txt` files so an old auto script cannot silently replace explicit user input during novelty/caption processing.
 
 ## Novelty guard
 
@@ -48,7 +57,7 @@ Useful options:
 - `--novelty-retries N` (default 4 retries after the first candidate)
 - `--no-novelty` for intentional one-off/debug runs
 
-Auto-generated content is regenerated when rejected. Manual/supplied text is never silently rewritten; the runner emits a warning and continues so explicit user input remains authoritative.
+Auto-generated content is regenerated when rejected. Manual/supplied text is never silently rewritten; the renderer emits a warning and continues so explicit user input remains authoritative.
 
 ## Integrity cleanup
 
@@ -71,9 +80,11 @@ The change is in content presentation: every normal narrated segment receives co
 
 ## Compatibility
 
-Existing scripts that invoke `redditTxtToImg.OpImageVideoSafeRunner` continue to work. That class is now a compatibility alias for `P0Runner`, so the Windows interactive and batch paths inherit P0 behavior without requiring users to change their commands.
+Existing scripts that invoke `redditTxtToImg.OpImageVideoSafeRunner` continue to work. That class is now a compatibility alias for `P0Entrypoint`, so the Windows interactive and batch paths inherit P0 behavior without requiring command changes.
 
-`Runner` and the Gradle application/JAR manifest also point to `P0Runner`.
+`Runner` and the Gradle application/JAR manifest also point to `P0Entrypoint`.
+
+`P0Runner` remains the rendering/orchestration engine underneath the safe entry point. Production callers should use `P0Entrypoint` (or the existing Windows scripts) rather than invoking raw/legacy entry points directly.
 
 ## Validation
 
@@ -85,6 +96,12 @@ Existing scripts that invoke `redditTxtToImg.OpImageVideoSafeRunner` continue to
 - automatic format rotation,
 - explicit format selection,
 - synthetic verified-marker cleanup,
-- successful format-specific image composition for all five formats.
+- successful format-specific image composition for all five formats,
+- removal of legacy `--auto` before rendering a generated script,
+- preservation of the visible original topic,
+- explicit propagation of the resolved format,
+- manual-input protection from stale generated-script paths.
 
-GitHub Actions runs those tests in addition to the existing raw Reddit/X and OP-image compatibility smoke tests and a P0 integration image run.
+The motion filter was also exercised against real local `ffmpeg`/`ffprobe` for all five formats and produced valid MP4 clips.
+
+GitHub Actions runs the P0 unit tests in addition to the existing raw Reddit/X and OP-image compatibility smoke tests and a P0 integration image run.
