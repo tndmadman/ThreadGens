@@ -14,8 +14,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Final production entry point. P0 owns generation/render originality; P2 runs
- * after P0 succeeds and gates the completed video before it is publish-ready.
+ * Final production entry point. P0/P1 own generation, rendering, captions,
+ * voices, identities and provenance; P2 runs after they succeed and gates the
+ * completed video before it is publish-ready.
  */
 public final class P2Entrypoint {
     private static final Pattern HISTORY_FORMAT = Pattern.compile("\\\"format\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
@@ -84,10 +85,6 @@ public final class P2Entrypoint {
                 config.videoCommand
         ));
 
-        // The history read, semantic comparison, decision, and accepted-history
-        // append form one serialized transaction. Without this lock, two identical
-        // jobs launched at the same time could both read the same old snapshot and
-        // both pass before either one records its result.
         PublishAuditHistory history = new PublishAuditHistory(config.publishHistory, config.publishHistoryLimit);
         try (PublishAuditHistory.LockHandle ignored = history.lockExclusive()) {
             List<PublishAuditHistory.Entry> recent = history.load();
@@ -154,10 +151,6 @@ public final class P2Entrypoint {
             }
         }
 
-        // If P0 novelty/history recording was explicitly disabled, the current
-        // accepted script may not have a history row. Re-run the same deterministic
-        // selector against the unchanged history so P2 fingerprints the actual
-        // format instead of the meaningless literal value "auto".
         NoveltyGuard formatHistory = new NoveltyGuard(config.generationHistory);
         String selectionTopic = config.autoGenerateText
                 ? config.topic
@@ -187,6 +180,7 @@ public final class P2Entrypoint {
         Path outputDirectory = Path.of("output");
         Path audioDirectory = Path.of("output", "audio");
         Path videoDirectory = Path.of("output", "video");
+        Path metadataDirectory = null;
         Path scriptOut = Path.of("output", "script", "generated_comments.txt");
         Path generationHistory = Path.of("data", "generation_history.jsonl");
         Path publishHistory = Path.of("data", "publish_history.jsonl");
@@ -248,6 +242,7 @@ public final class P2Entrypoint {
                         case "--voice" -> { if (i + 1 < args.length) config.voice = args[++i]; }
                         case "--audio-dir" -> { if (i + 1 < args.length) config.audioDirectory = Path.of(args[++i]); }
                         case "--video-dir" -> { if (i + 1 < args.length) config.videoDirectory = Path.of(args[++i]); }
+                        case "--metadata-dir" -> { if (i + 1 < args.length) config.metadataDirectory = Path.of(args[++i]); }
                         case "--video-command" -> { if (i + 1 < args.length) config.videoCommand = args[++i]; }
                         case "--final-video" -> { if (i + 1 < args.length) config.finalVideoName = args[++i]; }
                         case "--script-out" -> { if (i + 1 < args.length) config.scriptOut = Path.of(args[++i]); }
@@ -270,6 +265,9 @@ public final class P2Entrypoint {
                 if (positional == 0) config.commentsFile = Path.of(arg);
                 else if (positional == 1) config.outputDirectory = Path.of(arg);
                 positional++;
+            }
+            if (config.metadataDirectory == null) {
+                config.metadataDirectory = config.outputDirectory.resolve("metadata");
             }
             if ("x".equals(config.platform) && !config.postTitleExplicit) {
                 config.postTitle = "";
@@ -299,6 +297,8 @@ public final class P2Entrypoint {
                     p.getProperty("semanticNoveltyEnabled", String.valueOf(config.semanticNoveltyEnabled)));
             config.postTitle = p.getProperty("postTitle", config.postTitle);
             config.topic = p.getProperty("topic", config.topic);
+            String metadataDir = p.getProperty("metadataDirectory", "").trim();
+            if (!metadataDir.isBlank()) config.metadataDirectory = Path.of(metadataDir);
             config.publishHistory = Path.of(p.getProperty("publishHistoryFile", config.publishHistory.toString()));
             config.publishHistoryLimit = parseInt(p.getProperty("publishHistoryLimit"), config.publishHistoryLimit);
             config.warnThreshold = parseInt(p.getProperty("publishAuditWarnThreshold"), config.warnThreshold);
@@ -326,27 +326,81 @@ public final class P2Entrypoint {
             StringBuilder out = new StringBuilder();
             for (int i = 0; i < args.length; i++) {
                 String arg = args[i];
-                String lower = arg == null ? "" : arg.toLowerCase(Locale.ROOT);
-                if (lower.startsWith("--caption") || lower.startsWith("--identity")
-                        || lower.startsWith("--profile") || lower.startsWith("--provenance")
-                        || lower.startsWith("--voice-style")) {
+                if (arg == null) continue;
+                if (isP1MetadataValueOption(arg)) {
                     out.append(arg);
-                    if (i + 1 < args.length && !args[i + 1].startsWith("--")) out.append('=').append(args[++i]);
+                    if (i + 1 < args.length) out.append('=').append(args[++i]);
                     out.append('\n');
+                } else if ("--no-provenance-metadata".equals(arg)) {
+                    out.append(arg).append('\n');
                 }
             }
-            List<Path> candidates = new ArrayList<>(metadataFiles);
-            candidates.add(outputDirectory.resolve("production_manifest.json"));
-            candidates.add(videoDirectory.resolve("production_manifest.json"));
-            candidates.add(outputDirectory.resolve("p1_manifest.json"));
-            candidates.add(videoDirectory.resolve("p1_manifest.json"));
-            for (Path path : candidates) {
+
+            for (Path path : metadataFiles) {
                 if (path != null && Files.isRegularFile(path)) {
                     out.append(path.getFileName()).append(':')
                             .append(PublishFingerprint.sha256(Files.readAllBytes(path))).append('\n');
                 }
             }
+
+            Path manifest = metadataDirectory == null
+                    ? null : metadataDirectory.resolve(outputPrefix + "-provenance.json");
+            if (manifest == null || !Files.isRegularFile(manifest)) {
+                Path adjacent = videoDirectory.resolve(finalVideoName + ".provenance.json");
+                if (Files.isRegularFile(adjacent)) manifest = adjacent;
+            }
+            if (manifest != null && Files.isRegularFile(manifest)) {
+                appendStableP1ManifestSignature(out, manifest);
+            }
+
+            List<Path> legacyCandidates = List.of(
+                    outputDirectory.resolve("production_manifest.json"),
+                    videoDirectory.resolve("production_manifest.json"),
+                    outputDirectory.resolve("p1_manifest.json"),
+                    videoDirectory.resolve("p1_manifest.json"));
+            for (Path path : legacyCandidates) {
+                if (Files.isRegularFile(path)) {
+                    out.append(path.getFileName()).append(':')
+                            .append(PublishFingerprint.sha256(Files.readAllBytes(path))).append('\n');
+                }
+            }
             return out.toString();
+        }
+
+        private static void appendStableP1ManifestSignature(StringBuilder out, Path manifest) throws IOException {
+            String json = Files.readString(manifest, StandardCharsets.UTF_8);
+            out.append("p1-provenance:");
+            for (String key : List.of(
+                    "schema", "disclosure", "origin", "platform", "format", "llmModel",
+                    "engine", "voiceSelection", "voiceSeries", "delivery", "language",
+                    "imageMode", "imageCheckpoint", "captions", "captionTiming")) {
+                String value = JsonText.extractString(json, key);
+                if (value != null) out.append(key).append('=').append(value).append(';');
+            }
+            for (String key : List.of("speed", "sentencePauseMs", "dynamicSceneChanges")) {
+                String value = jsonScalar(json, key);
+                if (value != null) out.append(key).append('=').append(value).append(';');
+            }
+            out.append('\n');
+        }
+
+        private static String jsonScalar(String json, String key) {
+            Pattern pattern = Pattern.compile("\\\"" + Pattern.quote(key)
+                    + "\\\"\\s*:\\s*([^,}\\r\\n]+)");
+            Matcher matcher = pattern.matcher(json);
+            return matcher.find() ? matcher.group(1).trim() : null;
+        }
+
+        private static boolean isP1MetadataValueOption(String value) {
+            return "--captions".equals(value) || "--caption-words".equals(value)
+                    || "--visual-max-scenes".equals(value)
+                    || "--voice-series".equals(value) || "--voice-selection".equals(value)
+                    || "--series-id".equals(value) || "--tts-delivery".equals(value)
+                    || "--tts-speed".equals(value) || "--tts-language".equals(value)
+                    || "--tts-sentence-pause-ms".equals(value)
+                    || "--identity-history-file".equals(value) || "--identity-history-limit".equals(value)
+                    || "--metadata-dir".equals(value) || "--disclosure".equals(value)
+                    || "--content-origin".equals(value);
         }
 
         private static boolean isP2Flag(String value) {
