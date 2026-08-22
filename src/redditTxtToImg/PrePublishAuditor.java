@@ -125,7 +125,9 @@ final class PrePublishAuditor {
         if (closestScores.visual >= 0.90) {
             findings.add(String.format(Locale.US, "Visual-frame similarity is %.0f%%.", closestScores.visual * 100.0));
         }
-        if (closestScores.audio >= 0.95) findings.add("The same voice/TTS combination is being reused.");
+        if (closestScores.audio >= 0.95 && isKnownVoice(candidate.voice)) {
+            findings.add("The same known voice/TTS combination is being reused.");
+        }
         if (closestScores.format >= 0.99) findings.add("The closest approved video uses the same content format.");
         if (closestScores.pacing >= 0.90) {
             findings.add(String.format(Locale.US, "Segment pacing similarity is %.0f%%.", closestScores.pacing * 100.0));
@@ -221,8 +223,11 @@ final class PrePublishAuditor {
     }
 
     private static double audioSimilarity(PublishFingerprint a, PublishFingerprint b) {
-        boolean sameVoice = a.voice.equalsIgnoreCase(b.voice);
-        boolean sameEngine = a.ttsEngine.equalsIgnoreCase(b.ttsEngine);
+        boolean aKnown = isKnownVoice(a.voice);
+        boolean bKnown = isKnownVoice(b.voice);
+        boolean sameVoice = aKnown && bKnown && a.voice.equalsIgnoreCase(b.voice);
+        boolean sameEngine = isKnownValue(a.ttsEngine) && isKnownValue(b.ttsEngine)
+                && a.ttsEngine.equalsIgnoreCase(b.ttsEngine);
         if (sameVoice && sameEngine) return 1.0;
         if (sameVoice) return 0.75;
         if (sameEngine) return 0.35;
@@ -250,13 +255,22 @@ final class PrePublishAuditor {
     private static int streakPenalty(PublishFingerprint candidate, List<PublishAuditHistory.Entry> history) {
         int sameFormat = 0;
         int sameVoice = 0;
+        boolean candidateVoiceKnown = isKnownVoice(candidate.voice);
         for (int i = history.size() - 1; i >= 0 && history.size() - i <= 8; i--) {
             PublishFingerprint fp = history.get(i).fingerprint();
             if (candidate.format.equalsIgnoreCase(fp.format)) sameFormat++;
-            if (candidate.voice.equalsIgnoreCase(fp.voice)) sameVoice++;
+            if (candidateVoiceKnown && isKnownVoice(fp.voice) && candidate.voice.equalsIgnoreCase(fp.voice)) sameVoice++;
         }
         int penalty = Math.max(0, sameFormat - 2) * 2 + Math.max(0, sameVoice - 3);
         return Math.min(12, penalty);
+    }
+
+    private static boolean isKnownVoice(String value) {
+        return isKnownValue(value) && !"none".equalsIgnoreCase(value);
+    }
+
+    private static boolean isKnownValue(String value) {
+        return value != null && !value.isBlank() && !"unknown".equalsIgnoreCase(value);
     }
 
     private static List<String> tokens(String value) {
