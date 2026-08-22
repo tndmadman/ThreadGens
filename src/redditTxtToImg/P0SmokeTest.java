@@ -21,6 +21,8 @@ public final class P0SmokeTest {
             testIntegrityAndVisuals(temp);
             testEntrypointArgumentIsolation(temp);
             testContentAwareFormatSelection(temp);
+            testHiddenPromptDoesNotBecomeVisible();
+            testStaleVideoCleanup(temp);
             System.out.println("P0 smoke tests passed.");
         } finally {
             deleteRecursively(temp);
@@ -131,6 +133,41 @@ public final class P0SmokeTest {
                 "auto", guard, "Finish this story in the replies", "The basement door opened by itself");
         require(story == ContentFormat.THREAD_STORY || story == ContentFormat.ESCALATING_CONVERSATION,
                 "Story-continuation prompts should select a story-compatible format.");
+    }
+
+    private static void testHiddenPromptDoesNotBecomeVisible() throws Exception {
+        FormatAwareTextGenerator generator = new FormatAwareTextGenerator(
+                "http://127.0.0.1:9/api/generate", "not-used");
+        String visible = "This exact sentence must remain the visible original post.";
+        var lines = generator.generateLines(
+                "reddit",
+                "A visible title",
+                visible,
+                1,
+                ContentFormat.DEBATE,
+                "hidden retry instruction");
+        require(lines.size() == 1 && visible.equals(lines.get(0)),
+                "Hidden format/novelty guidance must never replace the visible OP.");
+        require(!lines.get(0).contains("hidden retry instruction"),
+                "Hidden novelty feedback must not leak into visible output.");
+    }
+
+    private static void testStaleVideoCleanup(Path temp) throws Exception {
+        P0Runner.RunConfig config = new P0Runner.RunConfig();
+        config.createVideo = true;
+        config.outputPrefix = "cleanup";
+        config.videoDirectory = temp.resolve("video-cleanup");
+        config.finalVideoName = "final.mp4";
+        Files.createDirectories(config.videoDirectory);
+        Files.writeString(config.videoPath(0), "stale");
+        Files.writeString(config.videoPath(1), "stale");
+        Files.writeString(config.videoDirectory.resolve(config.finalVideoName), "stale");
+
+        P0Runner.clearVideoOutputs(config, 2);
+        require(!Files.exists(config.videoPath(0)) && !Files.exists(config.videoPath(1)),
+                "Old segment videos must be removed before a new run.");
+        require(!Files.exists(config.videoDirectory.resolve(config.finalVideoName)),
+                "Old final video must be removed before a new run.");
     }
 
     private static void require(boolean condition, String message) {
