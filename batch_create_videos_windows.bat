@@ -69,6 +69,8 @@ echo   tts:      kokoro
 echo   voices:   %VOICE_SERIES% ^(one stable selection per video^)
 echo   text:     narration-timed reveal inside the rendered social image
 echo   captions: bottom duplicate subtitles disabled
+echo   motion:   locked/static social frame ^(no pan, zoom, crop drift, or state jumping^)
+echo   texture:  subtle full-frame temporal grain on the final stitched MP4
 echo   metadata: AI disclosure and provenance sidecars
 echo   video:    stitched MP4, watermark off, body text top-aligned
 if "%OP_IMAGE_FLAG%"=="" (

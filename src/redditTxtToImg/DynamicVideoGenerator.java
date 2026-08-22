@@ -13,13 +13,19 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Renders true multi-state narrated clips and stitches them with format-specific
- * transitions. Delivery stays conventional H.264/AAC/yuv420p/+faststart.
+ * Renders narration-timed social frames and stitches them into conventional
+ * H.264/AAC/yuv420p/+faststart MP4s.
+ *
+ * The social frame itself stays spatially locked. Narration-timed states may
+ * reveal different pixels/text, but the frame no longer pans, zooms, drifts or
+ * changes crop position between states. A very light temporal grain pass is
+ * applied once to the completed video so Reddit and X use the same final look.
  */
 final class DynamicVideoGenerator {
     private static final double END_PAUSE_SECONDS = 0.55;
     private static final double FADE_IN_SECONDS = 0.08;
     private static final double FADE_OUT_SECONDS = 0.14;
+    private static final int FINAL_GRAIN_STRENGTH = 2;
 
     private final String ffmpegCommand;
     private final int timeoutSeconds;
@@ -102,7 +108,7 @@ final class DynamicVideoGenerator {
         StringBuilder filter = new StringBuilder();
         for (int i = 0; i < states.size(); i++) {
             filter.append('[').append(i).append(":v]")
-                    .append(motionFilter(safeWidth, safeHeight, format, itemIndex, i))
+                    .append(staticFrameFilter(safeWidth, safeHeight))
                     .append(",trim=duration=").append(formatSeconds(stateDurations.get(i)))
                     .append(",setpts=PTS-STARTPTS[v").append(i).append("];");
         }
@@ -139,13 +145,13 @@ final class DynamicVideoGenerator {
         command.add(outputFile.toString());
 
         try {
-            run(command, "timed-state dynamic video render");
+            run(command, "timed-state static video render");
         } finally {
             if (filterCaptionFile != null && !filterCaptionFile.equals(captionFile)) {
                 Files.deleteIfExists(filterCaptionFile);
             }
         }
-        verifyNonEmpty(outputFile, "Dynamic video render");
+        verifyNonEmpty(outputFile, "Static video render");
         return outputFile;
     }
 
@@ -159,7 +165,6 @@ final class DynamicVideoGenerator {
             ContentFormat format,
             int index
     ) throws IOException, InterruptedException {
-        double duration = probeDurationSeconds(audioFile);
         List<TimedVisualStateRenderer.RenderedState> states = List.of(
                 new TimedVisualStateRenderer.RenderedState(presentationFrame, 1.0, 0, 1));
         return renderClip(states, audioFile, outputFile, width, height, format, index);
@@ -176,20 +181,18 @@ final class DynamicVideoGenerator {
             ContentFormat format,
             Map<String, String> metadata
     ) throws IOException, InterruptedException {
-        if (metadata == null || metadata.isEmpty()) {
-            return combineClipsInternal(clips, outputFile, format);
-        }
         if (outputFile.getParent() != null) {
             Files.createDirectories(outputFile.getParent());
         }
-        Path temporary = outputFile.resolveSibling(outputFile.getFileName() + ".unmarked.mp4");
-        Files.deleteIfExists(temporary);
+
+        Path stitched = outputFile.resolveSibling(outputFile.getFileName() + ".stitched.mp4");
+        Files.deleteIfExists(stitched);
         try {
-            combineClipsInternal(clips, temporary, format);
-            remuxWithMetadata(temporary, outputFile, metadata);
-            verifyNonEmpty(outputFile, "Final metadata remux");
+            combineClipsInternal(clips, stitched, format);
+            applyFinalGrainAndMetadata(stitched, outputFile, metadata);
+            verifyNonEmpty(outputFile, "Final grain/metadata render");
         } finally {
-            Files.deleteIfExists(temporary);
+            Files.deleteIfExists(stitched);
         }
         return outputFile;
     }
@@ -226,7 +229,7 @@ final class DynamicVideoGenerator {
             }
         }
         combineWithFormatTransitions(existing, durations, outputFile, format, profile);
-        verifyNonEmpty(outputFile, "Final dynamic stitch");
+        verifyNonEmpty(outputFile, "Final static stitch");
         return outputFile;
     }
 
@@ -345,68 +348,44 @@ final class DynamicVideoGenerator {
         command.add(clip.toString());
         addEncodingArgs(command);
         command.add(outputFile.toString());
-        run(command, "single dynamic video finalize");
-        verifyNonEmpty(outputFile, "Single dynamic video finalize");
+        run(command, "single static video finalize");
+        verifyNonEmpty(outputFile, "Single static video finalize");
     }
 
-    private String motionFilter(int width, int height, ContentFormat format, int itemIndex, int stateIndex) {
-        double scaleFactor = switch (format) {
-            case THREAD_STORY -> 1.075;
-            case CONFESSION -> 1.105;
-            case DEBATE -> 1.085;
-            case BEST_ANSWERS -> 1.095;
-            case ESCALATING_CONVERSATION -> 1.09;
-        };
-        int scaledWidth = even((int) Math.ceil(width * scaleFactor));
-        int scaledHeight = even((int) Math.ceil(height * scaleFactor));
-        int availableX = Math.max(2, scaledWidth - width);
-        int availableY = Math.max(2, scaledHeight - height);
-        double centerX = availableX / 2.0;
-        double centerY = availableY / 2.0;
-        double phase = (itemIndex * 0.77) + (stateIndex * 1.31);
-
-        String x;
-        String y;
-        switch (format) {
-            case THREAD_STORY -> {
-                x = decimal(centerX) + "+" + decimal(Math.min(22.0, availableX * 0.28))
-                        + "*sin(n/42+" + decimal(phase) + ")";
-                y = decimal(centerY) + "+" + decimal(Math.min(34.0, availableY * 0.30))
-                        + "*cos(n/58+" + decimal(phase) + ")";
-            }
-            case CONFESSION -> {
-                x = decimal(centerX) + "+" + decimal(Math.min(10.0, availableX * 0.18))
-                        + "*sin(n/75+" + decimal(phase) + ")";
-                y = decimal(centerY) + "+" + decimal(Math.min(62.0, availableY * 0.42))
-                        + "*sin(n/82+" + decimal(phase) + ")";
-            }
-            case DEBATE -> {
-                double direction = (itemIndex + stateIndex) % 2 == 0 ? 1.0 : -1.0;
-                x = decimal(centerX) + (direction >= 0 ? "+" : "-")
-                        + decimal(Math.min(38.0, availableX * 0.38))
-                        + "*sin(n/50+" + decimal(phase) + ")";
-                y = decimal(centerY) + "+" + decimal(Math.min(18.0, availableY * 0.20))
-                        + "*cos(n/68+" + decimal(phase) + ")";
-            }
-            case BEST_ANSWERS -> {
-                x = decimal(centerX) + "+" + decimal(Math.min(18.0, availableX * 0.24))
-                        + "*sin(n/64+" + decimal(phase) + ")";
-                y = decimal(centerY) + "-" + decimal(Math.min(42.0, availableY * 0.32))
-                        + "*sin(n/86+" + decimal(phase) + ")";
-            }
-            case ESCALATING_CONVERSATION -> {
-                x = decimal(centerX) + "+" + decimal(Math.min(14.0, availableX * 0.22))
-                        + "*cos(n/57+" + decimal(phase) + ")";
-                y = decimal(centerY) + "+" + decimal(Math.min(54.0, availableY * 0.40))
-                        + "*sin(n/61+" + decimal(phase) + ")";
-            }
-            default -> throw new IllegalStateException("Unhandled format: " + format);
-        }
-
-        return "scale=" + scaledWidth + ":" + scaledHeight
-                + ",crop=" + width + ":" + height + ":x=" + x + ":y=" + y
+    /**
+     * Keep the full social frame locked to the requested canvas. No scale-up,
+     * animated crop, sine-wave pan, per-state phase or other spatial motion.
+     */
+    private String staticFrameFilter(int width, int height) {
+        return "scale=" + width + ":" + height
+                + ":force_original_aspect_ratio=decrease"
+                + ",pad=" + width + ":" + height + ":(ow-iw)/2:(oh-ih)/2:black"
                 + ",fps=" + fps
                 + ",format=yuv420p";
+    }
+
+    /**
+     * Apply subtle temporal grain once, after the complete video has been
+     * stitched. Strength 2 is intentionally faint; this is a visual texture,
+     * not a heavy TV-static effect.
+     */
+    private void applyFinalGrainAndMetadata(Path input, Path output, Map<String, String> metadata)
+            throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegCommand);
+        command.add("-y");
+        command.add("-i");
+        command.add(input.toString());
+        command.add("-map");
+        command.add("0:v:0");
+        command.add("-map");
+        command.add("0:a?");
+        command.add("-vf");
+        command.add("noise=alls=" + FINAL_GRAIN_STRENGTH + ":allf=t");
+        addEncodingArgs(command);
+        addMetadata(command, metadata);
+        command.add(output.toString());
+        run(command, "final subtle grain render");
     }
 
     private static List<Double> allocateStateDurations(
@@ -441,24 +420,6 @@ final class DynamicVideoGenerator {
             result.add(duration);
         }
         return result;
-    }
-
-    private void remuxWithMetadata(Path input, Path output, Map<String, String> metadata)
-            throws IOException, InterruptedException {
-        List<String> command = new ArrayList<>();
-        command.add(ffmpegCommand);
-        command.add("-y");
-        command.add("-i");
-        command.add(input.toString());
-        command.add("-map");
-        command.add("0");
-        command.add("-c");
-        command.add("copy");
-        command.add("-movflags");
-        command.add("+faststart");
-        addMetadata(command, metadata);
-        command.add(output.toString());
-        run(command, "provenance metadata remux");
     }
 
     private static void addMetadata(List<String> command, Map<String, String> metadata) {
@@ -611,10 +572,6 @@ final class DynamicVideoGenerator {
     }
 
     private static String formatSeconds(double value) {
-        return String.format(Locale.US, "%.3f", value);
-    }
-
-    private static String decimal(double value) {
         return String.format(Locale.US, "%.3f", value);
     }
 
