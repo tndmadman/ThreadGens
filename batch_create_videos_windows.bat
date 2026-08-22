@@ -67,7 +67,8 @@ echo   model:    %MODEL%
 echo   count:    %COUNT%
 echo   tts:      kokoro
 echo   voices:   %VOICE_SERIES% ^(one stable selection per video^)
-echo   captions: word-timed
+echo   text:     narration-timed reveal inside the rendered social image
+echo   captions: bottom duplicate subtitles disabled
 echo   metadata: AI disclosure and provenance sidecars
 echo   video:    stitched MP4, watermark off, body text top-aligned
 if "%OP_IMAGE_FLAG%"=="" (
@@ -88,7 +89,7 @@ if not "%OP_IMAGE_FLAG%"=="" (
 )
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -Platform "%PLATFORM%" %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
