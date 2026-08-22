@@ -224,3 +224,7 @@ jobs:
               exit 1
             }
           }
+
+      - name: Run Windows batch launcher self-test
+        shell: cmd
+        run: batch_create_videos_windows.bat --self-test
