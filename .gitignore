@@ -7,3 +7,7 @@ Thumbs.db
 data/generation_history.jsonl
 data/publish_history.jsonl
 data/publish_history.jsonl.lock
+data/p2_*_publish.jsonl
+data/p2_*_publish.jsonl.lock
+data/p2_lock_process.jsonl
+data/p2_lock_process.jsonl.lock
