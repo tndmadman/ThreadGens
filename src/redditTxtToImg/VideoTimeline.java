@@ -6,14 +6,14 @@ import java.util.List;
 /**
  * Builds a deterministic visual timeline for each narrated segment.
  *
- * State count scales with real audio duration so normal content changes visual
- * focus roughly every 2.5 seconds instead of falling back to a long static hold.
- * P0 uses duration-weighted sentence/clause timing; exact word alignment can be
- * added later without changing the compositor contract.
+ * State count scales with real audio duration and narration text is divided into
+ * near-equal spoken chunks, keeping ordinary visual holds near 2.5 seconds even
+ * when one sentence is much longer than the others. Exact word timestamps can
+ * replace these proportional timings later without changing the compositor API.
  */
 final class VideoTimeline {
     private static final double TARGET_STATE_SECONDS = 2.5;
-    private static final int MAX_STATES = 12;
+    private static final int MAX_STATES = 20;
 
     record State(String focusText, double weight, int index, int total) {
     }
@@ -31,13 +31,10 @@ final class VideoTimeline {
         int desiredStates = Math.max(2,
                 Math.min(MAX_STATES, (int) Math.ceil(safeDuration / TARGET_STATE_SECONDS)));
 
-        List<String> units = sentenceUnits(clean);
-        if (units.size() < desiredStates) {
-            units = wordUnits(clean, desiredStates);
-        }
-
-        int stateCount = Math.max(1, Math.min(desiredStates, units.size()));
-        List<String> chunks = combineEvenly(units, stateCount);
+        // Equal word groups are deliberate here. Sentence-only groups can leave a
+        // single long sentence unchanged for most of a clip, violating the P0
+        // cadence requirement.
+        List<String> chunks = wordUnits(clean, desiredStates);
         double totalWeight = 0.0;
         List<Double> rawWeights = new ArrayList<>();
         for (String chunk : chunks) {
@@ -52,17 +49,6 @@ final class VideoTimeline {
             states.add(new State(chunks.get(i), normalized, i, chunks.size()));
         }
         return List.copyOf(states);
-    }
-
-    private static List<String> sentenceUnits(String text) {
-        List<String> units = new ArrayList<>();
-        for (String part : text.split("(?<=[.!?])\\s+")) {
-            String clean = part.trim();
-            if (!clean.isBlank()) {
-                units.add(clean);
-            }
-        }
-        return units;
     }
 
     private static List<String> wordUnits(String text, int desiredStates) {
@@ -80,28 +66,6 @@ final class VideoTimeline {
                     chunk.append(' ');
                 }
                 chunk.append(words[cursor]);
-            }
-            result.add(chunk.toString());
-        }
-        return result;
-    }
-
-    private static List<String> combineEvenly(List<String> units, int count) {
-        if (units.size() <= count) {
-            return new ArrayList<>(units);
-        }
-        List<String> result = new ArrayList<>();
-        int cursor = 0;
-        for (int i = 0; i < count; i++) {
-            int remaining = units.size() - cursor;
-            int groups = count - i;
-            int take = Math.max(1, (int) Math.ceil((double) remaining / groups));
-            StringBuilder chunk = new StringBuilder();
-            for (int j = 0; j < take && cursor < units.size(); j++, cursor++) {
-                if (!chunk.isEmpty()) {
-                    chunk.append(' ');
-                }
-                chunk.append(units.get(cursor));
             }
             result.add(chunk.toString());
         }
