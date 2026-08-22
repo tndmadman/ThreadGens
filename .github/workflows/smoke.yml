@@ -12,7 +12,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -31,12 +31,20 @@ jobs:
       - name: Run P0 video smoke tests for all formats
         run: java -Djava.awt.headless=true -cp out redditTxtToImg.P0VideoSmokeTest
 
+      - name: Run P2 scoring and history smoke tests
+        run: java -Djava.awt.headless=true -cp out redditTxtToImg.P2SmokeTest
+
+      - name: Run P2 real-media fingerprint smoke test
+        run: java -Djava.awt.headless=true -cp out redditTxtToImg.P2ArtifactSmokeTest
+
       - name: Run production Reddit image generation smoke test
         run: java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform reddit --count 1 --prefix smoke --no-novelty
 
       - name: Verify Reddit smoke image
         shell: bash
-        run: test -f output/0smoke.png
+        run: |
+          test -f output/0smoke.png
+          test ! -f data/publish_history.jsonl
 
       - name: Run production X image generation smoke test
         run: java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform x --count 1 --prefix xsmoke --no-novelty
@@ -70,7 +78,7 @@ jobs:
       - name: Fail when video is requested without TTS
         shell: bash
         run: |
-          ! java -cp out redditTxtToImg.P0Entrypoint data/comments.txt output --count 1 --prefix badvideo --video --no-novelty
+          ! java -cp out redditTxtToImg.P2Entrypoint data/comments.txt output --count 1 --prefix badvideo --video --no-novelty
 
   windows-validation:
     runs-on: windows-latest
@@ -79,7 +87,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -90,6 +98,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path out | Out-Null
           $javaFiles = Get-ChildItem -Path src\redditTxtToImg -Filter '*.java' | ForEach-Object { $_.FullName }
           & javac -d out $javaFiles
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run P2 unit smoke tests on Windows
+        shell: powershell
+        run: |
+          & java -Djava.awt.headless=true -cp out redditTxtToImg.P2SmokeTest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Parse Windows PowerShell launchers
