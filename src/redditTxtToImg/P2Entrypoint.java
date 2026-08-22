@@ -86,8 +86,24 @@ public final class P2Entrypoint {
 
         PublishAuditHistory history = new PublishAuditHistory(config.publishHistory, config.publishHistoryLimit);
         List<PublishAuditHistory.Entry> recent = history.load();
+        double semanticSimilarity = 0.0;
+        if (config.semanticNoveltyEnabled && !recent.isEmpty()) {
+            List<String> priorScripts = recent.stream()
+                    .map(entry -> entry.fingerprint().script)
+                    .filter(value -> value != null && !value.isBlank())
+                    .toList();
+            if (!priorScripts.isEmpty()) {
+                SemanticNoveltyGuard semantic = new SemanticNoveltyGuard(
+                        config.ollamaUrl, config.embeddingModel, 1.0);
+                SemanticNoveltyGuard.Result semanticResult = semantic.assess(script, priorScripts);
+                semanticSimilarity = semanticResult.highestSimilarity();
+                System.out.println(String.format(Locale.US,
+                        "P2 semantic premise similarity: %.0f%%", semanticSimilarity * 100.0));
+            }
+        }
+
         PrePublishAuditor auditor = new PrePublishAuditor(config.warnThreshold, config.blockThreshold);
-        PrePublishAuditor.Result result = auditor.assess(fingerprint, recent);
+        PrePublishAuditor.Result result = auditor.assess(fingerprint, recent, semanticSimilarity);
         PrePublishAuditor.writeReport(config.reportPath, fingerprint, result, config.mode);
         printResult(result, config.reportPath, history.file());
 
@@ -167,6 +183,8 @@ public final class P2Entrypoint {
         String ttsEngine = "none";
         String voice = "unknown";
         String mode = "block";
+        String ollamaUrl = "http://localhost:11434/api/generate";
+        String embeddingModel = SemanticNoveltyGuard.DEFAULT_MODEL;
 
         int count = -1;
         int publishHistoryLimit = 100;
@@ -177,6 +195,7 @@ public final class P2Entrypoint {
         boolean concatVideo = false;
         boolean autoGenerateText = false;
         boolean utilityMode = false;
+        boolean semanticNoveltyEnabled = true;
 
         static AuditConfig fromArgs(String[] args) throws IOException {
             AuditConfig config = loadDefaults();
@@ -192,6 +211,7 @@ public final class P2Entrypoint {
                         case "--concat-video" -> { config.createVideo = true; config.concatVideo = true; }
                         case "--no-publish-audit" -> config.enabled = false;
                         case "--publish-audit" -> config.enabled = true;
+                        case "--no-semantic-novelty" -> config.semanticNoveltyEnabled = false;
                         case "--platform" -> { if (i + 1 < args.length) config.platform = args[++i]; }
                         case "--format" -> { if (i + 1 < args.length) config.requestedFormat = args[++i]; }
                         case "--count" -> { if (i + 1 < args.length) config.count = parseInt(args[++i], config.count); }
@@ -204,6 +224,8 @@ public final class P2Entrypoint {
                         case "--final-video" -> { if (i + 1 < args.length) config.finalVideoName = args[++i]; }
                         case "--script-out" -> { if (i + 1 < args.length) config.scriptOut = Path.of(args[++i]); }
                         case "--history-file" -> { if (i + 1 < args.length) config.generationHistory = Path.of(args[++i]); }
+                        case "--llm-url" -> { if (i + 1 < args.length) config.ollamaUrl = args[++i]; }
+                        case "--embedding-model" -> { if (i + 1 < args.length) config.embeddingModel = args[++i]; }
                         case "--publish-history" -> { if (i + 1 < args.length) config.publishHistory = Path.of(args[++i]); }
                         case "--publish-history-limit" -> { if (i + 1 < args.length) config.publishHistoryLimit = parseInt(args[++i], config.publishHistoryLimit); }
                         case "--publish-audit-warn" -> { if (i + 1 < args.length) config.warnThreshold = parseInt(args[++i], config.warnThreshold); }
@@ -240,6 +262,10 @@ public final class P2Entrypoint {
             config.ttsEngine = p.getProperty("ttsEngine", config.ttsEngine);
             config.requestedFormat = p.getProperty("format", config.requestedFormat);
             config.generationHistory = Path.of(p.getProperty("historyFile", config.generationHistory.toString()));
+            config.ollamaUrl = p.getProperty("ollamaUrl", config.ollamaUrl);
+            config.embeddingModel = p.getProperty("embeddingModel", config.embeddingModel);
+            config.semanticNoveltyEnabled = Boolean.parseBoolean(
+                    p.getProperty("semanticNoveltyEnabled", String.valueOf(config.semanticNoveltyEnabled)));
             config.publishHistory = Path.of(p.getProperty("publishHistoryFile", config.publishHistory.toString()));
             config.publishHistoryLimit = parseInt(p.getProperty("publishHistoryLimit"), config.publishHistoryLimit);
             config.warnThreshold = parseInt(p.getProperty("publishAuditWarnThreshold"), config.warnThreshold);
