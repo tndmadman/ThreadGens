@@ -62,11 +62,23 @@ public final class P0Entrypoint {
                 config.requestedFormat, guard, config.postTitle, config.topic);
         FormatAwareTextGenerator generator = new FormatAwareTextGenerator(auto.ollamaUrl, auto.llmModel);
 
+        List<String> semanticHistory = List.of();
+        SemanticNoveltyGuard semanticGuard = null;
+        if (config.noveltyEnabled && auto.semanticNoveltyEnabled) {
+            semanticHistory = SemanticNoveltyGuard.loadRecentScripts(
+                    config.historyFile, auto.semanticHistoryLimit);
+            semanticGuard = new SemanticNoveltyGuard(
+                    auto.ollamaUrl, auto.embeddingModel, auto.semanticThreshold);
+            System.out.println("P0 semantic novelty: enabled with " + auto.embeddingModel
+                    + " against " + semanticHistory.size() + " recent scripts.");
+        }
+
         int requestedCount = config.count >= 0 ? config.count : 10;
         P0Runner.clearVideoOutputs(config, requestedCount);
         int maxAttempts = config.noveltyEnabled ? Math.max(1, config.noveltyRetries + 1) : 1;
         String feedback = "";
-        NoveltyGuard.Result last = null;
+        NoveltyGuard.Result deterministicResult = null;
+        SemanticNoveltyGuard.Result semanticResult = null;
 
         try {
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -85,19 +97,35 @@ public final class P0Entrypoint {
                 if (!config.noveltyEnabled) {
                     break;
                 }
+
                 String candidate = Files.readString(config.scriptOut);
-                last = guard.assess(candidate);
-                printNovelty(last);
-                if (last.accepted()) {
+                deterministicResult = guard.assess(candidate);
+                printNovelty(deterministicResult);
+
+                String rejectionFeedback = "";
+                if (!deterministicResult.accepted()) {
+                    rejectionFeedback = deterministicResult.feedbackForRegeneration();
+                } else if (semanticGuard != null && !semanticHistory.isEmpty()) {
+                    semanticResult = semanticGuard.assess(candidate, semanticHistory);
+                    printSemanticNovelty(semanticResult);
+                    if (!semanticResult.accepted()) {
+                        rejectionFeedback = semanticResult.feedbackForRegeneration();
+                    }
+                }
+
+                if (rejectionFeedback.isBlank()) {
                     break;
                 }
                 if (attempt >= maxAttempts) {
+                    String details = !deterministicResult.accepted()
+                            ? "Deterministic score: " + deterministicResult.noveltyScore() + "/100. "
+                                    + String.join(" ", deterministicResult.reasons())
+                            : semanticResult == null ? "" : semanticResult.reason();
                     throw new IOException(
-                            "Novelty guard rejected all " + maxAttempts + " format-aware candidates. "
-                                    + "Last score: " + last.noveltyScore() + "/100. "
-                                    + String.join(" ", last.reasons()));
+                            "Novelty guard rejected all " + maxAttempts + " generated candidates. " + details);
                 }
-                feedback = last.feedbackForRegeneration();
+                feedback = rejectionFeedback;
+                System.out.println("P0 novelty: regenerating with explicit anti-repeat feedback.");
             }
         } finally {
             if (!auto.keepOllamaLoaded) {
@@ -225,12 +253,24 @@ public final class P0Entrypoint {
         }
     }
 
+    private static void printSemanticNovelty(SemanticNoveltyGuard.Result result) {
+        System.out.println("P0 semantic similarity: "
+                + String.format(Locale.US, "%.0f%%", result.highestSimilarity() * 100.0));
+        System.out.println("  - " + result.reason());
+        if (!result.closestExcerpt().isBlank()) {
+            System.out.println("  - Closest semantic match: " + result.closestExcerpt());
+        }
+    }
+
     private static boolean isP0ValueOption(String arg) {
         return "--format".equals(arg)
                 || "--history-file".equals(arg)
                 || "--history-limit".equals(arg)
                 || "--novelty-threshold".equals(arg)
-                || "--novelty-retries".equals(arg);
+                || "--novelty-retries".equals(arg)
+                || "--embedding-model".equals(arg)
+                || "--semantic-threshold".equals(arg)
+                || "--semantic-history-limit".equals(arg);
     }
 
     private static boolean contains(String[] args, String value) {
@@ -245,6 +285,10 @@ public final class P0Entrypoint {
     private static final class AutoSettings {
         String llmModel = "llama3.1:8b";
         String ollamaUrl = "http://localhost:11434/api/generate";
+        String embeddingModel = SemanticNoveltyGuard.DEFAULT_MODEL;
+        double semanticThreshold = SemanticNoveltyGuard.DEFAULT_THRESHOLD;
+        int semanticHistoryLimit = SemanticNoveltyGuard.DEFAULT_HISTORY_LIMIT;
+        boolean semanticNoveltyEnabled = true;
         boolean keepOllamaLoaded = false;
 
         static AutoSettings fromArgs(String[] args) throws IOException {
@@ -255,6 +299,14 @@ public final class P0Entrypoint {
                     settings.llmModel = args[++i];
                 } else if ("--llm-url".equals(arg) && i + 1 < args.length) {
                     settings.ollamaUrl = args[++i];
+                } else if ("--embedding-model".equals(arg) && i + 1 < args.length) {
+                    settings.embeddingModel = args[++i];
+                } else if ("--semantic-threshold".equals(arg) && i + 1 < args.length) {
+                    settings.semanticThreshold = parseDouble(args[++i], settings.semanticThreshold);
+                } else if ("--semantic-history-limit".equals(arg) && i + 1 < args.length) {
+                    settings.semanticHistoryLimit = parseInt(args[++i], settings.semanticHistoryLimit);
+                } else if ("--no-semantic-novelty".equals(arg)) {
+                    settings.semanticNoveltyEnabled = false;
                 } else if ("--keep-ollama-loaded".equals(arg)) {
                     settings.keepOllamaLoaded = true;
                 }
@@ -274,9 +326,38 @@ public final class P0Entrypoint {
             }
             settings.llmModel = properties.getProperty("llmModel", settings.llmModel);
             settings.ollamaUrl = properties.getProperty("ollamaUrl", settings.ollamaUrl);
+            settings.embeddingModel = properties.getProperty("embeddingModel", settings.embeddingModel);
+            settings.semanticThreshold = parseDouble(
+                    properties.getProperty("semanticThreshold"), settings.semanticThreshold);
+            settings.semanticHistoryLimit = parseInt(
+                    properties.getProperty("semanticHistoryLimit"), settings.semanticHistoryLimit);
+            settings.semanticNoveltyEnabled = Boolean.parseBoolean(
+                    properties.getProperty("semanticNoveltyEnabled", String.valueOf(settings.semanticNoveltyEnabled)));
             settings.keepOllamaLoaded = !Boolean.parseBoolean(
                     properties.getProperty("unloadOllamaAfterText", "true").toLowerCase(Locale.ROOT));
             return settings;
+        }
+
+        private static int parseInt(String value, int fallback) {
+            if (value == null) {
+                return fallback;
+            }
+            try {
+                return Integer.parseInt(value.trim());
+            } catch (NumberFormatException e) {
+                return fallback;
+            }
+        }
+
+        private static double parseDouble(String value, double fallback) {
+            if (value == null) {
+                return fallback;
+            }
+            try {
+                return Double.parseDouble(value.trim());
+            } catch (NumberFormatException e) {
+                return fallback;
+            }
         }
     }
 }
