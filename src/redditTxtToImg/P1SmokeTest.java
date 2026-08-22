@@ -88,11 +88,11 @@ public final class P1SmokeTest {
                 5.0,
                 temp,
                 "caption-aligned");
-        require(states.size() >= 2, "Narration should create multiple P0 visual states.");
-        require(!java.util.Arrays.equals(
+        require(states.size() >= 2, "Narration timing should still create multiple timed states.");
+        require(java.util.Arrays.equals(
                         Files.readAllBytes(states.get(0).imagePath()),
                         Files.readAllBytes(states.get(1).imagePath())),
-                "Narration scenes should render visibly different frames.");
+                "Non-Reddit frames must not gain a duplicate narration overlay just to force scene variation.");
         TimedVisualStateRenderer.cleanup(states);
     }
 
