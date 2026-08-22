@@ -62,6 +62,12 @@ public final class P0Entrypoint {
                 config.requestedFormat, guard, config.postTitle, config.topic);
         FormatAwareTextGenerator generator = new FormatAwareTextGenerator(auto.ollamaUrl, auto.llmModel);
 
+        // A new auto run owns this prefix and script path. Remove stale visible
+        // artifacts before any generation/history validation can fail so failure
+        // can never be mistaken for a fresh successful run.
+        P0Runner.clearRequestedOutputs(config);
+        Files.deleteIfExists(config.scriptOut);
+
         // Always validate an existing history file when novelty is enabled. Even
         // if semantic comparison is intentionally disabled, corrupt history must
         // never silently look like a clean slate during automatic generation.
@@ -77,7 +83,6 @@ public final class P0Entrypoint {
         }
 
         int requestedCount = config.count >= 0 ? config.count : 10;
-        P0Runner.clearVideoOutputs(config, requestedCount);
         int maxAttempts = config.noveltyEnabled ? Math.max(1, config.noveltyRetries + 1) : 1;
         String feedback = "";
         NoveltyGuard.Result deterministicResult = null;
@@ -128,6 +133,7 @@ public final class P0Entrypoint {
                             "Novelty guard rejected all " + maxAttempts + " generated candidates. " + details);
                 }
                 feedback = rejectionFeedback;
+                Files.deleteIfExists(config.scriptOut);
                 System.out.println("P0 novelty: regenerating with explicit anti-repeat feedback.");
             }
         } finally {
