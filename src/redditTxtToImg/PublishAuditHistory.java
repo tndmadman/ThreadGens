@@ -1,6 +1,8 @@
 package redditTxtToImg;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,6 +12,8 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -17,8 +21,43 @@ import java.util.regex.Pattern;
 final class PublishAuditHistory {
     private static final Pattern FIELD =
             Pattern.compile("\"([a-zA-Z0-9_]+)\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
+    private static final ConcurrentHashMap<Path, ReentrantLock> PROCESS_LOCKS = new ConcurrentHashMap<>();
 
     record Entry(PublishFingerprint fingerprint, String status, int risk) {
+    }
+
+    static final class LockHandle implements AutoCloseable {
+        private final FileChannel channel;
+        private final FileLock fileLock;
+        private final ReentrantLock processLock;
+        private boolean closed;
+
+        private LockHandle(FileChannel channel, FileLock fileLock, ReentrantLock processLock) {
+            this.channel = channel;
+            this.fileLock = fileLock;
+            this.processLock = processLock;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (closed) return;
+            closed = true;
+            IOException failure = null;
+            try {
+                if (fileLock != null && fileLock.isValid()) fileLock.release();
+            } catch (IOException e) {
+                failure = e;
+            }
+            try {
+                if (channel != null && channel.isOpen()) channel.close();
+            } catch (IOException e) {
+                if (failure == null) failure = e;
+                else failure.addSuppressed(e);
+            } finally {
+                processLock.unlock();
+            }
+            if (failure != null) throw failure;
+        }
     }
 
     private final Path file;
@@ -27,6 +66,27 @@ final class PublishAuditHistory {
     PublishAuditHistory(Path file, int limit) {
         this.file = file == null ? Path.of("data", "publish_history.jsonl") : file;
         this.limit = Math.max(1, limit);
+    }
+
+    LockHandle lockExclusive() throws IOException {
+        Path key = file.toAbsolutePath().normalize();
+        ReentrantLock processLock = PROCESS_LOCKS.computeIfAbsent(key, ignored -> new ReentrantLock(true));
+        processLock.lock();
+        FileChannel channel = null;
+        try {
+            Path lockFile = key.resolveSibling(key.getFileName().toString() + ".lock");
+            if (lockFile.getParent() != null) Files.createDirectories(lockFile.getParent());
+            channel = FileChannel.open(lockFile,
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+            FileLock lock = channel.lock();
+            return new LockHandle(channel, lock, processLock);
+        } catch (IOException | RuntimeException e) {
+            if (channel != null) {
+                try { channel.close(); } catch (IOException closeFailure) { e.addSuppressed(closeFailure); }
+            }
+            processLock.unlock();
+            throw e;
+        }
     }
 
     List<Entry> load() throws IOException {
