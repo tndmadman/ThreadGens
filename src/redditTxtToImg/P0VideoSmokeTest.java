@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import javax.imageio.ImageIO;
 import javax.sound.sampled.AudioFileFormat;
@@ -32,6 +33,8 @@ public final class P0VideoSmokeTest {
             Path audio = temp.resolve("tone.wav");
             createSourceImage(source, 360, 640);
             createTone(audio, 1.25);
+
+            verifyBackgroundPaletteChanges(source, temp);
 
             DynamicVideoGenerator generator = new DynamicVideoGenerator("ffmpeg", 120, 24);
             for (ContentFormat format : ContentFormat.values()) {
@@ -68,10 +71,74 @@ public final class P0VideoSmokeTest {
                 require(hasAudioAndVideoStreams(finalVideo),
                         "Final video must contain both audio and video streams for " + format.id());
             }
-            System.out.println("P0 video smoke tests passed for all formats.");
+
+            verifyFinalTemporalGrain(generator, source, audio, temp);
+            System.out.println("P0 video smoke tests passed for all formats, palette rotation, and final temporal grain.");
         } finally {
+            System.clearProperty("threadgens.palette");
             deleteRecursively(temp);
         }
+    }
+
+    private static void verifyBackgroundPaletteChanges(Path source, Path temp) throws Exception {
+        Path ember = temp.resolve("palette_ember.png");
+        Path ocean = temp.resolve("palette_ocean.png");
+
+        System.setProperty("threadgens.palette", "ember");
+        DynamicVisualRenderer.render(source, "", ContentFormat.THREAD_STORY, 0, 1, ember);
+        System.setProperty("threadgens.palette", "ocean");
+        DynamicVisualRenderer.render(source, "", ContentFormat.THREAD_STORY, 0, 1, ocean);
+        System.clearProperty("threadgens.palette");
+
+        BufferedImage emberImage = ImageIO.read(ember.toFile());
+        BufferedImage oceanImage = ImageIO.read(ocean.toFile());
+        require(emberImage != null && oceanImage != null, "Palette regression images were not readable.");
+
+        int emberPixel = emberImage.getRGB(8, 8) & 0x00ffffff;
+        int oceanPixel = oceanImage.getRGB(8, 8) & 0x00ffffff;
+        require(emberPixel != oceanPixel,
+                "Different per-video palettes must produce different dark-background pixels.");
+    }
+
+    private static void verifyFinalTemporalGrain(
+            DynamicVideoGenerator generator,
+            Path source,
+            Path audio,
+            Path temp
+    ) throws Exception {
+        Path staticClip = temp.resolve("grain_static_source.mp4");
+        Path finalVideo = temp.resolve("grain_final.mp4");
+        generator.renderClip(source, audio, staticClip, 360, 640, ContentFormat.THREAD_STORY, 0);
+        generator.combineClips(List.of(staticClip), finalVideo, ContentFormat.THREAD_STORY);
+
+        String firstFrame = frameMd5(finalVideo, 0.25);
+        String laterFrame = frameMd5(finalVideo, 0.85);
+        require(!firstFrame.isBlank() && !laterFrame.isBlank(),
+                "Could not hash decoded frames from final grain video.");
+        require(!firstFrame.equals(laterFrame),
+                "Final completed video must contain temporal grain; two static-source frames decoded identically.");
+    }
+
+    private static String frameMd5(Path media, double seconds) throws Exception {
+        Process process = new ProcessBuilder(
+                "ffmpeg", "-v", "error",
+                "-ss", String.format(Locale.US, "%.3f", seconds),
+                "-i", media.toString(),
+                "-frames:v", "1",
+                "-f", "md5", "-")
+                .redirectErrorStream(true)
+                .start();
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line.trim());
+            }
+        }
+        int exit = process.waitFor();
+        require(exit == 0, "ffmpeg frame MD5 probe failed for " + media + ": " + output);
+        return output.toString();
     }
 
     private static void createSourceImage(Path path, int width, int height) throws Exception {
@@ -83,7 +150,7 @@ public final class P0VideoSmokeTest {
         g.setFont(new Font("Arial", Font.BOLD, 28));
         g.drawString("ThreadGens P0", 40, 110);
         g.setFont(new Font("Arial", Font.PLAIN, 20));
-        g.drawString("dynamic state smoke frame", 40, 160);
+        g.drawString("static state smoke frame", 40, 160);
         g.dispose();
         ImageIO.write(image, "png", path.toFile());
     }

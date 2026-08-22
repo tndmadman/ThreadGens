@@ -137,7 +137,7 @@ public class RedditScreenshotGenerator {
     }
 
     private void drawTypePill(Graphics2D g, int x, int y) {
-        String label = isOriginalPost() ? "ORIGINAL POST" : "REPLY " + itemIndex;
+        String label = isOriginalPost() ? "ORIGINAL POST" : "REPLY";
         Font font = new Font(settings.fontName, Font.BOLD, 16);
         g.setFont(font);
         FontMetrics metrics = g.getFontMetrics(font);

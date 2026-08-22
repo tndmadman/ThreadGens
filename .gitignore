@@ -13,6 +13,7 @@ data/identity_history.jsonl.lock
 data/identity_history.jsonl.tmp
 data/publish_history.jsonl
 data/publish_history.jsonl.lock
+data/batch_idea_history.jsonl
 data/p2_*_publish.jsonl
 data/p2_*_publish.jsonl.lock
 data/p2_lock_process.jsonl
