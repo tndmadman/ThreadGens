@@ -19,8 +19,14 @@ import java.util.regex.Pattern;
  * completed video before it is publish-ready.
  */
 public final class P2Entrypoint {
-    private static final Pattern HISTORY_FORMAT = Pattern.compile("\\\"format\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
-    private static final Pattern HISTORY_SCRIPT = Pattern.compile("\\\"script_b64\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
+    /*
+     * Generation-history format and script fields are controlled values. In
+     * particular script_b64 is URL-safe Base64 and can become very large. Use
+     * possessive repetition so java.util.regex never recursively backtracks
+     * through the full encoded script and exhausts the JVM stack after render.
+     */
+    private static final Pattern HISTORY_FORMAT = Pattern.compile("\"format\"\s*:\s*\"([^\"]++)\"");
+    private static final Pattern HISTORY_SCRIPT = Pattern.compile("\"script_b64\"\s*:\s*\"([^\"]++)\"");
 
     private P2Entrypoint() {
     }
@@ -385,8 +391,8 @@ public final class P2Entrypoint {
         }
 
         private static String jsonScalar(String json, String key) {
-            Pattern pattern = Pattern.compile("\\\"" + Pattern.quote(key)
-                    + "\\\"\\s*:\\s*([^,}\\r\\n]+)");
+            Pattern pattern = Pattern.compile("\"" + Pattern.quote(key)
+                    + "\"\s*:\s*([^,}\r\n]+)");
             Matcher matcher = pattern.matcher(json);
             return matcher.find() ? matcher.group(1).trim() : null;
         }
