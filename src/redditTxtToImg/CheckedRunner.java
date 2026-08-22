@@ -14,10 +14,10 @@ import java.util.Set;
 /**
  * User-facing checked entry point.
  *
- * Normal calls route through P0Entrypoint so CLI, GUI and older scripts inherit
- * the production originality/integrity pipeline. The package-private raw method
- * remains available to P0Runner and explicit compatibility tests without
- * creating recursion.
+ * Normal calls route through P2Entrypoint so CLI, GUI and older scripts inherit
+ * the complete P0/P1 production pipeline plus the final P2 publish gate. The
+ * package-private raw method remains available to P0Runner and explicit
+ * compatibility tests without creating recursion.
  */
 public class CheckedRunner {
     private static final Set<String> VOICE_DEPENDENCY_OPTIONS = Set.of("--tts", "--voice-dir");
@@ -33,7 +33,7 @@ public class CheckedRunner {
     }
 
     public static void runOrThrow(String[] args) throws IOException, InterruptedException {
-        P0Entrypoint.runOrThrow(args == null ? new String[0] : args);
+        P2Entrypoint.runOrThrow(args == null ? new String[0] : args);
     }
 
     static void runRawOrThrow(String[] args) throws IOException, InterruptedException {
