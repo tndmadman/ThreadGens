@@ -40,7 +40,8 @@ public final class P0Entrypoint {
         AutoSettings auto = AutoSettings.fromArgs(safeArgs);
         NoveltyGuard guard = new NoveltyGuard(
                 config.historyFile, config.noveltyThreshold, config.historyLimit);
-        ContentFormat format = ContentFormat.resolve(config.requestedFormat, guard);
+        ContentFormat format = FormatSelector.resolve(
+                config.requestedFormat, guard, config.postTitle, config.topic);
         FormatAwareTextGenerator generator = new FormatAwareTextGenerator(auto.ollamaUrl, auto.llmModel);
 
         int requestedCount = config.count >= 0 ? config.count : 10;
