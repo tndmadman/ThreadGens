@@ -44,6 +44,12 @@ def main():
     parser.add_argument("--voice", default="af_heart", help="Kokoro voice name, for example af_heart")
     parser.add_argument("--lang", default="a", help="Kokoro language code. Default 'a' = American English")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed")
+    parser.add_argument(
+        "--sentence-pause-ms",
+        type=int,
+        default=180,
+        help="Silence inserted between Kokoro output segments",
+    )
     parser.add_argument("--verbose", action="store_true", help="Print Kokoro progress and dependency warnings")
     args = parser.parse_args()
 
@@ -94,7 +100,17 @@ def main():
         raise SystemExit("Kokoro produced no audio.")
 
     log(f"combining {len(chunks)} chunk(s)...", verbose)
-    audio = np.concatenate(chunks)
+    pause_ms = max(0, min(2000, args.sentence_pause_ms))
+    if pause_ms > 0 and len(chunks) > 1:
+        silence = np.zeros(int(24000 * pause_ms / 1000), dtype=chunks[0].dtype)
+        combined = []
+        for index, chunk in enumerate(chunks):
+            if index > 0:
+                combined.append(silence)
+            combined.append(chunk)
+        audio = np.concatenate(combined)
+    else:
+        audio = np.concatenate(chunks)
 
     log(f"writing WAV: {output_path}", verbose)
     sf.write(str(output_path), audio, 24000)

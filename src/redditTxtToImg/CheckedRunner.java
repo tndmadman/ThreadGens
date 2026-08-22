@@ -246,6 +246,10 @@ public class CheckedRunner {
             for (int i = 0; i < expectedCount; i++) {
                 String baseName = i + outputPrefix;
                 paths.add(outputDirectory.resolve(baseName + ".png"));
+                if (forDeletion || ttsEnabled()) {
+                    paths.add(audioDirectory.resolve(baseName + ".txt"));
+                    paths.add(audioDirectory.resolve(baseName + ".voice.json"));
+                }
                 if (ttsEnabled()) {
                     paths.add(audioDirectory.resolve(baseName + ".wav"));
                     if (createVideo) {

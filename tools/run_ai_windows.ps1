@@ -8,6 +8,10 @@ $Platform = 'reddit'
 $Format = 'auto'
 $Tts = 'kokoro'
 $Voice = 'af_heart'
+$VoiceSeries = 'af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george'
+$VoiceSelection = 'series'
+$TtsDelivery = 'natural'
+$Captions = 'word'
 $VideoFlags = @()
 $ImageFlags = @()
 $KeepOllamaFlags = @('--keep-ollama-loaded')
@@ -22,7 +26,7 @@ $env:TOKENIZERS_PARALLELISM = 'false'
 
 Write-Host ''
 Write-Host 'ThreadGens local AI runner'
-Write-Host 'Pipeline: P0 content originality + dynamic video'
+Write-Host 'Pipeline: P0 content originality + P1 captions, voice variation, identity rotation, and provenance'
 Write-Host ''
 
 Write-Host 'Choose platform/thread style:'
@@ -43,6 +47,8 @@ if ($Tts -eq 'piper') {
     $TtsCmd = if (Test-Path $piperCmd) { $piperCmd } else { 'piper' }
     $voiceInput = Read-Host 'Voice name or ONNX path [en_US-lessac-medium]'
     if (-not [string]::IsNullOrWhiteSpace($voiceInput)) { $Voice = $voiceInput } else { $Voice = 'en_US-lessac-medium' }
+    $VoiceSeries = $Voice
+    $VoiceSelection = 'single'
 } else {
     if (Test-Path $KokoroPython) {
         $TtsCmd = $KokoroPython
@@ -55,6 +61,25 @@ if ($Tts -eq 'piper') {
     Write-Host 'Common Kokoro voices: af_heart af_bella af_nicole am_adam am_michael bf_emma bm_george'
     $voiceInput = Read-Host 'Kokoro voice [af_heart]'
     if (-not [string]::IsNullOrWhiteSpace($voiceInput)) { $Voice = $voiceInput }
+    $voiceSeriesInput = Read-Host "Voice pool [$VoiceSeries]"
+    if (-not [string]::IsNullOrWhiteSpace($voiceSeriesInput)) { $VoiceSeries = $voiceSeriesInput }
+}
+
+Write-Host ''
+Write-Host 'Choose narration delivery:'
+Write-Host '1. Natural'
+Write-Host '2. Calm'
+Write-Host '3. Energetic'
+Write-Host '4. Dramatic'
+$deliveryChoice = Read-Host 'Choice [1-4, default 1]'
+switch ($deliveryChoice.ToLowerInvariant()) {
+    '2' { $TtsDelivery = 'calm' }
+    'calm' { $TtsDelivery = 'calm' }
+    '3' { $TtsDelivery = 'energetic' }
+    'energetic' { $TtsDelivery = 'energetic' }
+    '4' { $TtsDelivery = 'dramatic' }
+    'dramatic' { $TtsDelivery = 'dramatic' }
+    default { $TtsDelivery = 'natural' }
 }
 
 Write-Host ''
@@ -112,6 +137,8 @@ if ($makeImage.ToLowerInvariant() -eq 'y' -or $makeImage.ToLowerInvariant() -eq 
 $makeVideo = Read-Host 'Make stitched MP4 video with dynamic P0 compositions? y/N'
 if ($makeVideo.ToLowerInvariant() -eq 'y' -or $makeVideo.ToLowerInvariant() -eq 'yes') {
     $VideoFlags = @('--video', '--concat-video')
+    $captionInput = Read-Host 'Captions: word, sentence, or off [word]'
+    if (-not [string]::IsNullOrWhiteSpace($captionInput)) { $Captions = $captionInput.ToLowerInvariant() }
 }
 
 $unloadOllama = Read-Host 'Unload Ollama after text generation? y/N [default N, keeps model loaded]'
@@ -127,6 +154,10 @@ Write-Host "Original:     $topic"
 Write-Host "Count:        $Count"
 Write-Host "TTS:          $Tts"
 Write-Host "Voice:        $Voice"
+Write-Host "Voice pool:   $VoiceSeries"
+Write-Host "Selection:    $VoiceSelection"
+Write-Host "Delivery:     $TtsDelivery"
+Write-Host "Captions:     $Captions"
 Write-Host "Cmd:          $TtsCmd"
 Write-Host "OP image:     $($ImageFlags -join ' ')"
 Write-Host "Video:        $($VideoFlags -join ' ')"
@@ -144,6 +175,10 @@ $javaArgs = @(
     '--tts', $Tts,
     '--tts-command', $TtsCmd,
     '--voice', $Voice,
+    '--voice-series', $VoiceSeries,
+    '--voice-selection', $VoiceSelection,
+    '--tts-delivery', $TtsDelivery,
+    '--captions', $Captions,
     '--no-watermark',
     '--top'
 )

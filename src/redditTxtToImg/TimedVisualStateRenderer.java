@@ -38,6 +38,63 @@ final class TimedVisualStateRenderer {
             Path outputDirectory,
             String baseName
     ) throws IOException {
+        return renderStates(
+                sourceImage,
+                narration,
+                format,
+                itemIndex,
+                itemTotal,
+                VideoTimeline.fromNarration(narration, audioDurationSeconds),
+                outputDirectory,
+                baseName);
+    }
+
+    static List<RenderedState> renderStates(
+            Path sourceImage,
+            String narration,
+            ContentFormat format,
+            int itemIndex,
+            int itemTotal,
+            List<CaptionTimeline.Scene> scenes,
+            double audioDurationSeconds,
+            Path outputDirectory,
+            String baseName
+    ) throws IOException {
+        List<VideoTimeline.State> states = new ArrayList<>();
+        List<CaptionTimeline.Scene> safeScenes = scenes == null ? List.of() : scenes;
+        double safeDuration = Math.max(0.01, audioDurationSeconds);
+        for (int i = 0; i < safeScenes.size(); i++) {
+            CaptionTimeline.Scene scene = safeScenes.get(i);
+            states.add(new VideoTimeline.State(
+                    scene.text(),
+                    scene.durationSeconds() / safeDuration,
+                    i,
+                    safeScenes.size()));
+        }
+        if (states.isEmpty()) {
+            states.add(new VideoTimeline.State(narration == null ? "" : narration, 1.0, 0, 1));
+        }
+        return renderStates(
+                sourceImage,
+                narration,
+                format,
+                itemIndex,
+                itemTotal,
+                states,
+                outputDirectory,
+                baseName);
+    }
+
+    private static List<RenderedState> renderStates(
+            Path sourceImage,
+            String narration,
+            ContentFormat format,
+            int itemIndex,
+            int itemTotal,
+            List<VideoTimeline.State> timeline,
+            Path outputDirectory,
+            String baseName
+    ) throws IOException {
         Files.createDirectories(outputDirectory);
         Path baseFrame = outputDirectory.resolve(baseName + "_base.png");
         DynamicVisualRenderer.render(sourceImage, narration, format, itemIndex, itemTotal, baseFrame);
@@ -46,7 +103,6 @@ final class TimedVisualStateRenderer {
             throw new IOException("Could not decode dynamic base frame: " + baseFrame);
         }
 
-        List<VideoTimeline.State> timeline = VideoTimeline.fromNarration(narration, audioDurationSeconds);
         List<RenderedState> rendered = new ArrayList<>();
         for (VideoTimeline.State state : timeline) {
             BufferedImage image = copy(base);

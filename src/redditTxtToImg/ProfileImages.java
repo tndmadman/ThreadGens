@@ -15,21 +15,21 @@ final class ProfileImages {
             return null;
         }
 
-        Path direct = Path.of(imageName);
-        if (direct.isAbsolute() && Files.exists(direct)) {
+        Path direct = Path.of(imageName).normalize();
+        if (Files.isRegularFile(direct)) {
             return direct;
         }
 
         Path cached = CACHE_ROOT.resolve(imageName).normalize();
-        if (Files.exists(cached)) {
+        if (Files.isRegularFile(cached)) {
             return cached;
         }
 
         Path legacy = LEGACY_ASSET_ROOT.resolve(imageName).normalize();
-        if (Files.exists(legacy)) {
+        if (Files.isRegularFile(legacy)) {
             return legacy;
         }
 
-        return cached;
+        return null;
     }
 }

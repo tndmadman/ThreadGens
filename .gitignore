@@ -1,7 +1,13 @@
 out/
+build/
 output/
 *.class
+*.pyc
+__pycache__/
 .DS_Store
 Thumbs.db
 .venv-kokoro/
 data/generation_history.jsonl
+data/identity_history.jsonl
+data/identity_history.jsonl.lock
+data/identity_history.jsonl.tmp

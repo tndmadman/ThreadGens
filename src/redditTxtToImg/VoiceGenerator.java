@@ -18,12 +18,27 @@ public class VoiceGenerator {
     private final String command;
     private final Path voiceModel;
     private final int timeoutSeconds;
+    private final VoicePlan.Delivery delivery;
 
     public VoiceGenerator(String engine, String command, Path voiceModel, int timeoutSeconds) {
+        this(engine, command, voiceModel, timeoutSeconds,
+                VoicePlan.Delivery.resolve("natural", null, "a", null));
+    }
+
+    VoiceGenerator(
+            String engine,
+            String command,
+            Path voiceModel,
+            int timeoutSeconds,
+            VoicePlan.Delivery delivery
+    ) {
         this.engine = engine == null ? "none" : engine.toLowerCase(Locale.ROOT);
         this.command = command == null || command.isBlank() ? defaultCommandFor(engine) : command;
         this.voiceModel = voiceModel;
         this.timeoutSeconds = timeoutSeconds <= 0 ? 120 : timeoutSeconds;
+        this.delivery = delivery == null
+                ? VoicePlan.Delivery.resolve("natural", null, "a", null)
+                : delivery;
     }
 
     private static String defaultCommandFor(String engine) {
@@ -38,30 +53,39 @@ public class VoiceGenerator {
     }
 
     public void generateSpeech(String text, Path outputFile) throws IOException, InterruptedException {
+        generateSpeech(text, outputFile, voiceModel);
+    }
+
+    void generateSpeech(String text, Path outputFile, Path selectedVoice) throws IOException, InterruptedException {
         if (!isEnabled()) {
             return;
         }
+        String safeText = text == null ? "" : text.trim();
+        if (safeText.isBlank()) {
+            throw new IOException("TTS narration is empty for: " + outputFile);
+        }
+        writeNarrationSidecar(safeText, outputFile);
         if ("piper".equals(engine)) {
-            generateWithPiper(text, outputFile);
-            return;
+            generateWithPiper(safeText, outputFile, selectedVoice);
+        } else if ("kokoro".equals(engine)) {
+            generateWithKokoro(safeText, outputFile, selectedVoice);
+        } else {
+            throw new IOException("Unsupported TTS engine: " + engine + ". Supported values: none, piper, kokoro.");
         }
-        if ("kokoro".equals(engine)) {
-            generateWithKokoro(text, outputFile);
-            return;
-        }
-        throw new IOException("Unsupported TTS engine: " + engine + ". Supported values: none, piper, kokoro.");
+        writeVoiceMetadata(outputFile, selectedVoice);
     }
 
-    private void generateWithPiper(String text, Path outputFile) throws IOException, InterruptedException {
-        if (voiceModel == null || voiceModel.toString().isBlank()) {
+    private void generateWithPiper(String text, Path outputFile, Path selectedVoice)
+            throws IOException, InterruptedException {
+        if (selectedVoice == null || selectedVoice.toString().isBlank()) {
             throw new IOException("Piper needs a voice model path. Use --voice path/to/voice.onnx");
         }
-        if (!Files.exists(voiceModel)) {
-            throw new IOException("Piper voice model not found: " + voiceModel
+        if (!Files.exists(selectedVoice)) {
+            throw new IOException("Piper voice model not found: " + selectedVoice
                     + ". Pick a listed voice or download it from the runner first.");
         }
 
-        Path configFile = Path.of(voiceModel.toString() + ".json");
+        Path configFile = Path.of(selectedVoice.toString() + ".json");
         if (!Files.exists(configFile)) {
             System.err.println("Warning: Piper voice config not found: " + configFile);
         }
@@ -73,14 +97,21 @@ public class VoiceGenerator {
         List<String> commandParts = new ArrayList<>();
         commandParts.add(resolvePiperCommand(command));
         commandParts.add("--model");
-        commandParts.add(voiceModel.toString());
+        commandParts.add(selectedVoice.toString());
         commandParts.add("--output_file");
         commandParts.add(outputFile.toString());
+        commandParts.add("--length_scale");
+        commandParts.add(String.format(Locale.ROOT, "%.4f", 1.0 / delivery.speed()));
+        if (delivery.sentencePauseMs() > 0) {
+            commandParts.add("--sentence_silence");
+            commandParts.add(String.format(Locale.ROOT, "%.3f", delivery.sentencePauseMs() / 1000.0));
+        }
 
         ProcessRunner.runAndCapture(commandParts, "Piper", timeoutSeconds, text + System.lineSeparator());
     }
 
-    private void generateWithKokoro(String text, Path outputFile) throws IOException, InterruptedException {
+    private void generateWithKokoro(String text, Path outputFile, Path selectedVoice)
+            throws IOException, InterruptedException {
         if (outputFile.getParent() != null) {
             Files.createDirectories(outputFile.getParent());
         }
@@ -90,12 +121,11 @@ public class VoiceGenerator {
             throw new IOException("Kokoro helper script not found: " + script);
         }
 
-        String voiceName = voiceModel == null || voiceModel.toString().isBlank()
+        String voiceName = selectedVoice == null || selectedVoice.toString().isBlank()
                 ? "af_heart"
-                : voiceModel.toString();
+                : selectedVoice.toString();
 
         Path textFile = outputFile.resolveSibling(outputFile.getFileName().toString().replaceAll("\\.wav$", "") + ".txt");
-        Files.writeString(textFile, text, StandardCharsets.UTF_8);
 
         List<String> commandParts = new ArrayList<>();
         commandParts.add(resolvePythonCommand(command));
@@ -106,6 +136,12 @@ public class VoiceGenerator {
         commandParts.add(outputFile.toString());
         commandParts.add("--voice");
         commandParts.add(voiceName);
+        commandParts.add("--speed");
+        commandParts.add(String.format(Locale.ROOT, "%.4f", delivery.speed()));
+        commandParts.add("--lang");
+        commandParts.add(delivery.language());
+        commandParts.add("--sentence-pause-ms");
+        commandParts.add(String.valueOf(delivery.sentencePauseMs()));
 
         System.out.println("Starting Kokoro TTS: " + outputFile);
         ProcessBuilder processBuilder = new ProcessBuilder(commandParts);
@@ -142,6 +178,39 @@ public class VoiceGenerator {
         if (!Files.exists(outputFile)) {
             throw new IOException("Kokoro finished but did not create WAV: " + outputFile + ". Output: " + output);
         }
+    }
+
+    private void writeNarrationSidecar(String text, Path outputFile) throws IOException {
+        if (outputFile.getParent() != null) {
+            Files.createDirectories(outputFile.getParent());
+        }
+        Path textFile = outputFile.resolveSibling(
+                outputFile.getFileName().toString().replaceAll("\\.wav$", "") + ".txt");
+        Files.writeString(textFile, text, StandardCharsets.UTF_8);
+    }
+
+    private void writeVoiceMetadata(Path outputFile, Path selectedVoice) throws IOException {
+        Path metadataFile = outputFile.resolveSibling(
+                outputFile.getFileName().toString().replaceAll("\\.wav$", "") + ".voice.json");
+        String json = "{\"engine\":" + JsonText.quote(engine)
+                + ",\"voice\":" + JsonText.quote(portableVoiceLabel(selectedVoice))
+                + ",\"delivery\":" + JsonText.quote(delivery.preset())
+                + ",\"speed\":" + String.format(Locale.ROOT, "%.4f", delivery.speed())
+                + ",\"language\":" + JsonText.quote(delivery.language())
+                + ",\"sentencePauseMs\":" + delivery.sentencePauseMs() + "}\n";
+        Files.writeString(metadataFile, json, StandardCharsets.UTF_8);
+    }
+
+    private static String portableVoiceLabel(Path voice) {
+        if (voice == null || voice.toString().isBlank()) {
+            return "";
+        }
+        Path absolute = voice.toAbsolutePath().normalize();
+        Path workingDirectory = Path.of("").toAbsolutePath().normalize();
+        Path display = absolute.startsWith(workingDirectory)
+                ? workingDirectory.relativize(absolute)
+                : voice.getFileName();
+        return display == null ? "" : display.toString().replace('\\', '/');
     }
 
     private String resolvePiperCommand(String configuredCommand) {
@@ -207,12 +276,11 @@ class VoiceCatalog {
         if (voices.isEmpty()) {
             System.out.println("No Piper voices found in: " + voiceDirectory);
             System.out.println("Put .onnx voice files there or pass --voice path\\to\\voice.onnx");
-            return;
-        }
-
-        System.out.println("Available Piper voices in " + voiceDirectory + ":");
-        for (String voice : voices) {
-            System.out.println("- " + voice);
+        } else {
+            System.out.println("Available Piper voices in " + voiceDirectory + ":");
+            for (String voice : voices) {
+                System.out.println("- " + voice);
+            }
         }
         System.out.println();
         System.out.println("Common Kokoro voices: af_heart, af_bella, af_nicole, am_adam, am_michael, bf_emma, bm_george");

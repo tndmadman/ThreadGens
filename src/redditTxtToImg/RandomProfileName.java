@@ -43,25 +43,26 @@ public class RandomProfileName {
 
         scanProfileDirectory(profileDirectory, seen);
 
-        if (!samePath(profileDirectory, RENDER_PROFILE_ROOT)) {
-            scanProfileDirectory(RENDER_PROFILE_ROOT, seen);
-        }
-
         if (profileImageNames.isEmpty()) {
             createFallbackProfileImages(seen);
+        }
+
+        if (!aiProfileImageNames.isEmpty()) {
+            System.out.println("AI profile pool enabled: " + aiProfileImageNames.size()
+                    + " valid profile(s); all slides will use AI profiles.");
         }
     }
 
     public String getRandomProfileName() {
-        if (profileImageNames.isEmpty()) {
+        List<String> preferredPool = aiProfileImageNames.isEmpty()
+                ? profileImageNames
+                : aiProfileImageNames;
+        if (preferredPool.isEmpty()) {
             return "";
         }
 
         if (!hasFirstRandomProfileName) {
-            List<String> originalPostPool = aiProfileImageNames.isEmpty()
-                    ? profileImageNames
-                    : aiProfileImageNames;
-            String selected = chooseRandom(originalPostPool);
+            String selected = chooseRandom(preferredPool);
             hasFirstRandomProfileName = true;
             firstRandomProfileName = selected;
             String profileType = aiProfileImageNames.contains(selected) ? "AI" : "fallback";
@@ -69,19 +70,31 @@ public class RandomProfileName {
             return selected;
         }
 
-        String selected = chooseRandom(profileImageNames);
-        if (!sameProfileName(selected, firstRandomProfileName)) {
-            return selected;
+        if (preferredPool.size() == 1) {
+            return preferredPool.get(0);
         }
 
         for (int attempt = 0; attempt < 25; attempt++) {
-            String candidate = chooseRandom(profileImageNames);
+            String candidate = chooseRandom(preferredPool);
             if (!sameProfileName(candidate, firstRandomProfileName)) {
                 return candidate;
             }
         }
 
-        return "";
+        for (String candidate : preferredPool) {
+            if (!sameProfileName(candidate, firstRandomProfileName)) {
+                return candidate;
+            }
+        }
+        return preferredPool.get(0);
+    }
+
+    List<String> profileImageNames() {
+        return List.copyOf(profileImageNames);
+    }
+
+    List<String> aiProfileImageNames() {
+        return List.copyOf(aiProfileImageNames);
     }
 
     private String chooseRandom(List<String> profileNames) {
@@ -104,6 +117,11 @@ public class RandomProfileName {
     }
 
     private void addProfileImage(Path sourcePath, Set<String> seen) {
+        if (!isLoadableImage(sourcePath)) {
+            System.err.println("Skipping invalid profile image: " + sourcePath);
+            return;
+        }
+
         try {
             String renderName = makeRenderableProfileName(sourcePath);
             if (renderName == null || renderName.isBlank()) {
@@ -116,19 +134,24 @@ public class RandomProfileName {
                 }
             }
         } catch (IOException e) {
-            System.err.println("Could not prepare profile image: " + sourcePath);
+            System.err.println("Could not prepare profile image: " + sourcePath + " (" + e.getMessage() + ")");
         }
     }
 
     private String makeRenderableProfileName(Path sourcePath) throws IOException {
         Path source = sourcePath.toAbsolutePath().normalize();
         Path renderRoot = RENDER_PROFILE_ROOT.toAbsolutePath().normalize();
+        Path legacyRoot = ProfileImages.LEGACY_ASSET_ROOT.toAbsolutePath().normalize();
+
+        if (source.startsWith(legacyRoot)) {
+            return toForwardSlashes(legacyRoot.relativize(source).toString());
+        }
 
         if (source.startsWith(renderRoot)) {
             return toRendererRelativeName(renderRoot.relativize(source).toString());
         }
 
-        Path importDir = RENDER_PROFILE_ROOT.resolve("imported_profiles");
+        Path importDir = renderRoot.resolve("imported_profiles");
         Files.createDirectories(importDir);
 
         String filename = source.getFileName().toString();
@@ -137,11 +160,9 @@ public class RandomProfileName {
         String importedName = addSuffixBeforeExtension(safeName, "_" + uniqueSuffix);
         Path target = importDir.resolve(importedName);
 
-        if (!Files.exists(target)) {
-            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
+        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
 
-        return toRendererRelativeName(RENDER_PROFILE_ROOT.toAbsolutePath().normalize().relativize(target.toAbsolutePath().normalize()).toString());
+        return toRendererRelativeName(renderRoot.relativize(target).toString());
     }
 
     private void createFallbackProfileImages(Set<String> seen) {
@@ -151,7 +172,7 @@ public class RandomProfileName {
             for (int i = 1; i <= 24; i++) {
                 String filename = String.format(Locale.ROOT, "reply_profile_%03d.png", i);
                 Path output = fallbackDir.resolve(filename);
-                if (!Files.exists(output)) {
+                if (!Files.exists(output) || !isLoadableImage(output)) {
                     writeFallbackAvatar(output, i);
                 }
                 String renderName = toRendererRelativeName(RENDER_PROFILE_ROOT.relativize(output).toString());
@@ -207,11 +228,20 @@ public class RandomProfileName {
         return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif");
     }
 
+    private static boolean isLoadableImage(Path path) {
+        try {
+            return ImageIO.read(path.toFile()) != null;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     private static boolean isAiProfileSource(Path sourcePath) {
         if (sourcePath == null || sourcePath.getFileName() == null) {
             return false;
         }
-        String filename = sourcePath.getFileName().toString().toLowerCase(Locale.ROOT);
+        String originalFilename = sourcePath.getFileName().toString();
+        String filename = originalFilename.toLowerCase(Locale.ROOT);
         if (filename.startsWith(DEFAULT_AI_PROFILE_PREFIX)) {
             return true;
         }
@@ -220,14 +250,7 @@ public class RandomProfileName {
                 return true;
             }
         }
-        return false;
-    }
-
-    private static boolean samePath(Path a, Path b) {
-        if (a == null || b == null) {
-            return false;
-        }
-        return a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
+        return !filename.startsWith("tg_profile_");
     }
 
     private static boolean sameProfileName(String left, String right) {

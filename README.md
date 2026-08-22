@@ -2,7 +2,7 @@
 
 ThreadGens is a local Java pipeline for turning Reddit-style threads or X-style posts/replies into 9:16 short-form video assets.
 
-The production pipeline now includes the P0 content-originality work:
+The production pipeline includes the completed P0 content-originality work and P1 variation/provenance work:
 
 - local Ollama script generation,
 - deterministic and semantic cross-video novelty checks,
@@ -11,6 +11,10 @@ The production pipeline now includes the P0 content-originality work:
 - local Kokoro or Piper TTS,
 - optional ComfyUI / RealVisXL OP images,
 - timed visual-state changes during narration,
+- word-highlighted or sentence-timed captions,
+- configurable voice pools, series narrators, and delivery presets,
+- persistent cross-video identity rotation,
+- AI disclosure and SHA-256 provenance manifests,
 - format-specific motion and transitions,
 - H.264/AAC FFmpeg output,
 - persistent generation history.
@@ -372,6 +376,43 @@ Video options:
 - `--fps N`
 - `--video-timeout SECONDS`
 - `--final-video NAME.mp4`
+
+## P1 captions, voices, identities, and provenance
+
+Caption timing uses the exact narration sidecar and measured WAV duration. The same timeline drives P0's active visual states, so scene changes and captions share one timing source. Timing is deterministic and audio-aligned, but it is estimated rather than phoneme-level forced alignment.
+
+```bash
+java -cp out redditTxtToImg.CheckedRunner data/comments.txt output \
+  --platform reddit \
+  --tts kokoro \
+  --voice-series "af_heart,af_bella,am_adam" \
+  --voice-selection series \
+  --series-id example-series \
+  --tts-delivery natural \
+  --captions word \
+  --video --concat-video
+```
+
+P1 options:
+
+- `--captions off|word|sentence`
+- `--caption-words N`
+- `--visual-max-scenes N` (maximum `20`)
+- `--voice-series VOICE1,VOICE2`
+- `--voice-selection single|series|per-slide`
+- `--series-id ID`
+- `--tts-delivery natural|calm|energetic|dramatic`
+- `--tts-speed 0.60..1.60`
+- `--tts-language CODE`
+- `--tts-sentence-pause-ms 0..2000`
+- `--identity-history-file PATH`
+- `--identity-history-limit N`
+- `--no-identity-history`
+- `--metadata-dir PATH`
+- `--disclosure TEXT`
+- `--no-provenance-metadata`
+
+Each successful run writes a JSON provenance manifest containing origin, generator settings, selected voices, caption timing method, portable artifact paths, sizes, and SHA-256 hashes. Segment and final MP4 files also receive standard disclosure tags; the final video receives an adjacent `.provenance.json` sidecar. This metadata is not a signed C2PA credential.
 
 ## Batch video creation
 
