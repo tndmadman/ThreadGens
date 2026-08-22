@@ -171,8 +171,11 @@ final class PublishFingerprint {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             for (Path path : paths) {
-                digest.update(path.getFileName().toString().getBytes(StandardCharsets.UTF_8));
-                digest.update(Files.readAllBytes(path));
+                byte[] bytes = Files.readAllBytes(path);
+                digest.update(Long.toString(bytes.length).getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(bytes);
+                digest.update((byte) 0xff);
             }
             return hex(digest.digest());
         } catch (NoSuchAlgorithmException e) {
@@ -208,14 +211,17 @@ final class PublishFingerprint {
     static double visualSimilarity(List<Long> a, List<Long> b) {
         if (a == null || b == null || a.isEmpty() || b.isEmpty()) return 0.0;
         double sum = 0.0;
-        int compared = 0;
-        int count = Math.min(a.size(), b.size());
-        for (int i = 0; i < count; i++) {
-            int distance = Long.bitCount(a.get(i) ^ b.get(i));
-            sum += 1.0 - (distance / 64.0);
-            compared++;
+        for (long left : a) {
+            double best = 0.0;
+            for (long right : b) {
+                int distance = Long.bitCount(left ^ right);
+                best = Math.max(best, 1.0 - (distance / 64.0));
+            }
+            sum += best;
         }
-        return compared == 0 ? 0.0 : sum / compared;
+        double directional = sum / a.size();
+        double countPenalty = (double) Math.min(a.size(), b.size()) / Math.max(a.size(), b.size());
+        return directional * countPenalty;
     }
 
     static String sha256(byte[] bytes) {
