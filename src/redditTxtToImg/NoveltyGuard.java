@@ -33,8 +33,15 @@ final class NoveltyGuard {
     static final int DEFAULT_THRESHOLD = 48;
     static final int DEFAULT_HISTORY_LIMIT = 500;
 
+    /*
+     * Generation-history string fields are controlled values: timestamps,
+     * format/hash identifiers, and URL-safe Base64 topic/script payloads. None
+     * require quoted-string escape handling. Keep this matcher flat and
+     * possessive so a long Base64 script cannot recurse through java.util.regex
+     * and exhaust the JVM stack while the next batch job loads history.
+     */
     private static final Pattern JSON_FIELD =
-            Pattern.compile("\"([a-zA-Z0-9_]+)\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
+            Pattern.compile("\"([a-zA-Z0-9_]+)\"\\s*:\\s*\"([^\"]*+)\"");
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "for",
             "from", "had", "has", "have", "he", "her", "hers", "him", "his", "i",
