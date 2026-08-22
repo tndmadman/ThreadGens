@@ -4,15 +4,15 @@ import java.io.IOException;
 
 /**
  * Backward-compatible entry point retained for existing Windows scripts.
- * P0Runner now owns the image/audio/video ordering and always renders dynamic
- * video after OP-image overlays are complete.
+ * P0Entrypoint now owns hidden-prompt generation and delegates rendering to the
+ * P0 pipeline after OP-image ordering is safe.
  */
 public class OpImageVideoSafeRunner {
     public static void main(String[] args) {
-        P0Runner.main(args);
+        P0Entrypoint.main(args);
     }
 
     static void run(String[] args) throws IOException, InterruptedException {
-        P0Runner.runOrThrow(args == null ? new String[0] : args);
+        P0Entrypoint.runOrThrow(args == null ? new String[0] : args);
     }
 }
