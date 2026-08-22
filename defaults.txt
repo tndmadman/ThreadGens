@@ -27,6 +27,7 @@ semanticHistoryLimit=50
 integritySanitize=true
 
 # P2 final pre-publish repetition audit
+# The history transaction is serialized with a sibling .lock file.
 publishAuditEnabled=true
 publishAuditMode=block
 publishHistoryFile=data/publish_history.jsonl
