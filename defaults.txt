@@ -20,6 +20,10 @@ historyLimit=500
 noveltyThreshold=48
 noveltyRetries=4
 noveltyEnabled=true
+semanticNoveltyEnabled=true
+embeddingModel=nomic-embed-text
+semanticThreshold=0.86
+semanticHistoryLimit=50
 integritySanitize=true
 
 # TTS defaults
