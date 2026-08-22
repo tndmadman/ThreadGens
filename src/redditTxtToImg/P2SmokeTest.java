@@ -18,7 +18,9 @@ public final class P2SmokeTest {
         testSemanticPremiseBlocks();
         testSameVoiceAloneDoesNotBlock();
         testUnknownVoiceDoesNotCreateReusePenalty();
+        testRenderedIdentityReuseIsScored();
         testHistoryRoundTripAndCorruptionFailsClosed();
+        testSchemaOneHistoryRemainsReadable();
         testReportWriting();
         System.out.println("P2 smoke tests passed.");
     }
@@ -101,17 +103,36 @@ public final class P2SmokeTest {
                 "unknown voice identifiers must not be treated as a known repeated voice");
     }
 
+    private static void testRenderedIdentityReuseIsScored() {
+        PrePublishAuditor auditor = new PrePublishAuditor(58, 78);
+        PublishFingerprint prior = PublishFingerprint.forTest(
+                "A story about a lost telescope.", "identity-a", 0x11110000L, 0x55aa55aaL,
+                "confession", "voice-a", List.of(2.0, 3.0), "meta-a");
+        PublishFingerprint candidate = PublishFingerprint.forTest(
+                "A completely unrelated story about a flooded greenhouse.", "identity-b", 0xeeeeffffL, 0x55aa55aaL,
+                "debate", "voice-b", List.of(6.0, 1.0), "meta-b");
+        PrePublishAuditor.Result result = auditor.assess(candidate,
+                List.of(new PublishAuditHistory.Entry(prior, "PASS", 10)));
+        require(result.scores().identity() > 0.99,
+                "same rendered identity fingerprint must be recognized");
+        require(result.status() != PrePublishAuditor.Status.BLOCK,
+                "same rendered identity alone must not hard-block unrelated content");
+    }
+
     private static void testHistoryRoundTripAndCorruptionFailsClosed() throws Exception {
         Path dir = Files.createTempDirectory("threadgens-p2-history-");
         Path historyFile = dir.resolve("publish.jsonl");
         try {
             PublishAuditHistory history = new PublishAuditHistory(historyFile, 5);
-            PublishFingerprint original = fp("History round trip script.", "artifact-x", 0xabcdefL,
+            PublishFingerprint original = PublishFingerprint.forTest(
+                    "History round trip script.", "artifact-x", 0xabcdefL, 0x12345678L,
                     "best_answers", "voice-x", List.of(1.2, 2.3), "meta-x");
             history.record(original, "PASS", 17);
             List<PublishAuditHistory.Entry> loaded = history.load();
             require(loaded.size() == 1, "history should round-trip one record");
             require(loaded.get(0).fingerprint().script.equals(original.script), "history script mismatch");
+            require(loaded.get(0).fingerprint().identityHashes.equals(original.identityHashes),
+                    "identity fingerprint history mismatch");
 
             Files.writeString(historyFile, "{bad history}\n", StandardCharsets.UTF_8);
             boolean failed = false;
@@ -121,6 +142,27 @@ public final class P2SmokeTest {
                 failed = true;
             }
             require(failed, "corrupt publish history must fail closed");
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
+    private static void testSchemaOneHistoryRemainsReadable() throws Exception {
+        Path dir = Files.createTempDirectory("threadgens-p2-schema1-");
+        Path historyFile = dir.resolve("publish.jsonl");
+        try {
+            String old = "{\"schema\":\"1\",\"created\":\"2026-01-01T00:00:00Z\","
+                    + "\"platform\":\"reddit\",\"format\":\"confession\","
+                    + "\"script_b64\":\"b2xkIHNjcmlwdA\",\"script_hash\":\"hash\","
+                    + "\"artifact_hash\":\"artifact\",\"visuals\":\"1\","
+                    + "\"voice_b64\":\"dm9pY2U\",\"tts\":\"kokoro\","
+                    + "\"pacing\":\"2.000\",\"total_duration\":\"2.0\","
+                    + "\"metadata_hash\":\"\",\"status\":\"PASS\",\"risk\":\"1\"}\n";
+            Files.writeString(historyFile, old, StandardCharsets.UTF_8);
+            List<PublishAuditHistory.Entry> loaded = new PublishAuditHistory(historyFile, 5).load();
+            require(loaded.size() == 1, "schema-1 publish history should remain readable");
+            require(loaded.get(0).fingerprint().identityHashes.isEmpty(),
+                    "schema-1 rows should load with no identity fingerprint");
         } finally {
             deleteTree(dir);
         }
@@ -136,6 +178,7 @@ public final class P2SmokeTest {
             PrePublishAuditor.writeReport(report, candidate, result, "block");
             String json = Files.readString(report, StandardCharsets.UTF_8);
             require(json.contains("\"status\": \"PASS\""), "report should contain status");
+            require(json.contains("\"identity\""), "report should contain identity score");
             require(json.contains("\"risk\""), "report should contain risk");
         } finally {
             deleteTree(dir);
