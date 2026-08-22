@@ -131,8 +131,10 @@ If the publish-history transaction lock cannot be acquired, the audit fails rath
 - schema-2 publish-history round trip including identity hashes;
 - schema-1 publish-history backward compatibility;
 - malformed history fails closed;
-- concurrent history transactions serialize and cannot both approve an empty-history candidate;
+- concurrent history transactions inside one JVM serialize and cannot both approve an empty-history candidate;
 - audit-report identity score output.
+
+A separate CI probe launches two independent Java processes against one empty publish-history path and verifies the OS file lock allows exactly one row to be recorded.
 
 `P2ArtifactSmokeTest` uses real FFmpeg/ffprobe media and validates:
 
@@ -149,4 +151,4 @@ If the publish-history transaction lock cannot be acquired, the audit fails rath
 
 GitHub Actions also runs a complete `P2Entrypoint` production-gate scenario using a deterministic fake Piper executable: the first real video run must PASS and create one history record, then the identical second run must BLOCK and must not append another approved-history row.
 
-GitHub Actions compiles the full Java source set on Ubuntu and Windows, runs P0 suites, both P2 suites, the full P2 production-gate test, existing renderer/integration/failure-path tests, and Windows PowerShell parsing.
+GitHub Actions compiles the full Java source set on Ubuntu and Windows, runs P0 suites, both P2 suites, the in-process and cross-process lock tests, the full P2 production-gate test, existing renderer/integration/failure-path tests, and Windows PowerShell parsing.
