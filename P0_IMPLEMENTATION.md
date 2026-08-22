@@ -4,7 +4,7 @@
 
 ## Production flow
 
-1. Resolve a genuinely different content format (`--format auto` by default).
+1. Resolve a genuinely different content format. `--format auto` first chooses formats compatible with the title/body (for example, disputes prefer debate while story-continuation prompts prefer story-compatible formats), then uses persistent history to avoid recently overused formats.
 2. For `--auto`, generate replies with `FormatAwareTextGenerator`. Format/originality instructions are placed only in the hidden Ollama prompt; the visible title and original post body are preserved exactly.
 3. Compare each auto-generated candidate against persistent local generation history before rendering.
 4. If a candidate is too repetitive, regenerate it with explicit anti-repeat feedback. Repeated failure stops the run instead of silently publishing a low-novelty script.
@@ -16,9 +16,11 @@
 10. Stitch the dynamic clips using the existing H.264/AAC final-video path.
 11. Only after a successful production run, append the accepted script/format/topic fingerprint to local history.
 
+Before a requested video run begins, ThreadGens deletes matching stale segment/final MP4 outputs. A failed generation therefore cannot be mistaken for a newly successful video because an old file happened to remain on disk.
+
 ## Content formats
 
-`--format auto` rotates away from recently used formats. Explicit values are:
+`--format auto` is recommended. Auto selection combines content fit with recent usage rather than choosing blindly. Explicit values are:
 
 - `thread_story` — threaded story progression.
 - `confession` — first-person reveal with a quote-focused visual composition.
@@ -28,6 +30,11 @@
 
 These formats change both the hidden generation prompt and the video composition. They are not just background/color variants.
 
+Both Windows generation paths expose the same format choices:
+
+- `tools/run_ai_windows.ps1` offers an interactive selector.
+- `tools/batch_create_videos.ps1` accepts `-Format auto|thread_story|confession|debate|best_answers|escalating_conversation`.
+
 ## Hidden-prompt isolation
 
 The visible OP/title must never be used as a transport for internal generation instructions. `P0Entrypoint` therefore generates the auto script before the platform renderer runs, preserving the original `--post-title` and `--topic` values for display while sending format and novelty guidance only to Ollama.
@@ -35,6 +42,8 @@ The visible OP/title must never be used as a transport for internal generation i
 After generation, `--auto` is removed and the generated script file replaces the comments input. This prevents the legacy platform-specific auto generator from running a second time.
 
 Manual runs are also isolated from stale `output/script/generated_comments.txt` files so an old auto script cannot silently replace explicit user input during novelty/caption processing.
+
+For X generation, the P0 entry point also normalizes the no-style case so the Reddit-oriented default title (`Finish this story in the comments`) cannot accidentally influence a normal X post when the caller did not supply `--post-title`.
 
 ## Novelty guard
 
@@ -57,7 +66,19 @@ Useful options:
 - `--novelty-retries N` (default 4 retries after the first candidate)
 - `--no-novelty` for intentional one-off/debug runs
 
-Auto-generated content is regenerated when rejected. Manual/supplied text is never silently rewritten; the renderer emits a warning and continues so explicit user input remains authoritative.
+Auto-generated content is regenerated when rejected. Manual/supplied text is never silently rewritten; the renderer emits a warning and continues so explicit user input remains authoritative. Rejected manual duplicates are not added to history again.
+
+The corresponding persistent defaults live in `defaults.txt`:
+
+```properties
+format=auto
+historyFile=data/generation_history.jsonl
+historyLimit=500
+noveltyThreshold=48
+noveltyRetries=4
+noveltyEnabled=true
+integritySanitize=true
+```
 
 ## Integrity cleanup
 
@@ -84,7 +105,7 @@ Existing scripts that invoke `redditTxtToImg.OpImageVideoSafeRunner` continue to
 
 `Runner` and the Gradle application/JAR manifest also point to `P0Entrypoint`.
 
-`P0Runner` remains the rendering/orchestration engine underneath the safe entry point. Production callers should use `P0Entrypoint` (or the existing Windows scripts) rather than invoking raw/legacy entry points directly.
+`P0Runner` remains the rendering/orchestration engine underneath the safe entry point. Production callers should use `P0Entrypoint` (or the existing Windows scripts) rather than invoking raw/legacy entry points directly. Direct `P0Runner --auto` calls are routed back through `P0Entrypoint` as an additional guard against bypassing hidden-prompt isolation.
 
 ## Validation
 
@@ -94,14 +115,17 @@ Existing scripts that invoke `redditTxtToImg.OpImageVideoSafeRunner` continue to
 - rejecting exact historical duplicates,
 - scoring distinct content above duplicates,
 - automatic format rotation,
+- content-aware format selection,
 - explicit format selection,
 - synthetic verified-marker cleanup,
 - successful format-specific image composition for all five formats,
 - removal of legacy `--auto` before rendering a generated script,
 - preservation of the visible original topic,
+- hidden format/novelty instructions not becoming the visible OP,
 - explicit propagation of the resolved format,
-- manual-input protection from stale generated-script paths.
+- manual-input protection from stale generated-script paths,
+- stale segment/final MP4 cleanup.
 
-The motion filter was also exercised against real local `ffmpeg`/`ffprobe` for all five formats and produced valid MP4 clips.
+The motion filter was also exercised against real local `ffmpeg`/`ffprobe` for all five formats and produced valid H.264/AAC MP4 clips.
 
 GitHub Actions runs the P0 unit tests in addition to the existing raw Reddit/X and OP-image compatibility smoke tests and a P0 integration image run.
