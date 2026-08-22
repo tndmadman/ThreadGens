@@ -5,3 +5,4 @@ output/
 Thumbs.db
 .venv-kokoro/
 data/generation_history.jsonl
+data/publish_history.jsonl
