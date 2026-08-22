@@ -45,6 +45,7 @@ public final class InImageRevealRegressionTest {
             BufferedImage last = ImageIO.read(states.get(states.size() - 1).imagePath().toFile());
             int firstBright = countBright(first, 140, 440, 990, 820);
             int lastBright = countBright(last, 140, 440, 990, 820);
+            System.out.println("Reveal bright pixels: first=" + firstBright + ", last=" + lastBright);
             require(lastBright > firstBright * 1.8,
                     "later states must expose substantially more of the same rasterized Reddit text");
 
@@ -63,6 +64,7 @@ public final class InImageRevealRegressionTest {
             BufferedImage cleanBottom = ImageIO.read(
                     bestAnswerStates.get(bestAnswerStates.size() - 1).imagePath().toFile());
             int bottomBright = countBright(cleanBottom, 40, 1460, 1040, 1880);
+            System.out.println("Best-answers bottom bright pixels=" + bottomBright);
             require(bottomBright < 3500,
                     "best_answers lower duplicate narration area should be removed");
             TimedVisualStateRenderer.cleanup(bestAnswerStates);
