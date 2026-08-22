@@ -26,6 +26,8 @@ Final MP4
         ↓
 P2 finished-output fingerprint
         ↓
+exclusive publish-history transaction
+        ↓
 PASS / WARN / BLOCK
         ↓
 Approved publish history
@@ -76,7 +78,7 @@ data/generation_history.jsonl
 data/publish_history.jsonl
 ```
 
-Both history files are git-ignored.
+Both history files are git-ignored. P2 also uses a git-ignored sibling `.lock` file while making a publish decision so concurrent jobs cannot both approve against the same stale history snapshot.
 
 ## Build
 
@@ -228,13 +230,19 @@ The fingerprint includes:
 - exact script hash;
 - lexical content similarity;
 - Ollama semantic premise similarity;
-- final MP4/clip byte fingerprint;
+- final MP4/clip byte fingerprint independent of filename;
 - perceptual hashes of rendered social frames;
+- perceptual samples from the actual completed MP4;
+- rendered avatar plus author/header identity fingerprints, so actual profile/username reuse contributes to repetition risk without OCR;
 - selected content format;
-- known voice and TTS engine;
+- known voice and TTS engine, including the configured default voice when `--voice` is omitted;
 - normalized real narration-segment durations from FFprobe;
-- recent same-format / same-voice streaks;
+- recent same-format / same-known-voice / rendered-identity streaks;
 - optional caption/identity/profile/provenance metadata signatures.
+
+P2 publish-history schema 2 persists rendered-identity fingerprints while remaining backward-compatible with existing schema-1 history. Malformed or unsupported history fails closed.
+
+The history read, semantic comparison, PASS/WARN/BLOCK decision, and successful history append are protected by both an in-process fair lock and an OS file lock. Concurrent ThreadGens processes sharing one publish history therefore cannot both approve the same candidate against an outdated snapshot.
 
 P2 outputs one of:
 
@@ -244,7 +252,7 @@ WARN
 BLOCK
 ```
 
-Default production behavior is `block` mode. A BLOCK writes the audit report but returns failure before a caller can promote the video as publish-ready.
+Default production behavior is `block` mode. A BLOCK writes the audit report but returns failure before a caller can promote the video as publish-ready, and the blocked candidate is not appended to approved publish history.
 
 Default P2 settings:
 
@@ -282,7 +290,7 @@ p1_manifest.json
 
 Those files are checked in the output/image and video directories. Additional manifests can be supplied with `--publish-metadata PATH`.
 
-This keeps the P2 branch independently buildable while allowing richer P1 state to become part of the final repetition fingerprint after integration.
+P2 already fingerprints viewer-visible identity regions and sampled finished-video frames independently, so profile reuse and burned caption/overlay repetition are observable even before the final P1 manifest interface is integrated.
 
 ## Social-render integrity
 
@@ -467,9 +475,14 @@ The repository smoke workflow validates:
 - real P0 FFmpeg/ffprobe timed-video generation for all five formats;
 - deterministic P2 scoring and strict publish-history behavior;
 - semantic P2 hard-block behavior;
+- rendered identity reuse scoring;
+- schema-1 to schema-2 publish-history compatibility;
+- concurrent publish-history transaction serialization;
+- default voice resolution;
 - real P2 FFmpeg/ffprobe artifact capture;
-- perceptual rendered-image hashing;
+- perceptual rendered-image and completed-MP4 hashing;
 - exact artifact/script blocking;
+- a full `P2Entrypoint` end-to-end test where the first real video PASSes and the identical second publish attempt BLOCKs without adding another approved-history row;
 - audit report creation;
 - production Reddit/X rendering;
 - raw compatibility behavior;
@@ -484,9 +497,9 @@ Detailed architecture:
 
 ## Important files
 
-- `src/redditTxtToImg/P2Entrypoint.java` — final production orchestration and publish gate.
-- `src/redditTxtToImg/PublishFingerprint.java` — finished-output fingerprint capture.
-- `src/redditTxtToImg/PublishAuditHistory.java` — strict approved publish history.
+- `src/redditTxtToImg/P2Entrypoint.java` — final production orchestration and concurrency-safe publish gate.
+- `src/redditTxtToImg/PublishFingerprint.java` — finished-output, rendered-identity, and voice fingerprint capture.
+- `src/redditTxtToImg/PublishAuditHistory.java` — strict approved publish history and exclusive transaction locking.
 - `src/redditTxtToImg/PrePublishAuditor.java` — PASS/WARN/BLOCK risk scoring.
 - `src/redditTxtToImg/P0Entrypoint.java` — P0 generation/originality orchestration.
 - `src/redditTxtToImg/P0Runner.java` — P0 render/video/history orchestration.
