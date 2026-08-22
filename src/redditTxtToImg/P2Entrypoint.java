@@ -131,21 +131,33 @@ public final class P2Entrypoint {
 
     private static String resolveActualFormat(AuditConfig config, String script) throws IOException {
         if (!"auto".equalsIgnoreCase(config.requestedFormat)) return config.requestedFormat;
-        if (!Files.exists(config.generationHistory)) return "auto";
-        List<String> lines = Files.readAllLines(config.generationHistory, StandardCharsets.UTF_8);
-        for (int i = lines.size() - 1; i >= 0; i--) {
-            String line = lines.get(i);
-            Matcher scriptMatcher = HISTORY_SCRIPT.matcher(line);
-            Matcher formatMatcher = HISTORY_FORMAT.matcher(line);
-            if (!scriptMatcher.find() || !formatMatcher.find()) continue;
-            try {
-                String decoded = new String(Base64.getUrlDecoder().decode(scriptMatcher.group(1)), StandardCharsets.UTF_8).trim();
-                if (decoded.equals(script.trim())) return formatMatcher.group(1);
-            } catch (IllegalArgumentException ignored) {
-                // Generation history strictness is already enforced by P0.
+        if (Files.exists(config.generationHistory)) {
+            List<String> lines = Files.readAllLines(config.generationHistory, StandardCharsets.UTF_8);
+            for (int i = lines.size() - 1; i >= 0; i--) {
+                String line = lines.get(i);
+                Matcher scriptMatcher = HISTORY_SCRIPT.matcher(line);
+                Matcher formatMatcher = HISTORY_FORMAT.matcher(line);
+                if (!scriptMatcher.find() || !formatMatcher.find()) continue;
+                try {
+                    String decoded = new String(
+                            Base64.getUrlDecoder().decode(scriptMatcher.group(1)), StandardCharsets.UTF_8).trim();
+                    if (decoded.equals(script.trim())) return formatMatcher.group(1);
+                } catch (IllegalArgumentException ignored) {
+                    // P0 owns strict generation-history validation when novelty is enabled.
+                }
             }
         }
-        return "auto";
+
+        // If P0 novelty/history recording was explicitly disabled, the current
+        // accepted script may not have a history row. Re-run the same deterministic
+        // selector against the unchanged history so P2 fingerprints the actual
+        // format instead of the meaningless literal value "auto".
+        NoveltyGuard formatHistory = new NoveltyGuard(config.generationHistory);
+        String selectionTopic = config.autoGenerateText
+                ? config.topic
+                : config.topic + " " + script;
+        return FormatSelector.resolve(
+                "auto", formatHistory, config.postTitle, selectionTopic).id();
     }
 
     private static int countNonBlankLines(Path file, int requested) throws IOException {
@@ -185,6 +197,8 @@ public final class P2Entrypoint {
         String mode = "block";
         String ollamaUrl = "http://localhost:11434/api/generate";
         String embeddingModel = SemanticNoveltyGuard.DEFAULT_MODEL;
+        String postTitle = "Finish this story in the comments";
+        String topic = "weird everyday stories";
 
         int count = -1;
         int publishHistoryLimit = 100;
@@ -196,6 +210,7 @@ public final class P2Entrypoint {
         boolean autoGenerateText = false;
         boolean utilityMode = false;
         boolean semanticNoveltyEnabled = true;
+        boolean postTitleExplicit = false;
 
         static AuditConfig fromArgs(String[] args) throws IOException {
             AuditConfig config = loadDefaults();
@@ -212,10 +227,17 @@ public final class P2Entrypoint {
                         case "--no-publish-audit" -> config.enabled = false;
                         case "--publish-audit" -> config.enabled = true;
                         case "--no-semantic-novelty" -> config.semanticNoveltyEnabled = false;
-                        case "--platform" -> { if (i + 1 < args.length) config.platform = args[++i]; }
+                        case "--platform" -> { if (i + 1 < args.length) config.platform = normalizePlatform(args[++i]); }
                         case "--format" -> { if (i + 1 < args.length) config.requestedFormat = args[++i]; }
                         case "--count" -> { if (i + 1 < args.length) config.count = parseInt(args[++i], config.count); }
                         case "--prefix" -> { if (i + 1 < args.length) config.outputPrefix = args[++i]; }
+                        case "--post-title" -> {
+                            if (i + 1 < args.length) {
+                                config.postTitle = args[++i];
+                                config.postTitleExplicit = true;
+                            }
+                        }
+                        case "--topic" -> { if (i + 1 < args.length) config.topic = args[++i]; }
                         case "--tts" -> { if (i + 1 < args.length) config.ttsEngine = args[++i]; }
                         case "--voice" -> { if (i + 1 < args.length) config.voice = args[++i]; }
                         case "--audio-dir" -> { if (i + 1 < args.length) config.audioDirectory = Path.of(args[++i]); }
@@ -243,6 +265,9 @@ public final class P2Entrypoint {
                 else if (positional == 1) config.outputDirectory = Path.of(arg);
                 positional++;
             }
+            if ("x".equals(config.platform) && !config.postTitleExplicit) {
+                config.postTitle = "";
+            }
             if (config.reportPath == null) config.reportPath = config.videoDirectory.resolve("publish_audit.json");
             return config;
         }
@@ -253,7 +278,7 @@ public final class P2Entrypoint {
             if (!Files.exists(defaults)) return config;
             Properties p = new Properties();
             try (InputStream in = Files.newInputStream(defaults)) { p.load(in); }
-            config.platform = p.getProperty("platform", config.platform);
+            config.platform = normalizePlatform(p.getProperty("platform", config.platform));
             config.outputPrefix = p.getProperty("prefix", config.outputPrefix);
             config.audioDirectory = Path.of(p.getProperty("audioDirectory", config.audioDirectory.toString()));
             config.videoDirectory = Path.of(p.getProperty("videoDirectory", config.videoDirectory.toString()));
@@ -266,6 +291,8 @@ public final class P2Entrypoint {
             config.embeddingModel = p.getProperty("embeddingModel", config.embeddingModel);
             config.semanticNoveltyEnabled = Boolean.parseBoolean(
                     p.getProperty("semanticNoveltyEnabled", String.valueOf(config.semanticNoveltyEnabled)));
+            config.postTitle = p.getProperty("postTitle", config.postTitle);
+            config.topic = p.getProperty("topic", config.topic);
             config.publishHistory = Path.of(p.getProperty("publishHistoryFile", config.publishHistory.toString()));
             config.publishHistoryLimit = parseInt(p.getProperty("publishHistoryLimit"), config.publishHistoryLimit);
             config.warnThreshold = parseInt(p.getProperty("publishAuditWarnThreshold"), config.warnThreshold);
@@ -329,6 +356,12 @@ public final class P2Entrypoint {
 
         private static String normalizeMode(String value) {
             return "warn".equalsIgnoreCase(value) ? "warn" : "block";
+        }
+
+        private static String normalizePlatform(String value) {
+            if (value == null || value.isBlank()) return "reddit";
+            String cleaned = value.trim().toLowerCase(Locale.ROOT);
+            return "twitter".equals(cleaned) ? "x" : cleaned;
         }
 
         private static int parseInt(String value, int fallback) {
