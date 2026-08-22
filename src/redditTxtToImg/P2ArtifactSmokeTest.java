@@ -1,5 +1,6 @@
 package redditTxtToImg;
 
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -20,9 +21,13 @@ public final class P2ArtifactSmokeTest {
             BufferedImage buffered = new BufferedImage(320, 568, BufferedImage.TYPE_INT_RGB);
             Graphics2D graphics = buffered.createGraphics();
             try {
+                graphics.setColor(new Color(30, 30, 30));
                 graphics.fillRect(0, 0, 320, 568);
-                graphics.drawString("P2 artifact smoke", 40, 120);
-                graphics.drawString("different visible states", 40, 220);
+                graphics.setColor(Color.WHITE);
+                graphics.fillOval(28, 88, 48, 48);
+                graphics.drawString("Smoke Author", 88, 112);
+                graphics.drawString("P2 artifact smoke", 40, 220);
+                graphics.drawString("different visible states", 40, 300);
             } finally {
                 graphics.dispose();
             }
@@ -41,6 +46,8 @@ public final class P2ArtifactSmokeTest {
             require(!first.artifactHash.isBlank(), "artifact hash must exist");
             require(first.visualHashes.size() >= 4,
                     "visual fingerprint must include source image plus sampled finished-video frames");
+            require(first.identityHashes.size() >= 2,
+                    "identity fingerprint must include rendered avatar and author/header regions");
             require(!first.segmentDurations.isEmpty() && first.segmentDurations.get(0) > 0,
                     "ffprobe audio duration must exist");
             require(first.totalDuration > 0, "ffprobe final-video duration must exist");
@@ -53,6 +60,7 @@ public final class P2ArtifactSmokeTest {
                     List.of(video), List.of(image), List.of(audio), "other_voice", "kokoro", "", "ffmpeg"));
             PrePublishAuditor.Result result = new PrePublishAuditor(58, 78).assess(duplicate, history.load());
             require(result.status() == PrePublishAuditor.Status.BLOCK, "same finished artifact must block");
+            require(result.scores().identity() > 0.99, "same rendered identity must compare as identical");
             System.out.println("P2 artifact smoke test passed.");
         } finally {
             deleteTree(dir);
