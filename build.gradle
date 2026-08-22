@@ -12,12 +12,12 @@ repositories {
 sourceSets.main.java.srcDirs = ['src']
 
 application {
-    mainClass = 'redditTxtToImg.P0Runner'
+    mainClass = 'redditTxtToImg.P0Entrypoint'
 }
 
 jar {
     archiveBaseName = 'ThreadGens'
     manifest {
-        attributes 'Main-Class': 'redditTxtToImg.P0Runner'
+        attributes 'Main-Class': 'redditTxtToImg.P0Entrypoint'
     }
 }
