@@ -55,6 +55,9 @@ public final class P0Runner {
         System.out.println("P0 format: " + format.id() + " (" + format.label() + ")");
         System.out.println("P0 novelty history: " + noveltyGuard.historyFile());
 
+        int artifactCount = config.expectedCount();
+        clearVideoOutputs(config, artifactCount);
+
         String currentScript = config.readCurrentScript();
         NoveltyGuard.Result noveltyResult = null;
         if (config.noveltyEnabled && !currentScript.isBlank()) {
@@ -73,7 +76,6 @@ public final class P0Runner {
         }
         CheckedRunner.runOrThrow(delegatedArgs);
 
-        int artifactCount = config.expectedCount();
         if (config.integritySanitize) {
             System.out.println("P0 integrity: removing synthetic engagement and verification markers...");
             for (int i = 0; i < artifactCount; i++) {
@@ -97,6 +99,17 @@ public final class P0Runner {
         } else {
             System.out.println("P0 pipeline complete.");
         }
+    }
+
+    static void clearVideoOutputs(RunConfig config, int countHint) throws IOException {
+        if (config == null || !config.createVideo) {
+            return;
+        }
+        int count = Math.max(0, countHint);
+        for (int i = 0; i < count; i++) {
+            Files.deleteIfExists(config.videoPath(i));
+        }
+        Files.deleteIfExists(config.videoDirectory.resolve(config.finalVideoName));
     }
 
     private static void renderDynamicVideos(RunConfig config, ContentFormat format, int artifactCount)
@@ -347,6 +360,16 @@ public final class P0Runner {
                     properties.getProperty("videoDirectory", config.videoDirectory.toString()));
             config.videoCommand = properties.getProperty("videoCommand", config.videoCommand);
             config.finalVideoName = properties.getProperty("finalVideoName", config.finalVideoName);
+            config.requestedFormat = properties.getProperty("format", config.requestedFormat);
+            config.historyFile = Path.of(properties.getProperty("historyFile", config.historyFile.toString()));
+            config.historyLimit = parseInt(properties.getProperty("historyLimit"), config.historyLimit);
+            config.noveltyThreshold = parseInt(
+                    properties.getProperty("noveltyThreshold"), config.noveltyThreshold);
+            config.noveltyRetries = parseInt(properties.getProperty("noveltyRetries"), config.noveltyRetries);
+            config.noveltyEnabled = Boolean.parseBoolean(
+                    properties.getProperty("noveltyEnabled", String.valueOf(config.noveltyEnabled)));
+            config.integritySanitize = Boolean.parseBoolean(
+                    properties.getProperty("integritySanitize", String.valueOf(config.integritySanitize)));
             return config;
         }
 
