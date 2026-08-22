@@ -4,12 +4,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Builds a small, deterministic visual timeline for each narrated segment.
- * P0 intentionally uses sentence/clause timing derived from the real audio
- * duration; word-level alignment can be layered on later without changing the
- * compositor contract.
+ * Builds a deterministic visual timeline for each narrated segment.
+ *
+ * State count scales with real audio duration so normal content changes visual
+ * focus roughly every 2.5 seconds instead of falling back to a long static hold.
+ * P0 uses duration-weighted sentence/clause timing; exact word alignment can be
+ * added later without changing the compositor contract.
  */
 final class VideoTimeline {
+    private static final double TARGET_STATE_SECONDS = 2.5;
+    private static final int MAX_STATES = 12;
+
     record State(String focusText, double weight, int index, int total) {
     }
 
@@ -22,14 +27,9 @@ final class VideoTimeline {
             return List.of(new State("", 1.0, 0, 1));
         }
 
-        int desiredStates;
-        if (audioDurationSeconds < 3.2) {
-            desiredStates = 2;
-        } else if (audioDurationSeconds < 7.0) {
-            desiredStates = 3;
-        } else {
-            desiredStates = 4;
-        }
+        double safeDuration = Math.max(0.1, audioDurationSeconds);
+        int desiredStates = Math.max(2,
+                Math.min(MAX_STATES, (int) Math.ceil(safeDuration / TARGET_STATE_SECONDS)));
 
         List<String> units = sentenceUnits(clean);
         if (units.size() < desiredStates) {
