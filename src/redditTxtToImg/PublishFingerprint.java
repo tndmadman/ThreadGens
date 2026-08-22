@@ -12,11 +12,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
 
 /** Canonical viewer-facing fingerprint used by the P2 pre-publish audit. */
 final class PublishFingerprint {
     static final int SCHEMA_VERSION = 1;
+    private static final double[] VIDEO_SAMPLE_POSITIONS = {0.18, 0.50, 0.82};
 
     record CaptureInput(
             String platform,
@@ -83,24 +85,33 @@ final class PublishFingerprint {
             throw new IOException("P2 publish audit requires at least one generated video artifact.");
         }
 
+        DynamicVideoGenerator media = new DynamicVideoGenerator(input.videoCommand(), 90, 30);
         List<Long> visuals = new ArrayList<>();
         for (Path image : existing(input.imagePaths())) {
             visuals.add(dHash(image));
         }
 
+        // Sample the actual completed video, not just the pre-video screenshots.
+        // This makes burned captions, overlays and final presentation changes part
+        // of the visual fingerprint and gives P1 a useful integration path even
+        // before a stable manifest schema is available.
+        Path sampleDirectory = Files.createTempDirectory("threadgens-p2-video-frames-");
+        double totalArtifactDuration = 0.0;
+        try {
+            for (int artifactIndex = 0; artifactIndex < artifacts.size(); artifactIndex++) {
+                Path artifact = artifacts.get(artifactIndex);
+                double duration = media.probeDurationSeconds(artifact);
+                totalArtifactDuration += Math.max(0.0, duration);
+                visuals.addAll(sampleVideoHashes(
+                        input.videoCommand(), artifact, duration, sampleDirectory, artifactIndex));
+            }
+        } finally {
+            deleteTree(sampleDirectory);
+        }
+
         List<Double> durations = new ArrayList<>();
-        DynamicVideoGenerator media = new DynamicVideoGenerator(input.videoCommand(), 90, 30);
         for (Path audio : existing(input.audioPaths())) {
             durations.add(media.probeDurationSeconds(audio));
-        }
-        double total = 0.0;
-        for (double value : durations) {
-            total += Math.max(0.0, value);
-        }
-        if (total <= 0.0) {
-            for (Path artifact : artifacts) {
-                total += Math.max(0.0, media.probeDurationSeconds(artifact));
-            }
         }
 
         String metadataSignature = input.metadataSignature() == null ? "" : input.metadataSignature().trim();
@@ -119,7 +130,7 @@ final class PublishFingerprint {
                 input.voice(),
                 input.ttsEngine(),
                 durations,
-                total,
+                totalArtifactDuration,
                 metadataHash
         );
     }
@@ -183,6 +194,47 @@ final class PublishFingerprint {
         }
     }
 
+    private static List<Long> sampleVideoHashes(
+            String ffmpegCommand,
+            Path artifact,
+            double duration,
+            Path sampleDirectory,
+            int artifactIndex
+    ) throws IOException, InterruptedException {
+        if (duration <= 0.01) {
+            throw new IOException("P2 cannot sample a video with invalid duration: " + artifact);
+        }
+        String command = ffmpegCommand == null || ffmpegCommand.isBlank() ? "ffmpeg" : ffmpegCommand;
+        List<Long> hashes = new ArrayList<>();
+        for (int i = 0; i < VIDEO_SAMPLE_POSITIONS.length; i++) {
+            double seek = Math.max(0.0, Math.min(duration - 0.01, duration * VIDEO_SAMPLE_POSITIONS[i]));
+            Path frame = sampleDirectory.resolve("artifact_" + artifactIndex + "_sample_" + i + ".png");
+            List<String> args = List.of(
+                    command, "-y",
+                    "-ss", String.format(Locale.US, "%.3f", seek),
+                    "-i", artifact.toString(),
+                    "-frames:v", "1",
+                    "-vf", "scale=320:-2",
+                    frame.toString()
+            );
+            ProcessBuilder builder = new ProcessBuilder(args);
+            builder.redirectErrorStream(true);
+            builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+            Process process = builder.start();
+            boolean finished = process.waitFor(45, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                throw new IOException("P2 FFmpeg frame sampling timed out for: " + artifact);
+            }
+            if (process.exitValue() != 0 || !Files.isRegularFile(frame)) {
+                throw new IOException("P2 FFmpeg frame sampling failed for: " + artifact
+                        + " at " + String.format(Locale.US, "%.3fs", seek));
+            }
+            hashes.add(dHash(frame));
+        }
+        return List.copyOf(hashes);
+    }
+
     static long dHash(Path imagePath) throws IOException {
         BufferedImage source = ImageIO.read(imagePath.toFile());
         if (source == null) {
@@ -240,5 +292,20 @@ final class PublishFingerprint {
 
     private static String clean(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private static void deleteTree(Path root) {
+        if (root == null || !Files.exists(root)) return;
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted((a, b) -> b.compareTo(a)).toList()) {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                    // Temporary audit samples are best-effort cleanup only.
+                }
+            }
+        } catch (IOException ignored) {
+            // The audit result remains valid if a temporary sample cannot be removed.
+        }
     }
 }
