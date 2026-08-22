@@ -84,45 +84,51 @@ public final class P2Entrypoint {
                 config.videoCommand
         ));
 
+        // The history read, semantic comparison, decision, and accepted-history
+        // append form one serialized transaction. Without this lock, two identical
+        // jobs launched at the same time could both read the same old snapshot and
+        // both pass before either one records its result.
         PublishAuditHistory history = new PublishAuditHistory(config.publishHistory, config.publishHistoryLimit);
-        List<PublishAuditHistory.Entry> recent = history.load();
-        double semanticSimilarity = 0.0;
-        if (config.semanticNoveltyEnabled && !recent.isEmpty()) {
-            List<String> priorScripts = recent.stream()
-                    .map(entry -> entry.fingerprint().script)
-                    .filter(value -> value != null && !value.isBlank())
-                    .toList();
-            if (!priorScripts.isEmpty()) {
-                SemanticNoveltyGuard semantic = new SemanticNoveltyGuard(
-                        config.ollamaUrl, config.embeddingModel, 1.0);
-                SemanticNoveltyGuard.Result semanticResult = semantic.assess(script, priorScripts);
-                semanticSimilarity = semanticResult.highestSimilarity();
-                System.out.println(String.format(Locale.US,
-                        "P2 semantic premise similarity: %.0f%%", semanticSimilarity * 100.0));
+        try (PublishAuditHistory.LockHandle ignored = history.lockExclusive()) {
+            List<PublishAuditHistory.Entry> recent = history.load();
+            double semanticSimilarity = 0.0;
+            if (config.semanticNoveltyEnabled && !recent.isEmpty()) {
+                List<String> priorScripts = recent.stream()
+                        .map(entry -> entry.fingerprint().script)
+                        .filter(value -> value != null && !value.isBlank())
+                        .toList();
+                if (!priorScripts.isEmpty()) {
+                    SemanticNoveltyGuard semantic = new SemanticNoveltyGuard(
+                            config.ollamaUrl, config.embeddingModel, 1.0);
+                    SemanticNoveltyGuard.Result semanticResult = semantic.assess(script, priorScripts);
+                    semanticSimilarity = semanticResult.highestSimilarity();
+                    System.out.println(String.format(Locale.US,
+                            "P2 semantic premise similarity: %.0f%%", semanticSimilarity * 100.0));
+                }
             }
+
+            PrePublishAuditor auditor = new PrePublishAuditor(config.warnThreshold, config.blockThreshold);
+            PrePublishAuditor.Result result = auditor.assess(fingerprint, recent, semanticSimilarity);
+            PrePublishAuditor.writeReport(config.reportPath, fingerprint, result, config.mode);
+            printResult(result, config.reportPath, history.file());
+
+            if (result.blocked() && "block".equals(config.mode)) {
+                throw new IOException("P2 pre-publish audit BLOCKED this video at " + result.risk()
+                        + "/100 repetition risk. Review " + config.reportPath + ".");
+            }
+
+            String recordedStatus = result.blocked() ? "WARN_OVERRIDE" : result.status().name();
+            history.record(fingerprint, recordedStatus, result.risk());
+            System.out.println("P2 publish audit: approved history recorded as " + recordedStatus + ".");
         }
-
-        PrePublishAuditor auditor = new PrePublishAuditor(config.warnThreshold, config.blockThreshold);
-        PrePublishAuditor.Result result = auditor.assess(fingerprint, recent, semanticSimilarity);
-        PrePublishAuditor.writeReport(config.reportPath, fingerprint, result, config.mode);
-        printResult(result, config.reportPath, history.file());
-
-        if (result.blocked() && "block".equals(config.mode)) {
-            throw new IOException("P2 pre-publish audit BLOCKED this video at " + result.risk()
-                    + "/100 repetition risk. Review " + config.reportPath + ".");
-        }
-
-        String recordedStatus = result.blocked() ? "WARN_OVERRIDE" : result.status().name();
-        history.record(fingerprint, recordedStatus, result.risk());
-        System.out.println("P2 publish audit: approved history recorded as " + recordedStatus + ".");
     }
 
     private static void printResult(PrePublishAuditor.Result result, Path report, Path history) {
         PrePublishAuditor.Scores s = result.scores();
         System.out.println("P2 pre-publish audit: " + result.status() + " — " + result.risk() + "/100 repetition risk");
         System.out.println(String.format(Locale.US,
-                "  content %.0f%% | visual %.0f%% | audio %.0f%% | format %.0f%% | pacing %.0f%% | metadata %.0f%%",
-                s.content() * 100.0, s.visual() * 100.0, s.audio() * 100.0,
+                "  content %.0f%% | visual %.0f%% | identity %.0f%% | audio %.0f%% | format %.0f%% | pacing %.0f%% | metadata %.0f%%",
+                s.content() * 100.0, s.visual() * 100.0, s.identity() * 100.0, s.audio() * 100.0,
                 s.format() * 100.0, s.pacing() * 100.0, s.metadata() * 100.0));
         for (String finding : result.findings()) System.out.println("  - " + finding);
         System.out.println("P2 audit report: " + report);
