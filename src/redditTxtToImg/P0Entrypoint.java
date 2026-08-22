@@ -62,15 +62,18 @@ public final class P0Entrypoint {
                 config.requestedFormat, guard, config.postTitle, config.topic);
         FormatAwareTextGenerator generator = new FormatAwareTextGenerator(auto.ollamaUrl, auto.llmModel);
 
-        List<String> semanticHistory = List.of();
+        // Always validate an existing history file when novelty is enabled. Even
+        // if semantic comparison is intentionally disabled, corrupt history must
+        // never silently look like a clean slate during automatic generation.
+        List<String> validatedHistory = config.noveltyEnabled
+                ? SemanticNoveltyGuard.loadRecentScripts(config.historyFile, auto.semanticHistoryLimit)
+                : List.of();
         SemanticNoveltyGuard semanticGuard = null;
         if (config.noveltyEnabled && auto.semanticNoveltyEnabled) {
-            semanticHistory = SemanticNoveltyGuard.loadRecentScripts(
-                    config.historyFile, auto.semanticHistoryLimit);
             semanticGuard = new SemanticNoveltyGuard(
                     auto.ollamaUrl, auto.embeddingModel, auto.semanticThreshold);
             System.out.println("P0 semantic novelty: enabled with " + auto.embeddingModel
-                    + " against " + semanticHistory.size() + " recent scripts.");
+                    + " against " + validatedHistory.size() + " recent scripts.");
         }
 
         int requestedCount = config.count >= 0 ? config.count : 10;
@@ -105,8 +108,8 @@ public final class P0Entrypoint {
                 String rejectionFeedback = "";
                 if (!deterministicResult.accepted()) {
                     rejectionFeedback = deterministicResult.feedbackForRegeneration();
-                } else if (semanticGuard != null && !semanticHistory.isEmpty()) {
-                    semanticResult = semanticGuard.assess(candidate, semanticHistory);
+                } else if (semanticGuard != null && !validatedHistory.isEmpty()) {
+                    semanticResult = semanticGuard.assess(candidate, validatedHistory);
                     printSemanticNovelty(semanticResult);
                     if (!semanticResult.accepted()) {
                         rejectionFeedback = semanticResult.feedbackForRegeneration();
