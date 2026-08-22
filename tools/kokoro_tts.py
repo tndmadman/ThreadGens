@@ -4,7 +4,6 @@ import base64
 import contextlib
 import os
 import re
-import sys
 import time
 import warnings
 from pathlib import Path
@@ -51,6 +50,14 @@ def timing_path_for(output_path):
     return output_path.with_name(output_path.stem + ".timing.tsv")
 
 
+def delete_if_present(path):
+    try:
+        path.unlink(missing_ok=True)
+    except TypeError:
+        if path.exists():
+            path.unlink()
+
+
 def align_model_tokens_to_input_words(text, timed_tokens):
     source_words = re.findall(r"\S+", text)
     tokens = [token for token in timed_tokens if normalized_word(token[0])]
@@ -64,6 +71,7 @@ def align_model_tokens_to_input_words(text, timed_tokens):
         if not target:
             continue
 
+        match_start = token_index
         match_end = None
         combined = ""
         for j in range(token_index, min(len(tokens), token_index + 8)):
@@ -76,18 +84,16 @@ def align_model_tokens_to_input_words(text, timed_tokens):
             break
 
         if match_end is None:
-            # Some G2P paths may emit one extra token around punctuation. Search
-            # a very small window rather than silently drifting the whole track.
             for j in range(token_index, min(len(tokens), token_index + 4)):
                 if normalized_word(tokens[j][0]) == target:
-                    token_index = j
+                    match_start = j
                     match_end = j
                     break
 
         if match_end is None:
             return []
 
-        start = tokens[token_index][1]
+        start = tokens[match_start][1]
         end = tokens[match_end][2]
         if end <= start:
             return []
@@ -99,11 +105,7 @@ def align_model_tokens_to_input_words(text, timed_tokens):
 
 def write_timing_sidecar(output_path, text, timed_tokens, verbose):
     timing_path = timing_path_for(output_path)
-    try:
-        timing_path.unlink(missing_ok=True)
-    except TypeError:
-        if timing_path.exists():
-            timing_path.unlink()
+    delete_if_present(timing_path)
 
     aligned = align_model_tokens_to_input_words(text, timed_tokens)
     if not aligned:
@@ -141,6 +143,8 @@ def main():
     text_path = Path(args.text_file)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # A failed/aborted retry must never leave timing from an older WAV behind.
+    delete_if_present(timing_path_for(output_path))
 
     log(f"reading text: {text_path}", verbose)
     text = text_path.read_text(encoding="utf-8").strip()
