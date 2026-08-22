@@ -22,6 +22,7 @@ final class PrePublishAuditor {
             double audio,
             double format,
             double pacing,
+            double identity,
             double metadata,
             double overall
     ) {
@@ -57,7 +58,7 @@ final class PrePublishAuditor {
         double semantic = Math.max(0.0, Math.min(1.0, semanticSimilarity));
         if (safeHistory.isEmpty()) {
             return new Result(Status.PASS, 0,
-                    new Scores(0, 0, 0, 0, 0, 0, 0), null,
+                    new Scores(0, 0, 0, 0, 0, 0, 0, 0), null,
                     List.of("No prior approved publish history yet."));
         }
 
@@ -90,7 +91,7 @@ final class PrePublishAuditor {
         }
 
         if (closestScores == null) {
-            closestScores = new Scores(0, 0, 0, 0, 0, 0, 0);
+            closestScores = new Scores(0, 0, 0, 0, 0, 0, 0, 0);
         }
 
         if (semantic > closestScores.content) {
@@ -125,6 +126,10 @@ final class PrePublishAuditor {
         if (closestScores.visual >= 0.90) {
             findings.add(String.format(Locale.US, "Visual-frame similarity is %.0f%%.", closestScores.visual * 100.0));
         }
+        if (closestScores.identity >= 0.90) {
+            findings.add(String.format(Locale.US,
+                    "Rendered avatar/author identity similarity is %.0f%%.", closestScores.identity * 100.0));
+        }
         if (closestScores.audio >= 0.95 && isKnownVoice(candidate.voice)) {
             findings.add("The same known voice/TTS combination is being reused.");
         }
@@ -135,7 +140,9 @@ final class PrePublishAuditor {
         if (closestScores.metadata >= 0.99 && !candidate.metadataHash.isBlank()) {
             findings.add("Optional caption/identity/provenance metadata signature is unchanged.");
         }
-        if (streakPenalty > 0) findings.add("Recent format/voice streak added " + streakPenalty + " repetition-risk points.");
+        if (streakPenalty > 0) {
+            findings.add("Recent format/voice/rendered-identity streak added " + streakPenalty + " repetition-risk points.");
+        }
         if (findings.isEmpty()) findings.add("Finished video is sufficiently distinct from recent approved output.");
 
         return new Result(status, risk, closestScores, closest, List.copyOf(findings));
@@ -153,7 +160,7 @@ final class PrePublishAuditor {
         String closestCreated = result.closest == null ? "" : result.closest.fingerprint().created;
         Scores s = result.scores;
         String json = "{\n"
-                + "  \"schema\": 1,\n"
+                + "  \"schema\": 2,\n"
                 + "  \"status\": \"" + result.status + "\",\n"
                 + "  \"mode\": \"" + escape(mode == null ? "block" : mode) + "\",\n"
                 + "  \"risk\": " + result.risk + ",\n"
@@ -165,6 +172,7 @@ final class PrePublishAuditor {
                 + field("audio", s.audio, true)
                 + field("format", s.format, true)
                 + field("pacing", s.pacing, true)
+                + field("identity", s.identity, true)
                 + field("metadata", s.metadata, true)
                 + field("overall", s.overall, false)
                 + "  },\n"
@@ -174,13 +182,10 @@ final class PrePublishAuditor {
     }
 
     private static Scores withContentScore(Scores scores, double content) {
-        double overall = content * 0.34
-                + scores.visual * 0.18
-                + scores.audio * 0.10
-                + scores.format * 0.10
-                + scores.pacing * 0.18
-                + scores.metadata * 0.10;
-        return new Scores(content, scores.visual, scores.audio, scores.format, scores.pacing, scores.metadata, overall);
+        double overall = weighted(content, scores.visual, scores.audio, scores.format,
+                scores.pacing, scores.identity, scores.metadata);
+        return new Scores(content, scores.visual, scores.audio, scores.format, scores.pacing,
+                scores.identity, scores.metadata, overall);
     }
 
     private static Scores compare(PublishFingerprint a, PublishFingerprint b) {
@@ -189,14 +194,22 @@ final class PrePublishAuditor {
         double audio = audioSimilarity(a, b);
         double format = a.format.equalsIgnoreCase(b.format) ? 1.0 : 0.0;
         double pacing = pacingSimilarity(a.segmentDurations, b.segmentDurations);
+        double identity = PublishFingerprint.visualSimilarity(a.identityHashes, b.identityHashes);
         double metadata = !a.metadataHash.isBlank() && a.metadataHash.equals(b.metadataHash) ? 1.0 : 0.0;
-        double overall = content * 0.34
-                + visual * 0.18
-                + audio * 0.10
-                + format * 0.10
-                + pacing * 0.18
-                + metadata * 0.10;
-        return new Scores(content, visual, audio, format, pacing, metadata, overall);
+        double overall = weighted(content, visual, audio, format, pacing, identity, metadata);
+        return new Scores(content, visual, audio, format, pacing, identity, metadata, overall);
+    }
+
+    private static double weighted(
+            double content, double visual, double audio, double format,
+            double pacing, double identity, double metadata) {
+        return content * 0.32
+                + visual * 0.15
+                + audio * 0.08
+                + format * 0.08
+                + pacing * 0.15
+                + identity * 0.14
+                + metadata * 0.08;
     }
 
     private static double contentSimilarity(String a, String b) {
@@ -255,13 +268,20 @@ final class PrePublishAuditor {
     private static int streakPenalty(PublishFingerprint candidate, List<PublishAuditHistory.Entry> history) {
         int sameFormat = 0;
         int sameVoice = 0;
+        int sameIdentity = 0;
         boolean candidateVoiceKnown = isKnownVoice(candidate.voice);
         for (int i = history.size() - 1; i >= 0 && history.size() - i <= 8; i--) {
             PublishFingerprint fp = history.get(i).fingerprint();
             if (candidate.format.equalsIgnoreCase(fp.format)) sameFormat++;
             if (candidateVoiceKnown && isKnownVoice(fp.voice) && candidate.voice.equalsIgnoreCase(fp.voice)) sameVoice++;
+            if (!candidate.identityHashes.isEmpty() && !fp.identityHashes.isEmpty()
+                    && PublishFingerprint.visualSimilarity(candidate.identityHashes, fp.identityHashes) >= 0.95) {
+                sameIdentity++;
+            }
         }
-        int penalty = Math.max(0, sameFormat - 2) * 2 + Math.max(0, sameVoice - 3);
+        int penalty = Math.max(0, sameFormat - 2) * 2
+                + Math.max(0, sameVoice - 3)
+                + Math.max(0, sameIdentity - 1) * 2;
         return Math.min(12, penalty);
     }
 
