@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.regex.Pattern;
 
 /**
  * P0 render/orchestration engine.
@@ -44,6 +45,12 @@ public final class P0Runner {
         }
 
         RunConfig config = RunConfig.fromArgs(safeArgs);
+
+        // Clear every artifact owned by this output prefix before validating the
+        // new input. A failed regeneration must never leave an older PNG/WAV/MP4
+        // behind that can be mistaken for fresh output.
+        clearRequestedOutputs(config);
+
         if (config.createVideo && !config.ttsEnabled()) {
             throw new IOException(
                     "Video was requested, but TTS is disabled. Use --tts kokoro or --tts piper before --video.");
@@ -56,7 +63,6 @@ public final class P0Runner {
         System.out.println("P0 novelty history: " + noveltyGuard.historyFile());
 
         int artifactCount = config.expectedCount();
-        clearVideoOutputs(config, artifactCount);
 
         String currentScript = config.readCurrentScript();
         NoveltyGuard.Result noveltyResult = null;
@@ -98,6 +104,36 @@ public final class P0Runner {
             System.out.println("P0 completed with a manual-content novelty warning.");
         } else {
             System.out.println("P0 pipeline complete.");
+        }
+    }
+
+    static void clearRequestedOutputs(RunConfig config) throws IOException {
+        if (config == null) {
+            return;
+        }
+        deleteNumberedArtifacts(config.outputDirectory, config.outputPrefix, ".png");
+        deleteNumberedArtifacts(config.audioDirectory, config.outputPrefix, ".wav");
+        deleteNumberedArtifacts(config.audioDirectory, config.outputPrefix, ".txt");
+        deleteNumberedArtifacts(config.videoDirectory, config.outputPrefix, ".mp4");
+        if (config.createVideo) {
+            Files.deleteIfExists(config.videoDirectory.resolve(config.finalVideoName));
+        }
+    }
+
+    private static void deleteNumberedArtifacts(Path directory, String prefix, String suffix) throws IOException {
+        if (directory == null || !Files.isDirectory(directory)) {
+            return;
+        }
+        String safePrefix = prefix == null ? "" : prefix;
+        Pattern pattern = Pattern.compile("\\d+" + Pattern.quote(safePrefix) + Pattern.quote(suffix));
+        try (var entries = Files.list(directory)) {
+            List<Path> matches = entries
+                    .filter(Files::isRegularFile)
+                    .filter(path -> pattern.matcher(path.getFileName().toString()).matches())
+                    .toList();
+            for (Path path : matches) {
+                Files.deleteIfExists(path);
+            }
         }
     }
 
