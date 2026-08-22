@@ -34,6 +34,18 @@ jobs:
       - name: Run P2 scoring and history smoke tests
         run: java -Djava.awt.headless=true -cp out redditTxtToImg.P2SmokeTest
 
+      - name: Run P2 cross-process history lock smoke test
+        shell: bash
+        run: |
+          rm -f data/p2_lock_process.jsonl data/p2_lock_process.jsonl.lock
+          java -Djava.awt.headless=true -cp out redditTxtToImg.P2SmokeTest lock-process data/p2_lock_process.jsonl &
+          pid1=$!
+          java -Djava.awt.headless=true -cp out redditTxtToImg.P2SmokeTest lock-process data/p2_lock_process.jsonl &
+          pid2=$!
+          wait "$pid1"
+          wait "$pid2"
+          test "$(grep -cve '^$' data/p2_lock_process.jsonl)" -eq 1
+
       - name: Run P2 real-media fingerprint smoke test
         run: java -Djava.awt.headless=true -cp out redditTxtToImg.P2ArtifactSmokeTest
 
@@ -63,7 +75,7 @@ jobs:
           touch fake_voice.onnx fake_voice.onnx.json
           printf '%s\n' 'A unique end to end P2 production gate story about a broken greenhouse sensor.' > p2_e2e_comments.txt
           rm -rf output/p2_e2e
-          rm -f data/p2_e2e_publish.jsonl
+          rm -f data/p2_e2e_publish.jsonl data/p2_e2e_publish.jsonl.lock
           mkdir -p output/p2_e2e/images output/p2_e2e/audio output/p2_e2e/video
 
           java -Djava.awt.headless=true -cp out redditTxtToImg.P2Entrypoint \
