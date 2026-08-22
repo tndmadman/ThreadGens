@@ -5,6 +5,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Fast deterministic tests for the P2 publish gate. */
 public final class P2SmokeTest {
@@ -21,6 +24,7 @@ public final class P2SmokeTest {
         testRenderedIdentityReuseIsScored();
         testHistoryRoundTripAndCorruptionFailsClosed();
         testSchemaOneHistoryRemainsReadable();
+        testConcurrentHistoryTransactionSerializes();
         testReportWriting();
         System.out.println("P2 smoke tests passed.");
     }
@@ -163,6 +167,50 @@ public final class P2SmokeTest {
             require(loaded.size() == 1, "schema-1 publish history should remain readable");
             require(loaded.get(0).fingerprint().identityHashes.isEmpty(),
                     "schema-1 rows should load with no identity fingerprint");
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
+    private static void testConcurrentHistoryTransactionSerializes() throws Exception {
+        Path dir = Files.createTempDirectory("threadgens-p2-concurrency-");
+        Path historyFile = dir.resolve("publish.jsonl");
+        try {
+            PublishAuditHistory history = new PublishAuditHistory(historyFile, 20);
+            PublishFingerprint candidate = PublishFingerprint.forTest(
+                    "Concurrent duplicate candidate.", "concurrent-artifact", 0x1234L, 0x5678L,
+                    "confession", "voice-a", List.of(2.0, 3.0), "meta-a");
+            CountDownLatch start = new CountDownLatch(1);
+            AtomicInteger approvals = new AtomicInteger();
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+
+            Runnable transaction = () -> {
+                try {
+                    start.await();
+                    try (PublishAuditHistory.LockHandle ignored = history.lockExclusive()) {
+                        if (history.load().isEmpty()) {
+                            Thread.sleep(80);
+                            history.record(candidate, "PASS", 1);
+                            approvals.incrementAndGet();
+                        }
+                    }
+                } catch (Throwable t) {
+                    failure.compareAndSet(null, t);
+                }
+            };
+
+            Thread first = new Thread(transaction, "p2-history-lock-1");
+            Thread second = new Thread(transaction, "p2-history-lock-2");
+            first.start();
+            second.start();
+            start.countDown();
+            first.join(5000);
+            second.join(5000);
+
+            require(!first.isAlive() && !second.isAlive(), "concurrent history transactions must not deadlock");
+            require(failure.get() == null, "concurrent history transaction failed: " + failure.get());
+            require(approvals.get() == 1, "only one concurrent candidate may observe an empty history and approve");
+            require(history.load().size() == 1, "concurrent history transaction must record exactly one row");
         } finally {
             deleteTree(dir);
         }
