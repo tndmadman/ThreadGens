@@ -1,9 +1,11 @@
 package redditTxtToImg;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -30,6 +32,7 @@ public final class P2SmokeTest {
         testHistoryRoundTripAndCorruptionFailsClosed();
         testSchemaOneHistoryRemainsReadable();
         testConcurrentHistoryTransactionSerializes();
+        testLongGenerationHistoryFormatResolutionIsStackSafe();
         testReportWriting();
         System.out.println("P2 smoke tests passed.");
     }
@@ -232,6 +235,36 @@ public final class P2SmokeTest {
             require(failure.get() == null, "concurrent history transaction failed: " + failure.get());
             require(approvals.get() == 1, "only one concurrent candidate may observe an empty history and approve");
             require(history.load().size() == 1, "concurrent history transaction must record exactly one row");
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
+    private static void testLongGenerationHistoryFormatResolutionIsStackSafe() throws Exception {
+        Path dir = Files.createTempDirectory("threadgens-p2-long-generation-history-");
+        Path historyFile = dir.resolve("generation.jsonl");
+        try {
+            String script = ("long-history-token ".repeat(12000)).trim();
+            String encoded = Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(script.getBytes(StandardCharsets.UTF_8));
+            String row = "{\"created\":\"2026-08-22T00:00:00Z\","
+                    + "\"format\":\"confession\",\"hash\":\"test\","
+                    + "\"topic_b64\":\"dG9waWM\",\"script_b64\":\"" + encoded + "\"}\n";
+            Files.writeString(historyFile, row, StandardCharsets.UTF_8);
+
+            P2Entrypoint.AuditConfig config = new P2Entrypoint.AuditConfig();
+            config.requestedFormat = "auto";
+            config.generationHistory = historyFile;
+            config.autoGenerateText = true;
+            config.postTitle = "Long history regression";
+            config.topic = "Long history regression";
+
+            Method method = P2Entrypoint.class.getDeclaredMethod(
+                    "resolveActualFormat", P2Entrypoint.AuditConfig.class, String.class);
+            method.setAccessible(true);
+            String format = (String) method.invoke(null, config, script);
+            require("confession".equals(format),
+                    "P2 should resolve a long generation-history row without exhausting the JVM stack");
         } finally {
             deleteTree(dir);
         }
