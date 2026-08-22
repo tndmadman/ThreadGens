@@ -103,6 +103,11 @@ final class PublishFingerprint {
             }
         }
 
+        String metadataSignature = input.metadataSignature() == null ? "" : input.metadataSignature().trim();
+        String metadataHash = metadataSignature.isBlank()
+                ? ""
+                : sha256(metadataSignature.getBytes(StandardCharsets.UTF_8));
+
         return new PublishFingerprint(
                 Instant.now().toString(),
                 input.platform(),
@@ -115,8 +120,7 @@ final class PublishFingerprint {
                 input.ttsEngine(),
                 durations,
                 total,
-                sha256((input.metadataSignature() == null ? "" : input.metadataSignature())
-                        .getBytes(StandardCharsets.UTF_8))
+                metadataHash
         );
     }
 
