@@ -26,6 +26,14 @@ semanticThreshold=0.86
 semanticHistoryLimit=50
 integritySanitize=true
 
+# P2 final pre-publish repetition audit
+publishAuditEnabled=true
+publishAuditMode=block
+publishHistoryFile=data/publish_history.jsonl
+publishHistoryLimit=100
+publishAuditWarnThreshold=58
+publishAuditBlockThreshold=78
+
 # TTS defaults
 ttsEngine=none
 ttsCommand=piper
