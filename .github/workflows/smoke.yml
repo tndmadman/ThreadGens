@@ -103,7 +103,7 @@ jobs:
       - name: Run P2 unit smoke tests on Windows
         shell: powershell
         run: |
-          & java -Djava.awt.headless=true -cp out redditTxtToImg.P2SmokeTest
+          & java '-Djava.awt.headless=true' -cp out redditTxtToImg.P2SmokeTest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Parse Windows PowerShell launchers
