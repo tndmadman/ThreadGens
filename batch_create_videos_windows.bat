@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-set "INPUT_FILE=data\batch_videos.txt"
+set "TARGET_VIDEOS=30"
 set "COUNT=10"
 set "MODEL=llama3.1:8b"
 set "VOICE=af_heart"
@@ -18,11 +18,13 @@ set "TOKENIZERS_PARALLELISM=false"
 if /I "%~1"=="--self-test" (
   call :EnsureBatchRunner
   if errorlevel 1 exit /b 1
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -SelfTest
+  if errorlevel 1 exit /b 1
   echo Batch launcher self-test passed.
   exit /b 0
 )
 
-if not "%~1"=="" set "INPUT_FILE=%~1"
+if not "%~1"=="" set "TARGET_VIDEOS=%~1"
 if not "%~2"=="" set "COUNT=%~2"
 
 call :EnsureBatchRunner
@@ -34,12 +36,16 @@ if errorlevel 1 (
 )
 
 echo.
-echo ThreadGens batch video creator
+echo ThreadGens self-filling batch video creator
 echo.
-echo Input format uses 2 non-empty lines per video:
-echo   Reddit: line 1 = post title, line 2 = post body
-echo   X:      line 1 = hidden reply style, line 2 = visible X post text
-echo   Repeat those 2 lines for each next video.
+echo This mode does not load title/body prompts from batch_videos.txt.
+echo It generates fresh ideas with local Ollama and keeps replacing rejected attempts
+echo until the requested number of approved final videos has been created.
+echo.
+echo Usage:
+echo   batch_create_videos_windows.bat [approved-video-target] [slides-per-video]
+echo Example:
+echo   batch_create_videos_windows.bat 30 10
 echo.
 echo Choose platform/thread style:
 echo 1. Reddit thread
@@ -57,48 +63,49 @@ if /I "%MAKE_OP_IMAGE%"=="Y" set "OP_IMAGE_FLAG=-GenerateOpImage"
 if /I "%MAKE_OP_IMAGE%"=="YES" set "OP_IMAGE_FLAG=-GenerateOpImage"
 
 echo.
-set /p "UNLOAD_OLLAMA=Unload Ollama after each video? y/N [default N, keeps model loaded]: "
+set /p "UNLOAD_OLLAMA=Unload Ollama between generation calls? y/N [default N, keeps model loaded]: "
 if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="
 if /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
 
-echo Defaults copied from run_ai_windows.bat:
-echo   platform: %PLATFORM%
-echo   model:    %MODEL%
-echo   count:    %COUNT%
-echo   tts:      kokoro
-echo   voices:   %VOICE_SERIES% ^(one stable selection per video^)
-echo   text:     narration-timed reveal inside the rendered social image
-echo   captions: bottom duplicate subtitles disabled
-echo   motion:   locked/static social frame ^(no pan, zoom, crop drift, or state jumping^)
-echo   texture:  subtle full-frame temporal grain on the final stitched MP4
-echo   metadata: AI disclosure and provenance sidecars
-echo   video:    stitched MP4, watermark off, body text top-aligned
+echo Defaults:
+echo   platform:              %PLATFORM%
+echo   approved video target: %TARGET_VIDEOS%
+echo   slides per video:      %COUNT%
+echo   model:                 %MODEL%
+echo   tts:                   kokoro
+echo   voices:                %VOICE_SERIES% ^(one stable selection per video^)
+echo   ideas:                  generated automatically and persisted to data\batch_idea_history.jsonl
+echo   retry behavior:         rejected ideas are replaced until approved target is reached
+echo   text:                   narration-timed reveal inside the rendered social image
+echo   captions:               bottom duplicate subtitles disabled
+echo   video motion:           locked/static social frame ^(no pan/zoom/crop drift^)
+echo   final texture:          subtle full-frame grain
+echo   metadata:               AI disclosure and provenance sidecars
 if "%OP_IMAGE_FLAG%"=="" (
-  echo   OP image: disabled
+  echo   OP image:              disabled
 ) else (
-  echo   OP image: ComfyUI RealVisXL enabled for each OP post
+  echo   OP image:              ComfyUI RealVisXL enabled for each OP post
 )
-echo   kokoro console: quiet
+echo   kokoro console:          quiet
 if "%KEEP_OLLAMA_FLAG%"=="" (
-  echo   Ollama: unload after each video
+  echo   Ollama:                unload between calls
 ) else (
-  echo   Ollama: keep loaded between videos
+  echo   Ollama:                keep loaded between ideas/videos
 )
-echo   batch failures: continue to later jobs; failed/rejected jobs are summarized at the end
 echo.
 if not "%OP_IMAGE_FLAG%"=="" (
   echo OP images: enabled. Make sure ComfyUI is already running at http://127.0.0.1:8188 and RealVisXL_V5.0_fp32.safetensors is installed.
 )
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
 if "%EXITCODE%"=="0" (
-  echo Batch video creation finished.
+  echo Batch approved-video target reached.
 ) else if "%EXITCODE%"=="2" (
-  echo Batch video creation finished with one or more failed/rejected jobs. See the summary and failed_jobs.txt above.
+  echo Batch stopped before the approved-video target was reached. See the summary above.
 ) else (
   echo Batch video creation stopped with exit code %EXITCODE%.
 )
@@ -108,14 +115,14 @@ exit /b %EXITCODE%
 
 :EnsureBatchRunner
 set "PS_SCRIPT=tools\batch_create_videos.ps1"
-set "CONTINUE_MARKER=Continuing to the next batch job."
+set "SELF_FILL_MARKER=Self-filling mode: generate ideas until approved target is reached"
 
 if not exist "%PS_SCRIPT%" (
   echo Missing %PS_SCRIPT%
   exit /b 1
 )
 
-findstr /C:"%CONTINUE_MARKER%" "%PS_SCRIPT%" >nul 2>&1
+findstr /C:"%SELF_FILL_MARKER%" "%PS_SCRIPT%" >nul 2>&1
 if not errorlevel 1 exit /b 0
 
 echo.
@@ -158,9 +165,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-findstr /C:"%CONTINUE_MARKER%" "%PS_SCRIPT%" >nul 2>&1
+findstr /C:"%SELF_FILL_MARKER%" "%PS_SCRIPT%" >nul 2>&1
 if errorlevel 1 (
-  echo The refreshed PowerShell runner is still missing the required batch-continuation behavior.
+  echo The refreshed PowerShell runner is still missing the required self-filling approved-target behavior.
   exit /b 1
 )
 
