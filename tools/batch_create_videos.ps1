@@ -4,6 +4,8 @@ param(
     [string]$Model = 'llama3.1:8b',
     [string]$Voice = 'af_heart',
     [string]$Platform = 'reddit',
+    [ValidateSet('auto', 'thread_story', 'confession', 'debate', 'best_answers', 'escalating_conversation')]
+    [string]$Format = 'auto',
     [switch]$KeepOllamaLoaded,
     [switch]$GenerateOpImage
 )
@@ -73,7 +75,7 @@ if ($Platform -eq 'x') {
     Write-Host 'Reddit format: line 1 = post title, line 2 = post body.'
 }
 Write-Host "Output root: $OutputRoot"
-Write-Host "Defaults: platform=$Platform, model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
+Write-Host "Defaults: platform=$Platform, format=$Format, model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
 Write-Host 'Kokoro console: quiet'
 if ($GenerateOpImage) {
     Write-Host 'OP image generation: enabled through local ComfyUI RealVisXL' -ForegroundColor Green
@@ -155,8 +157,9 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
         Write-Step "[$jobLabel/$jobCountLabel] Reddit title: $title"
         Write-Host "Reddit body: $body"
     }
+    Write-Host "P0 format: $Format"
     if ($GenerateOpImage) {
-        Write-Host "OP image: ComfyUI RealVisXL enabled"
+        Write-Host 'OP image: ComfyUI RealVisXL enabled'
     }
     Write-Host "Final MP4: $finalVideoName"
 
@@ -168,6 +171,7 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
         '--post-title', $title,
         '--topic', $body,
         '--count', $Count,
+        '--format', $Format,
         '--llm-model', $Model,
         '--tts', $TtsEngine,
         '--tts-command', $KokoroPython,
