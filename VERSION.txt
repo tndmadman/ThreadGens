@@ -1,23 +1,30 @@
-ThreadGens 0.5.0-p0-originality
+ThreadGens 0.6.0-p2-publish-audit
 
-Branch: p0-content-originality
+Branch: p2-prepublish-audit
 
-P0 content-originality release:
-- production entrypoints route through P0Entrypoint
-- CheckedRunner and the GUI inherit P0 behavior
-- RawCheckedRunner is the explicit low-level compatibility/debug path
-- five content-aware formats: thread_story, confession, debate, best_answers, escalating_conversation
-- persistent deterministic novelty history with regeneration on rejected auto content
-- local Ollama semantic novelty with nomic-embed-text for reworded story/joke/conflict detection
-- malformed existing novelty history fails closed during automatic generation
-- generated Reddit/X renderers omit fabricated engagement at source
-- generated X output omits verification badges and precise fake timestamps
-- narration is split into timed visual states targeting roughly 2.5-second content/focus changes
-- each format has its own layout, motion behavior and final transition profile
-- final delivery remains conventional H.264/AAC/yuv420p/+faststart
-- stale segment/final MP4 files are removed before regeneration
-- Windows setup pulls both llama3.1:8b and nomic-embed-text
-- CI includes Java 21 compilation, P0 unit tests, real FFmpeg/ffprobe video tests for all five formats, and Windows PowerShell parser validation
+P2 pre-publish audit release:
+- P2Entrypoint is the final production entrypoint and runs after the complete P0 pipeline
+- final videos are fingerprinted before they are considered publish-ready
+- persistent approved-output history lives at data/publish_history.jsonl and fails closed if malformed
+- exact final-artifact and exact-script duplicates hard-block
+- local Ollama semantic comparison catches heavily paraphrased copies of approved premises
+- source screenshot perceptual hashes detect visually repeated presentation/content
+- voice/TTS reuse, selected content format, normalized segment pacing, and optional metadata signatures contribute to aggregate risk
+- recent same-format and same-voice streaks add feed-level repetition risk
+- optional P1 caption/identity/provenance metadata is consumed through CLI signatures or production_manifest.json / p1_manifest.json without a compile-time P1 dependency
+- every audited video receives a JSON publish_audit.json report with PASS/WARN/BLOCK, component scores and findings
+- production defaults use block mode; blocked videos are not recorded as approved history
+- warn mode allows an explicit WARN_OVERRIDE while retaining the audit result in history
+- batch jobs naturally compare against earlier successful jobs because approved outputs share publish history
+- the existing batch copy to final_videos only happens after the P2 entrypoint returns success
+- CI covers deterministic scoring/history, malformed-history fail-closed behavior, report generation, real FFmpeg/ffprobe fingerprint capture, perceptual image hashing, exact-artifact blocking, and Windows Java/PowerShell validation
+
+P0 remains fully included:
+- five content-aware formats
+- deterministic and semantic generation novelty
+- source-level social-signal integrity cleanup
+- timed visual states and format-specific motion/transitions
+- conventional H.264/AAC/yuv420p/+faststart delivery
 
 Still included:
 - optional OP-only image generation through local ComfyUI / RealVisXL
@@ -25,12 +32,11 @@ Still included:
 - generated/imported profile images and usernames
 - batch video creation and interactive Windows generation
 
-Default output folders:
+Default output/history locations:
 - generated script: output/script/generated_comments.txt
 - screenshots: output/
-- generated/imported profile cache: output/cache/pfp/
-- OP image prompts/cache: output/cache/images/
-- OP images: output/images/
 - audio: output/audio/
 - video clips and final video: output/video/
-- novelty history: data/generation_history.jsonl (git-ignored)
+- P2 audit report: output/video/publish_audit.json (or each batch job's video directory)
+- P0 novelty history: data/generation_history.jsonl (git-ignored)
+- P2 approved publish history: data/publish_history.jsonl (git-ignored)
