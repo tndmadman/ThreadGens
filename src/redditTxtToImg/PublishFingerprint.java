@@ -117,10 +117,6 @@ final class PublishFingerprint {
             identities.addAll(identityHashes(image, input.platform()));
         }
 
-        // Sample the actual completed video, not just the pre-video screenshots.
-        // This makes burned captions, overlays and final presentation changes part
-        // of the visual fingerprint and gives P1 a useful integration path even
-        // before a stable manifest schema is available.
         Path sampleDirectory = Files.createTempDirectory("threadgens-p2-video-frames-");
         double totalArtifactDuration = 0.0;
         try {
@@ -135,8 +131,9 @@ final class PublishFingerprint {
             deleteTree(sampleDirectory);
         }
 
+        List<Path> audioPaths = existing(input.audioPaths());
         List<Double> durations = new ArrayList<>();
-        for (Path audio : existing(input.audioPaths())) {
+        for (Path audio : audioPaths) {
             durations.add(media.probeDurationSeconds(audio));
         }
 
@@ -144,7 +141,7 @@ final class PublishFingerprint {
         String metadataHash = metadataSignature.isBlank()
                 ? ""
                 : sha256(metadataSignature.getBytes(StandardCharsets.UTF_8));
-        String resolvedVoice = resolveVoiceIdentity(input.voice(), input.ttsEngine());
+        String resolvedVoice = resolveVoiceIdentity(input.voice(), input.ttsEngine(), audioPaths);
 
         return new PublishFingerprint(
                 Instant.now().toString(),
@@ -368,7 +365,39 @@ final class PublishFingerprint {
         return sum / a.size();
     }
 
-    private static String resolveVoiceIdentity(String configuredVoice, String engine) {
+    private static String resolveVoiceIdentity(
+            String configuredVoice, String engine, List<Path> audioPaths) throws IOException {
+        List<String> renderedVoices = new ArrayList<>();
+        int sidecarCount = 0;
+        if (audioPaths != null) {
+            for (Path audio : audioPaths) {
+                if (audio == null) continue;
+                String base = audio.getFileName().toString().replaceFirst("(?i)\\.wav$", "");
+                Path sidecar = audio.resolveSibling(base + ".voice.json");
+                if (!Files.isRegularFile(sidecar)) continue;
+                sidecarCount++;
+                String json = Files.readString(sidecar, StandardCharsets.UTF_8);
+                String actualEngine = JsonText.extractString(json, "engine");
+                String actualVoice = JsonText.extractString(json, "voice");
+                if (actualVoice == null || actualVoice.isBlank()) {
+                    throw new IOException("P2 found P1 voice metadata without a selected voice: " + sidecar);
+                }
+                String label = clean(actualEngine, clean(engine, "unknown")) + ":" + actualVoice.trim();
+                if (!renderedVoices.contains(label)) renderedVoices.add(label);
+            }
+        }
+        if (sidecarCount > 0 && audioPaths != null && sidecarCount != audioPaths.size()) {
+            throw new IOException("P2 found incomplete P1 voice metadata: " + sidecarCount
+                    + " sidecars for " + audioPaths.size() + " narration segments.");
+        }
+        if (!renderedVoices.isEmpty()) {
+            renderedVoices.sort(String.CASE_INSENSITIVE_ORDER);
+            return String.join("|", renderedVoices);
+        }
+        return resolveConfiguredVoiceIdentity(configuredVoice, engine);
+    }
+
+    private static String resolveConfiguredVoiceIdentity(String configuredVoice, String engine) {
         String selected = configuredVoice == null ? "" : configuredVoice.trim();
         Path voiceDirectory = Path.of("voices");
         if (selected.isBlank() || "unknown".equalsIgnoreCase(selected)) {
