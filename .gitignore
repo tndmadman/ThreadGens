@@ -4,3 +4,4 @@ output/
 .DS_Store
 Thumbs.db
 .venv-kokoro/
+data/generation_history.jsonl
