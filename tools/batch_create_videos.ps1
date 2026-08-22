@@ -65,6 +65,7 @@ $IdeaHistoryPath = if ([System.IO.Path]::IsPathRooted($IdeaHistoryFile)) {
 }
 $OllamaGenerateUrl = 'http://127.0.0.1:11434/api/generate'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$Palettes = @('ember', 'ocean', 'forest', 'violet', 'teal', 'rose', 'amber', 'slate')
 
 function Write-Step($Message) {
     Write-Host "`n== $Message ==" -ForegroundColor Cyan
@@ -75,13 +76,42 @@ function New-SafeFileName($Value) {
     $name = $name.ToLowerInvariant()
     $name = $name -replace '[^a-z0-9]+', '_'
     $name = $name.Trim('_')
-    if ($name.Length -gt 36) {
-        $name = $name.Substring(0, 36).Trim('_')
+    if ($name.Length -gt 48) {
+        $name = $name.Substring(0, 48).Trim('_')
     }
     if ([string]::IsNullOrWhiteSpace($name)) {
         return 'video'
     }
     return $name
+}
+
+function Get-AlphaSuffix([int]$Value) {
+    if ($Value -lt 1) {
+        return ''
+    }
+    $result = ''
+    $n = $Value
+    while ($n -gt 0) {
+        $n--
+        $result = ([char](97 + ($n % 26))) + $result
+        $n = [Math]::Floor($n / 26)
+    }
+    return $result
+}
+
+function Get-UniqueFinalVideoName($SafeTitle, $Directory) {
+    $candidate = "$SafeTitle.mp4"
+    if (-not (Test-Path (Join-Path $Directory $candidate))) {
+        return $candidate
+    }
+    for ($i = 1; $i -le 702; $i++) {
+        $suffix = Get-AlphaSuffix $i
+        $candidate = "${SafeTitle}_${suffix}.mp4"
+        if (-not (Test-Path (Join-Path $Directory $candidate))) {
+            return $candidate
+        }
+    }
+    throw "Could not create a unique alphabetic filename for $SafeTitle."
 }
 
 function Normalize-IdeaText($Value) {
@@ -174,7 +204,7 @@ function Get-RecentIdeaBlock($History) {
     return ($lines -join [Environment]::NewLine)
 }
 
-function Invoke-NewBatchIdea($AttemptNumber, [ref]$HistoryRef, [hashtable]$SeenKeys) {
+function Invoke-NewBatchIdea($AttemptNumber, $History, [hashtable]$SeenKeys) {
     $themes = @(
         'awkward social situation',
         'workplace problem',
@@ -195,9 +225,8 @@ function Invoke-NewBatchIdea($AttemptNumber, [ref]$HistoryRef, [hashtable]$SeenK
     )
 
     for ($ideaTry = 1; $ideaTry -le $IdeaRetries; $ideaTry++) {
-        $history = @($HistoryRef.Value)
         $theme = $themes[(($AttemptNumber + $ideaTry - 2) % $themes.Count)]
-        $recentBlock = Get-RecentIdeaBlock $history
+        $recentBlock = Get-RecentIdeaBlock $History
 
         if ($Platform -eq 'x') {
             $shape = @"
@@ -237,17 +266,19 @@ RECENT IDEAS THAT MUST NOT BE RECYCLED:
 $recentBlock
 "@
 
-        $payload = @{
+        $keepAlive = if ($KeepOllamaLoaded) { '30m' } else { '0s' }
+        $payloadObject = @{
             model = $Model
             prompt = $prompt
             stream = $false
             format = 'json'
-            keep_alive = if ($KeepOllamaLoaded) { '30m' } else { '0s' }
+            keep_alive = $keepAlive
             options = @{
                 temperature = 1.02
                 top_p = 0.95
             }
-        } | ConvertTo-Json -Depth 8
+        }
+        $payload = $payloadObject | ConvertTo-Json -Depth 8
 
         try {
             $response = Invoke-RestMethod `
@@ -296,7 +327,6 @@ $recentBlock
         }
         Add-IdeaHistoryEvent $entry
         $SeenKeys[$key] = $true
-        $HistoryRef.Value = @($history + $entry)
         return $entry
     }
 
@@ -342,6 +372,22 @@ function Run-SelfTest {
             throw 'Approved-target loop accounting failed.'
         }
 
+        $tempFinal = Join-Path $tempRoot 'final'
+        New-Item -ItemType Directory -Force -Path $tempFinal | Out-Null
+        $first = Get-UniqueFinalVideoName 'sample_title' $tempFinal
+        if ($first -ne 'sample_title.mp4') {
+            throw 'Numberless final filename generation failed.'
+        }
+        New-Item -ItemType File -Path (Join-Path $tempFinal $first) | Out-Null
+        $second = Get-UniqueFinalVideoName 'sample_title' $tempFinal
+        if ($second -ne 'sample_title_a.mp4') {
+            throw 'Alphabetic collision suffix generation failed.'
+        }
+
+        if ($Palettes.Count -lt 4) {
+            throw 'Palette rotation is unexpectedly small.'
+        }
+
         Write-Host 'Self-filling batch controller self-test passed.'
     } finally {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tempRoot
@@ -364,7 +410,9 @@ Write-Host "Idea history: $IdeaHistoryPath"
 Write-Host "Output root: $OutputRoot"
 Write-Host "Defaults: platform=$Platform, format=$Format, model=$Model, tts=$TtsEngine"
 Write-Host "P1 voice selection: $VoiceSelection from [$VoiceSeries], delivery=$TtsDelivery, captions=$Captions"
-Write-Host 'Video style: locked/static social frame with subtle final grain'
+Write-Host 'Video style: locked/static social frame, rotating dark background palette, subtle final grain'
+Write-Host 'Visible format/progress counters: disabled'
+Write-Host 'Final MP4 names: title-based with no numeric prefix'
 Write-Host 'Self-filling mode: generate ideas until approved target is reached' -ForegroundColor Green
 Write-Host 'Kokoro console: quiet'
 if ($MaxAttempts -gt 0) {
@@ -429,14 +477,13 @@ while ($succeededVideos -lt $TargetVideos) {
     $slotLabel = '{0:D3}' -f $approvedSlot
     $attemptLabel = '{0:D4}' -f $totalAttempts
 
-    $historyRef = [ref]$ideaHistory
-    $idea = Invoke-NewBatchIdea $totalAttempts $historyRef $seenIdeaKeys
-    $ideaHistory = @($historyRef.Value)
+    $idea = Invoke-NewBatchIdea $totalAttempts $ideaHistory $seenIdeaKeys
+    $ideaHistory = @($ideaHistory + $idea)
     $title = [string]$idea.title
     $body = [string]$idea.body
 
     $safeTitle = New-SafeFileName $title
-    $finalVideoName = "${slotLabel}_${safeTitle}.mp4"
+    $finalVideoName = Get-UniqueFinalVideoName $safeTitle $FinalDir
     $jobRoot = Join-Path $OutputRoot ("attempt_${attemptLabel}_slot_${slotLabel}")
     $imageDir = Join-Path $jobRoot 'images'
     $audioDir = Join-Path $jobRoot 'audio'
@@ -446,6 +493,9 @@ while ($succeededVideos -lt $TargetVideos) {
     $opImageCacheDir = Join-Path $jobRoot 'image_cache'
     $metadataDir = Join-Path $jobRoot 'metadata'
     $scriptOut = Join-Path $scriptDir 'generated_comments.txt'
+
+    $palette = $Palettes[(($approvedSlot - 1) % $Palettes.Count)]
+    $env:THREADGENS_PALETTE = $palette
 
     New-Item -ItemType Directory -Force -Path $imageDir, $audioDir, $videoDir, $scriptDir | Out-Null
     if ($GenerateOpImage) {
@@ -460,6 +510,7 @@ while ($succeededVideos -lt $TargetVideos) {
         Write-Host "Reddit body: $body"
     }
     Write-Host "Idea family: $($idea.theme)"
+    Write-Host "Background palette: $palette"
     Write-Host "P0 format: $Format"
     Write-Host "Final MP4 if approved: $finalVideoName"
 
@@ -534,6 +585,7 @@ while ($succeededVideos -lt $TargetVideos) {
             status = 'approved'
             attempt = $totalAttempts
             approvedSlot = $succeededVideos
+            palette = $palette
             output = $copyTo
         })
         Write-Host "Approved $succeededVideos/$TargetVideos. Saved final copy: $copyTo" -ForegroundColor Green
@@ -546,6 +598,7 @@ while ($succeededVideos -lt $TargetVideos) {
             status = 'rejected'
             attempt = $totalAttempts
             approvedSlot = $approvedSlot
+            palette = $palette
             reason = $reason
         })
         $failedAttempts += [pscustomobject]@{
@@ -563,6 +616,8 @@ while ($succeededVideos -lt $TargetVideos) {
         Write-Host "Generating a replacement idea; approved progress remains $succeededVideos/$TargetVideos." -ForegroundColor Yellow
     }
 }
+
+Remove-Item Env:THREADGENS_PALETTE -ErrorAction SilentlyContinue
 
 Write-Step 'Batch complete'
 Write-Host "Approved final videos: $succeededVideos/$TargetVideos" -ForegroundColor Green
