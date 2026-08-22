@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 import javax.imageio.ImageIO;
 
-/** Exercises P2 capture with real FFmpeg/ffprobe media and perceptual image hashing. */
+/** Exercises P2 capture with real FFmpeg/ffprobe media and perceptual image/video hashing. */
 public final class P2ArtifactSmokeTest {
     private P2ArtifactSmokeTest() {
     }
@@ -39,9 +39,11 @@ public final class P2ArtifactSmokeTest {
                     "reddit", "thread_story", "A unique P2 artifact smoke test story.",
                     List.of(video), List.of(image), List.of(audio), "smoke_voice", "kokoro", "", "ffmpeg"));
             require(!first.artifactHash.isBlank(), "artifact hash must exist");
-            require(!first.visualHashes.isEmpty(), "visual perceptual hash must exist");
+            require(first.visualHashes.size() >= 4,
+                    "visual fingerprint must include source image plus sampled finished-video frames");
             require(!first.segmentDurations.isEmpty() && first.segmentDurations.get(0) > 0,
                     "ffprobe audio duration must exist");
+            require(first.totalDuration > 0, "ffprobe final-video duration must exist");
 
             Path historyPath = dir.resolve("publish_history.jsonl");
             PublishAuditHistory history = new PublishAuditHistory(historyPath, 20);
