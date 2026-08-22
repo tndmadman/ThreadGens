@@ -51,7 +51,8 @@ if /I "%MAKE_OP_IMAGE%"=="YES" set "OP_IMAGE_FLAG=-GenerateOpImage"
 
 echo.
 set /p "UNLOAD_OLLAMA=Unload Ollama after each video? y/N [default N, keeps model loaded]: "
-if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="nif /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
+if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="
+if /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
 
 echo Defaults copied from run_ai_windows.bat:
 echo   platform: %PLATFORM%
