@@ -25,6 +25,12 @@ import javax.imageio.ImageIO;
 final class TimedVisualStateRenderer {
     static final String LAYOUT_HEADER = "threadgens-smooth-reveal-v1";
 
+    private enum SocialKind {
+        REDDIT,
+        X,
+        UNKNOWN
+    }
+
     record RenderedState(Path imagePath, double weight, int index, int total) {
     }
 
@@ -114,8 +120,10 @@ final class TimedVisualStateRenderer {
 
         List<WordBox> boxes = detectNarrationWordBoxes(source, narration, itemIndex);
         if (boxes.isEmpty()) {
-            // Compatibility path for synthetic/non-social test frames. Keep the
-            // same number of states, but do not fabricate any text overlay.
+            // Compatibility path for synthetic/non-social frames or any social
+            // frame whose raster text cannot be mapped exactly to narration.
+            // We refuse a guessed word-to-pixel mapping because that would drift
+            // away from the spoken timing the feature is meant to follow.
             List<RenderedState> result = new ArrayList<>();
             for (int i = 0; i < timeline.size(); i++) {
                 Path statePath = outputDirectory.resolve(baseName + "_state_" + i + ".png");
@@ -241,12 +249,15 @@ final class TimedVisualStateRenderer {
             return List.of();
         }
 
-        boolean reddit = looksLikeReddit(image);
+        SocialKind socialKind = detectSocialKind(image);
+        if (socialKind == SocialKind.UNKNOWN) {
+            return List.of();
+        }
+
         List<WordBox> best = List.of();
         int bestDifference = Integer.MAX_VALUE;
-
         for (int gap = 3; gap <= 24; gap++) {
-            List<WordBox> candidate = detectWordBoxes(image, reddit, itemIndex, gap);
+            List<WordBox> candidate = detectWordBoxes(image, socialKind, itemIndex, gap);
             int difference = Math.abs(candidate.size() - expectedWords);
             if (!candidate.isEmpty() && difference < bestDifference) {
                 best = candidate;
@@ -257,39 +268,37 @@ final class TimedVisualStateRenderer {
             }
         }
 
-        // Never attach narration timings to an arbitrary block of bright text.
-        // Smooth reveal is only safe when the raster segmentation accounts for
-        // essentially the same number of words as the narration. This rejects
-        // generic smoke frames and avoids timing drift if a social layout cannot
-        // be segmented confidently.
-        int allowedDifference = Math.max(1, expectedWords / 10);
-        int minimumCoverage = Math.max(1, (int) Math.ceil(expectedWords * 0.90));
-        if (best.isEmpty() || bestDifference > allowedDifference || best.size() < minimumCoverage) {
-            return List.of();
-        }
-        return best;
+        // Exact count is intentional. A one-word offset would associate every
+        // later pixel box with the wrong Kokoro timestamp and create visible
+        // sync drift. If segmentation is uncertain, keep the compatibility path
+        // rather than claim an exact narration mapping that we do not have.
+        return bestDifference == 0 ? best : List.of();
     }
 
     private static List<WordBox> detectWordBoxes(
             BufferedImage image,
-            boolean reddit,
+            SocialKind socialKind,
             int itemIndex,
             int wordGap
     ) {
         int w = image.getWidth();
         int h = image.getHeight();
         int x0;
-        int x1 = clamp((int) Math.round(w * 0.91), 1, w);
+        int x1 = clamp((int) Math.round(w * 0.94), 1, w);
         int y0;
         int y1 = clamp((int) Math.round(h * 0.76), 1, h);
-        if (reddit) {
+
+        if (socialKind == SocialKind.REDDIT) {
             x0 = clamp((int) Math.round(w * (itemIndex == 0 ? 0.085 : 0.145)), 0, w - 1);
             // Include the full OP title glyphs. Small header/pill lettering is
             // rejected below by the scale-aware minimum text-band height.
             y0 = clamp((int) Math.round(h * 0.195), 0, h - 1);
         } else {
-            x0 = clamp((int) Math.round(w * (itemIndex == 0 ? 0.09 : 0.18)), 0, w - 1);
-            y0 = clamp((int) Math.round(h * (itemIndex == 0 ? 0.19 : 0.205)), 0, h - 1);
+            // X originals begin near the left card margin, while replies begin
+            // after the avatar/identity column. These values track the renderer's
+            // actual text origins without admitting its header metadata.
+            x0 = clamp((int) Math.round(w * (itemIndex == 0 ? 0.04 : 0.19)), 0, w - 1);
+            y0 = clamp((int) Math.round(h * (itemIndex == 0 ? 0.17 : 0.19)), 0, h - 1);
         }
 
         int minimumBrightPixels = Math.max(4, (x1 - x0) / 220);
@@ -416,6 +425,16 @@ final class TimedVisualStateRenderer {
         return new Color((int) (r / count), (int) (g / count), (int) (b / count));
     }
 
+    private static SocialKind detectSocialKind(BufferedImage image) {
+        if (looksLikeReddit(image)) {
+            return SocialKind.REDDIT;
+        }
+        if (looksLikeX(image)) {
+            return SocialKind.X;
+        }
+        return SocialKind.UNKNOWN;
+    }
+
     private static boolean looksLikeReddit(BufferedImage image) {
         int w = image.getWidth();
         int h = image.getHeight();
@@ -437,6 +456,55 @@ final class TimedVisualStateRenderer {
             }
         }
         return sampled > 0 && branded >= Math.max(18, sampled / 120);
+    }
+
+    /**
+     * X's renderer has a distinctive near-black phone/top-bar plus a centered
+     * white X mark. Requiring both prevents arbitrary dark images from being
+     * treated as X merely because they contain some bright text.
+     */
+    private static boolean looksLikeX(BufferedImage image) {
+        int w = image.getWidth();
+        int h = image.getHeight();
+        int black = 0;
+        int sampled = 0;
+        int x0 = clamp((int) Math.round(w * 0.05), 0, w - 1);
+        int x1 = clamp((int) Math.round(w * 0.95), x0 + 1, w);
+        int y0 = clamp((int) Math.round(h * 0.035), 0, h - 1);
+        int y1 = clamp((int) Math.round(h * 0.105), y0 + 1, h);
+        for (int y = y0; y < y1; y += 4) {
+            for (int x = x0; x < x1; x += 4) {
+                Color c = new Color(image.getRGB(x, y));
+                sampled++;
+                int average = (c.getRed() + c.getGreen() + c.getBlue()) / 3;
+                int max = Math.max(c.getRed(), Math.max(c.getGreen(), c.getBlue()));
+                int min = Math.min(c.getRed(), Math.min(c.getGreen(), c.getBlue()));
+                if (average <= 12 && max - min <= 12) {
+                    black++;
+                }
+            }
+        }
+        if (sampled == 0 || black < sampled * 0.55) {
+            return false;
+        }
+
+        int brightCenter = 0;
+        int cx0 = clamp((int) Math.round(w * 0.43), 0, w - 1);
+        int cx1 = clamp((int) Math.round(w * 0.57), cx0 + 1, w);
+        int cy0 = clamp((int) Math.round(h * 0.055), 0, h - 1);
+        int cy1 = clamp((int) Math.round(h * 0.115), cy0 + 1, h);
+        for (int y = cy0; y < cy1; y += 2) {
+            for (int x = cx0; x < cx1; x += 2) {
+                Color c = new Color(image.getRGB(x, y));
+                int average = (c.getRed() + c.getGreen() + c.getBlue()) / 3;
+                int max = Math.max(c.getRed(), Math.max(c.getGreen(), c.getBlue()));
+                int min = Math.min(c.getRed(), Math.min(c.getGreen(), c.getBlue()));
+                if (average >= 190 && max - min <= 45) {
+                    brightCenter++;
+                }
+            }
+        }
+        return brightCenter >= Math.max(6, (w * h) / 250_000);
     }
 
     private static boolean isTextLike(int rgb) {
