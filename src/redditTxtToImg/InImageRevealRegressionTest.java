@@ -6,11 +6,12 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import javax.imageio.ImageIO;
 
-/** Focused regression for narration-timed reveal of the rasterized Reddit text. */
+/** Focused regression for smooth narration-synced in-image text reveal. */
 public final class InImageRevealRegressionTest {
     private InImageRevealRegressionTest() {
     }
@@ -19,19 +20,18 @@ public final class InImageRevealRegressionTest {
         System.setProperty("java.awt.headless", "true");
         Path temp = Files.createTempDirectory("threadgens-in-image-reveal-");
         try {
+            String narration = "first line has enough visible pixels second line stays hidden initially";
             Path source = temp.resolve("reddit-source.png");
             createRedditLikeSource(source);
 
             List<CaptionTimeline.Scene> scenes = List.of(
-                    new CaptionTimeline.Scene("first line", 0.0, 0.5),
-                    new CaptionTimeline.Scene("second line", 0.5, 1.0),
-                    new CaptionTimeline.Scene("third line", 1.0, 1.5),
-                    new CaptionTimeline.Scene("fourth line", 1.5, 2.0)
+                    new CaptionTimeline.Scene("first line has enough visible pixels", 0.0, 1.0),
+                    new CaptionTimeline.Scene("second line stays hidden initially", 1.0, 2.0)
             );
 
             List<TimedVisualStateRenderer.RenderedState> states = TimedVisualStateRenderer.renderStates(
                     source,
-                    "first line second line third line fourth line",
+                    narration,
                     ContentFormat.THREAD_STORY,
                     1,
                     3,
@@ -39,37 +39,51 @@ public final class InImageRevealRegressionTest {
                     2.0,
                     temp.resolve("thread-states"),
                     "thread");
-            require(states.size() >= 4, "reveal should produce multiple narration-timed states");
+            require(states.size() == 1,
+                    "social frames should use one full frame plus a clean base, not block-step reveal states");
 
-            BufferedImage first = ImageIO.read(states.get(0).imagePath().toFile());
-            BufferedImage last = ImageIO.read(states.get(states.size() - 1).imagePath().toFile());
-            int firstBright = countBright(first, 140, 440, 990, 820);
-            int lastBright = countBright(last, 140, 440, 990, 820);
-            System.out.println("Reveal bright pixels: first=" + firstBright + ", last=" + lastBright);
-            require(lastBright > firstBright * 1.8,
-                    "later states must expose substantially more of the same rasterized Reddit text");
+            Path fullPath = states.get(0).imagePath();
+            require(TimedVisualStateRenderer.hasSmoothRevealAssets(fullPath),
+                    "smooth reveal must create its base frame and word layout sidecars");
+            TimedVisualStateRenderer.RevealLayout layout = TimedVisualStateRenderer.readLayout(fullPath);
+            require(layout.words().size() == narration.split("\\s+").length,
+                    "word-box detection should match the visible narration word count");
+
+            BufferedImage full = ImageIO.read(fullPath.toFile());
+            BufferedImage base = ImageIO.read(TimedVisualStateRenderer.basePath(fullPath).toFile());
+            int fullBright = countBright(full, 130, 430, 1010, 720);
+            int baseBright = countBright(base, 130, 430, 1010, 720);
+            System.out.println("Reveal preparation bright pixels: full=" + fullBright + ", base=" + baseBright);
+            require(fullBright > 1500, "fixture must contain substantial visible text");
+            require(baseBright < fullBright / 12,
+                    "clean base must physically remove essentially all narration glyph pixels");
+
+            // Every detected word rectangle should be clean in the hidden base.
+            for (TimedVisualStateRenderer.WordBox box : layout.words()) {
+                int leaked = countBright(base, box.left(), box.top(), box.right() + 1, box.bottom() + 1);
+                require(leaked <= 3,
+                        "hidden word rectangle leaked bright glyph pixels before reveal: " + box + " -> " + leaked);
+            }
+
+            List<NarrationTiming.Word> timing = new ArrayList<>();
+            String[] words = narration.split("\\s+");
+            for (int i = 0; i < words.length; i++) {
+                timing.add(new NarrationTiming.Word(words[i], i * 0.16, (i + 1) * 0.16));
+            }
+            String mask = DynamicVideoGenerator.buildSmoothRevealMask(layout, timing, 1080, 1920, 30);
+            require(mask.contains("N/30.0"), "smooth reveal mask must be evaluated every video frame");
+            require(mask.contains("clip(("), "active word should interpolate continuously across its duration");
+            require(mask.contains(String.valueOf(layout.words().get(0).left() - 1)),
+                    "zero-progress reveal edge must begin before the first glyph column to prevent leakage");
 
             TimedVisualStateRenderer.cleanup(states);
+            require(!Files.exists(fullPath), "cleanup should remove smooth full frame");
+            require(!Files.exists(TimedVisualStateRenderer.basePath(fullPath)),
+                    "cleanup should remove smooth base frame");
+            require(!Files.exists(TimedVisualStateRenderer.layoutPath(fullPath)),
+                    "cleanup should remove smooth reveal layout");
 
-            List<TimedVisualStateRenderer.RenderedState> bestAnswerStates = TimedVisualStateRenderer.renderStates(
-                    source,
-                    "first line second line third line fourth line",
-                    ContentFormat.BEST_ANSWERS,
-                    1,
-                    3,
-                    scenes,
-                    2.0,
-                    temp.resolve("best-states"),
-                    "best");
-            BufferedImage cleanBottom = ImageIO.read(
-                    bestAnswerStates.get(bestAnswerStates.size() - 1).imagePath().toFile());
-            int bottomBright = countBright(cleanBottom, 40, 1460, 1040, 1880);
-            System.out.println("Best-answers bottom bright pixels=" + bottomBright);
-            require(bottomBright < 3500,
-                    "best_answers lower duplicate narration area should be removed");
-            TimedVisualStateRenderer.cleanup(bestAnswerStates);
-
-            System.out.println("In-image narration reveal regression passed.");
+            System.out.println("Smooth in-image narration reveal regression passed.");
         } finally {
             deleteTree(temp);
         }
@@ -90,9 +104,7 @@ public final class InImageRevealRegressionTest {
         g.setColor(new Color(225, 225, 228));
         g.setFont(new Font("Arial", Font.PLAIN, 54));
         g.drawString("first line has enough visible pixels", 178, 500);
-        g.drawString("second line has enough visible pixels", 178, 564);
-        g.drawString("third line has enough visible pixels", 178, 628);
-        g.drawString("fourth line has enough visible pixels", 178, 692);
+        g.drawString("second line stays hidden initially", 178, 574);
         g.dispose();
         ImageIO.write(image, "png", path.toFile());
     }
