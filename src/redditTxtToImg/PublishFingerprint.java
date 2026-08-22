@@ -3,6 +3,7 @@ package redditTxtToImg;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
 
@@ -142,6 +144,7 @@ final class PublishFingerprint {
         String metadataHash = metadataSignature.isBlank()
                 ? ""
                 : sha256(metadataSignature.getBytes(StandardCharsets.UTF_8));
+        String resolvedVoice = resolveVoiceIdentity(input.voice(), input.ttsEngine());
 
         return new PublishFingerprint(
                 Instant.now().toString(),
@@ -152,7 +155,7 @@ final class PublishFingerprint {
                 combinedFileHash(artifacts),
                 visuals,
                 identities,
-                input.voice(),
+                resolvedVoice,
                 input.ttsEngine(),
                 durations,
                 totalArtifactDuration,
@@ -363,6 +366,29 @@ final class PublishFingerprint {
             sum += best;
         }
         return sum / a.size();
+    }
+
+    private static String resolveVoiceIdentity(String configuredVoice, String engine) {
+        String selected = configuredVoice == null ? "" : configuredVoice.trim();
+        Path voiceDirectory = Path.of("voices");
+        if (selected.isBlank() || "unknown".equalsIgnoreCase(selected)) {
+            Path defaults = Path.of("defaults.txt");
+            if (Files.isRegularFile(defaults)) {
+                Properties properties = new Properties();
+                try (InputStream input = Files.newInputStream(defaults)) {
+                    properties.load(input);
+                    voiceDirectory = Path.of(properties.getProperty("voiceDirectory", voiceDirectory.toString()));
+                    selected = properties.getProperty("voiceModel", selected).trim();
+                } catch (IOException ignored) {
+                    // If defaults become unreadable, preserve unknown rather than inventing a voice.
+                }
+            }
+        }
+        if (selected.isBlank()) return "unknown";
+        if ("piper".equalsIgnoreCase(engine)) {
+            return VoiceCatalog.resolveVoice(selected, voiceDirectory).normalize().toString();
+        }
+        return selected;
     }
 
     static String sha256(byte[] bytes) {
