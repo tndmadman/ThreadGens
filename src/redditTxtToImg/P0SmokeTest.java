@@ -19,6 +19,7 @@ public final class P0SmokeTest {
         Path temp = Files.createTempDirectory("threadgens-p0-smoke");
         try {
             testNovelty(temp);
+            testLargeHistoryParsing(temp);
             testStrictHistoryValidation(temp);
             testFormats(temp);
             testVideoTimelineCadence();
@@ -47,6 +48,17 @@ public final class P0SmokeTest {
                 "What is the most useful habit you learned at a bad job? One person explains inventory notes, another talks about sleep, and a third gives a budgeting rule.");
         require(distinct.noveltyScore() > duplicate.noveltyScore(),
                 "Distinct content should score above duplicate content.");
+    }
+
+    private static void testLargeHistoryParsing(Path temp) throws Exception {
+        Path historyPath = temp.resolve("large-history.jsonl");
+        NoveltyGuard guard = new NoveltyGuard(historyPath, 48, 50);
+        String largeScript = "historytoken ".repeat(5000).trim();
+        guard.record(largeScript, "large parser regression", ContentFormat.THREAD_STORY);
+
+        List<String> formats = guard.recentFormats(5);
+        require(formats.size() == 1 && "thread_story".equals(formats.get(0)),
+                "Large Base64 history rows must parse without regex stack overflow.");
     }
 
     private static void testStrictHistoryValidation(Path temp) throws Exception {
