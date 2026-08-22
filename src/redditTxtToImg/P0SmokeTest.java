@@ -3,8 +3,10 @@ package redditTxtToImg;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import javax.imageio.ImageIO;
 
@@ -17,7 +19,9 @@ public final class P0SmokeTest {
         Path temp = Files.createTempDirectory("threadgens-p0-smoke");
         try {
             testNovelty(temp);
+            testStrictHistoryValidation(temp);
             testFormats(temp);
+            testVideoTimelineCadence();
             testIntegrityAndVisuals(temp);
             testEntrypointArgumentIsolation(temp);
             testContentAwareFormatSelection(temp);
@@ -45,6 +49,27 @@ public final class P0SmokeTest {
                 "Distinct content should score above duplicate content.");
     }
 
+    private static void testStrictHistoryValidation(Path temp) throws Exception {
+        Path goodHistory = temp.resolve("strict-good.jsonl");
+        NoveltyGuard guard = new NoveltyGuard(goodHistory, 48, 50);
+        guard.record("A valid historical script with enough words to compare.",
+                "valid history", ContentFormat.CONFESSION);
+        List<String> scripts = SemanticNoveltyGuard.loadRecentScripts(goodHistory, 10);
+        require(scripts.size() == 1 && scripts.get(0).contains("valid historical script"),
+                "Strict semantic history loader must read NoveltyGuard records.");
+
+        Path badHistory = temp.resolve("strict-bad.jsonl");
+        Files.writeString(badHistory, "{\"created\":\"now\",\"broken\":true}\n");
+        boolean failedClosed = false;
+        try {
+            SemanticNoveltyGuard.loadRecentScripts(badHistory, 10);
+        } catch (IOException expected) {
+            failedClosed = true;
+        }
+        require(failedClosed,
+                "Malformed existing novelty history must fail closed instead of behaving like empty history.");
+    }
+
     private static void testFormats(Path temp) throws Exception {
         NoveltyGuard guard = new NoveltyGuard(temp.resolve("format_history.jsonl"));
         ContentFormat first = ContentFormat.resolve("auto", guard);
@@ -53,6 +78,32 @@ public final class P0SmokeTest {
         require(first != second, "Auto format selection should rotate away from the only recently used format.");
         require(ContentFormat.resolve("debate", guard) == ContentFormat.DEBATE,
                 "Explicit debate format should resolve.");
+    }
+
+    private static void testVideoTimelineCadence() {
+        String narration = String.join(" ",
+                "one two three four five six seven eight nine ten",
+                "eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty",
+                "twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty",
+                "thirtyone thirtytwo thirtythree thirtyfour thirtyfive thirtysix thirtyseven thirtyeight thirtynine forty",
+                "fortyone fortytwo fortythree fortyfour fortyfive fortysix fortyseven fortyeight fortynine fifty",
+                "fiftyone fiftytwo fiftythree fiftyfour fiftyfive fiftysix fiftyseven fiftyeight fiftynine sixty",
+                "sixtyone sixtytwo sixtythree sixtyfour sixtyfive sixtysix sixtyseven sixtyeight sixtynine seventy",
+                "seventyone seventytwo seventythree seventyfour seventyfive seventysix seventyseven seventyeight seventynine eighty");
+        double duration = 20.0;
+        List<VideoTimeline.State> states = VideoTimeline.fromNarration(narration, duration);
+        require(states.size() >= 8,
+                "Twenty seconds of narration should create enough visual states to avoid long holds.");
+        double weightSum = 0.0;
+        double longest = 0.0;
+        for (VideoTimeline.State state : states) {
+            require(!state.focusText().isBlank(), "Every timed state should have focus text.");
+            weightSum += state.weight();
+            longest = Math.max(longest, state.weight() * duration);
+        }
+        require(Math.abs(weightSum - 1.0) < 0.0001, "Timeline state weights must sum to one.");
+        require(longest <= 3.0,
+                "Normal timed visual states should not hold essentially unchanged for more than about three seconds.");
     }
 
     private static void testIntegrityAndVisuals(Path temp) throws Exception {
@@ -73,7 +124,7 @@ public final class P0SmokeTest {
         BufferedImage sanitized = ImageIO.read(source.toFile());
         Color badgePixel = new Color(sanitized.getRGB(188, 133));
         require(!(badgePixel.getBlue() > 200 && badgePixel.getGreen() > 120),
-                "Synthetic verification blue should be removed.");
+                "Legacy synthetic verification blue should be removed by the safety net.");
 
         for (ContentFormat format : ContentFormat.values()) {
             Path output = temp.resolve(format.id() + ".png");
@@ -97,7 +148,8 @@ public final class P0SmokeTest {
                         "data/comments.txt", "output", "--auto",
                         "--topic", "VISIBLE ORIGINAL",
                         "--llm-model", "llama3.1:8b",
-                        "--format", "auto"
+                        "--format", "auto",
+                        "--embedding-model", "nomic-embed-text"
                 },
                 generated,
                 ContentFormat.CONFESSION
@@ -111,6 +163,8 @@ public final class P0SmokeTest {
                 "Visible topic must stay unchanged for rendering.");
         require(joined.contains("--format|confession"),
                 "Resolved format must be explicit during rendering.");
+        require(joined.contains("--embedding-model|nomic-embed-text"),
+                "Semantic novelty options must preserve option/value pairing until P0 consumes them.");
 
         String[] manual = P0Entrypoint.protectManualScriptInput(
                 new String[]{
