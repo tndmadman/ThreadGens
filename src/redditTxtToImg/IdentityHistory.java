@@ -148,7 +148,9 @@ final class IdentityHistory {
             return new ArrayList<>();
         }
         List<Entry> result = new ArrayList<>();
-        for (String line : Files.readAllLines(historyFile, StandardCharsets.UTF_8)) {
+        List<String> lines = Files.readAllLines(historyFile, StandardCharsets.UTF_8);
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
             if (line.isBlank()) {
                 continue;
             }
@@ -157,12 +159,15 @@ final class IdentityHistory {
                 String image = JsonText.extractString(line, "image");
                 String run = JsonText.extractString(line, "run");
                 String timestamp = JsonText.extractString(line, "timestamp");
-                if (name != null || image != null) {
-                    result.add(new Entry(name == null ? "" : name, image == null ? "" : image,
-                            run == null ? "" : run, timestamp == null ? "" : timestamp));
+                if (name == null && image == null) {
+                    throw new IOException("history row has neither name nor image");
                 }
-            } catch (IOException ignored) {
-                // A damaged line must not prevent generation; valid later entries still count.
+                result.add(new Entry(name == null ? "" : name, image == null ? "" : image,
+                        run == null ? "" : run, timestamp == null ? "" : timestamp));
+            } catch (IOException | RuntimeException e) {
+                throw new IOException("Identity history is malformed at line " + (i + 1)
+                        + " in " + historyFile
+                        + ". P1 fails closed instead of forgetting recent identities.", e);
             }
         }
         if (result.size() > historyLimit) {
