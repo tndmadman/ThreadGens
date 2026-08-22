@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.util.List;
 import javax.imageio.ImageIO;
 
-/** Exercises P2 capture with real FFmpeg/ffprobe media and perceptual image/video hashing. */
+/** Exercises P2 capture with real FFmpeg/ffprobe media and P1 sidecar integration. */
 public final class P2ArtifactSmokeTest {
     private P2ArtifactSmokeTest() {
     }
@@ -40,9 +40,12 @@ public final class P2ArtifactSmokeTest {
             run(List.of("ffmpeg", "-y", "-loop", "1", "-i", image.toString(), "-i", audio.toString(),
                     "-t", "1.0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", video.toString()));
 
+            Path voiceSidecar = dir.resolve("0audit.voice.json");
+            Files.writeString(voiceSidecar,
+                    "{\"engine\":\"kokoro\",\"voice\":\"af_bella\",\"delivery\":\"calm\",\"speed\":0.92}");
             PublishFingerprint first = PublishFingerprint.capture(new PublishFingerprint.CaptureInput(
                     "reddit", "thread_story", "A unique P2 artifact smoke test story.",
-                    List.of(video), List.of(image), List.of(audio), "smoke_voice", "kokoro", "", "ffmpeg"));
+                    List.of(video), List.of(image), List.of(audio), "configured_but_not_rendered", "kokoro", "", "ffmpeg"));
             require(!first.artifactHash.isBlank(), "artifact hash must exist");
             require(first.visualHashes.size() >= 4,
                     "visual fingerprint must include source image plus sampled finished-video frames");
@@ -51,13 +54,18 @@ public final class P2ArtifactSmokeTest {
             require(!first.segmentDurations.isEmpty() && first.segmentDurations.get(0) > 0,
                     "ffprobe audio duration must exist");
             require(first.totalDuration > 0, "ffprobe final-video duration must exist");
+            require("kokoro:af_bella".equals(first.voice),
+                    "P2 must fingerprint the actual P1-rendered voice sidecar, not the launch-time voice argument");
 
+            Files.deleteIfExists(voiceSidecar);
             PublishFingerprint defaultVoice = PublishFingerprint.capture(new PublishFingerprint.CaptureInput(
                     "reddit", "thread_story", "Default voice identity probe.",
                     List.of(video), List.of(image), List.of(audio), "unknown", "piper", "", "ffmpeg"));
             require(!"unknown".equalsIgnoreCase(defaultVoice.voice),
-                    "P2 must resolve the renderer's configured default voice instead of recording unknown");
+                    "P2 must resolve the renderer's configured default voice when no P1 sidecar exists");
 
+            Files.writeString(voiceSidecar,
+                    "{\"engine\":\"kokoro\",\"voice\":\"af_bella\",\"delivery\":\"calm\",\"speed\":0.92}");
             Path historyPath = dir.resolve("publish_history.jsonl");
             PublishAuditHistory history = new PublishAuditHistory(historyPath, 20);
             history.record(first, "PASS", 10);
@@ -67,6 +75,7 @@ public final class P2ArtifactSmokeTest {
             PrePublishAuditor.Result result = new PrePublishAuditor(58, 78).assess(duplicate, history.load());
             require(result.status() == PrePublishAuditor.Status.BLOCK, "same finished artifact must block");
             require(result.scores().identity() > 0.99, "same rendered identity must compare as identical");
+            require(result.scores().audio() > 0.99, "same actual P1 voice signature must compare as identical");
             System.out.println("P2 artifact smoke test passed.");
         } finally {
             deleteTree(dir);
