@@ -38,7 +38,7 @@ jobs:
         run: test -f output/0xsmoke.png
 
       - name: Run P0 Reddit integrity smoke test
-        run: java -Djava.awt.headless=true -cp out redditTxtToImg.P0Runner data/comments.txt output --platform reddit --count 1 --prefix p0smoke --format debate --no-novelty
+        run: java -Djava.awt.headless=true -cp out redditTxtToImg.P0Entrypoint data/comments.txt output --platform reddit --count 1 --prefix p0smoke --format debate --no-novelty
 
       - name: Verify P0 smoke image
         shell: bash
@@ -62,4 +62,4 @@ jobs:
       - name: Fail when video is requested without TTS
         shell: bash
         run: |
-          ! java -cp out redditTxtToImg.P0Runner data/comments.txt output --count 1 --prefix badvideo --video
+          ! java -cp out redditTxtToImg.P0Entrypoint data/comments.txt output --count 1 --prefix badvideo --video
