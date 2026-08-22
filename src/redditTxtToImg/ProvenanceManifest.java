@@ -16,7 +16,7 @@ import java.util.Map;
 /** Writes machine-readable provenance and user-facing disclosure metadata. */
 final class ProvenanceManifest {
     static final String SCHEMA = "urn:threadgens:provenance:v1";
-    static final String GENERATOR_VERSION = "0.6.0-p1-content-variation";
+    static final String GENERATOR_VERSION = "0.7.0-p0-p1-p2-integrated";
 
     private ProvenanceManifest() {
     }
