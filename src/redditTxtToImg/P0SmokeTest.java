@@ -19,6 +19,7 @@ public final class P0SmokeTest {
             testNovelty(temp);
             testFormats(temp);
             testIntegrityAndVisuals(temp);
+            testEntrypointArgumentIsolation(temp);
             System.out.println("P0 smoke tests passed.");
         } finally {
             deleteRecursively(temp);
@@ -84,6 +85,37 @@ public final class P0SmokeTest {
             require(Files.exists(output) && Files.size(output) > 0,
                     "Dynamic visual renderer should create " + format.id());
         }
+    }
+
+    private static void testEntrypointArgumentIsolation(Path temp) {
+        Path generated = temp.resolve("generated.txt");
+        String[] transformed = P0Entrypoint.prepareGeneratedScriptArgs(
+                new String[]{
+                        "data/comments.txt", "output", "--auto",
+                        "--topic", "VISIBLE ORIGINAL",
+                        "--llm-model", "llama3.1:8b",
+                        "--format", "auto"
+                },
+                generated,
+                ContentFormat.CONFESSION
+        );
+        String joined = String.join("|", transformed);
+        require(!joined.contains("--auto"),
+                "Generated-script render must not invoke the legacy auto generator.");
+        require(joined.contains(generated.toString()),
+                "Generated script must replace the input comments file.");
+        require(joined.contains("VISIBLE ORIGINAL"),
+                "Visible topic must stay unchanged for rendering.");
+        require(joined.contains("--format|confession"),
+                "Resolved format must be explicit during rendering.");
+
+        String[] manual = P0Entrypoint.protectManualScriptInput(
+                new String[]{
+                        "data/comments.txt", "output", "--script-out",
+                        "output/script/generated_comments.txt"
+                });
+        require(!String.join("|", manual).contains("output/script/generated_comments.txt"),
+                "Manual runs must not read a stale generated script path.");
     }
 
     private static void require(boolean condition, String message) {
