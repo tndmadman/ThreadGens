@@ -2,30 +2,36 @@
 
 ThreadGens is a local Java pipeline for turning Reddit-style threads or X-style posts/replies into 9:16 short-form video assets.
 
-The production pipeline now includes the P0 content-originality work:
+The production path now has two quality layers:
 
-- local Ollama script generation,
-- deterministic and semantic cross-video novelty checks,
-- five meaningfully different content/video formats,
-- source-clean fictional social rendering with no fabricated engagement or verification,
-- local Kokoro or Piper TTS,
-- optional ComfyUI / RealVisXL OP images,
-- timed visual-state changes during narration,
-- format-specific motion and transitions,
-- H.264/AAC FFmpeg output,
-- persistent generation history.
+- **P0 generation/originality** — content-aware formats, deterministic + semantic script novelty, source-clean social rendering, timed visual states, and format-specific video motion/transitions.
+- **P2 pre-publish audit** — final finished-video repetition analysis across approved output history before a video is considered ready.
 
-The layouts are intended for vertical short-form output such as Shorts, Reels, and TikTok-style videos.
+The P2 gate does not add classifier-evasion noise or random metadata. It evaluates actual content and presentation repetition.
 
-## Example output
+## Production flow
 
-X output with OP image:
+```text
+Prompt / manual script
+        ↓
+P0 content + semantic novelty
+        ↓
+Reddit/X rendering
+        ↓
+TTS / optional OP image
+        ↓
+Timed dynamic video
+        ↓
+Final MP4
+        ↓
+P2 finished-output fingerprint
+        ↓
+PASS / WARN / BLOCK
+        ↓
+Approved publish history
+```
 
-<img src="docs/x-op-image-example.png" alt="ThreadGens X OP image example" width="360">
-
-Reddit output with OP image:
-
-<img src="docs/reddit-op-image-example.png" alt="ThreadGens Reddit OP image example" width="360">
+P0 generation history and P2 publish history are separate on purpose. A P2-rejected generation remains known to P0, but it is not added to the approved publish history.
 
 ## Windows one-click setup
 
@@ -35,14 +41,12 @@ Double-click:
 setup_windows.bat
 ```
 
-Setup checks/installs the required local stack and builds ThreadGens. In particular it pulls both Ollama models used by the production pipeline:
+Setup checks/installs Java 21, FFmpeg/FFprobe, Kokoro, Piper, Ollama, and the local models used by the production pipeline:
 
 ```text
 llama3.1:8b
 nomic-embed-text
 ```
-
-It also sets up Java 21, Kokoro, Piper and the default Piper voice.
 
 Then run:
 
@@ -50,23 +54,7 @@ Then run:
 run_ai_windows.bat
 ```
 
-The interactive runner asks for platform, prompt content, P0 format, TTS engine/voice, optional OP image generation, and whether to create the final video.
-
-For Reddit:
-
-```text
-post title
-post body
-```
-
-For X:
-
-```text
-optional hidden reply style
-visible original X post text
-```
-
-The normal and batch Windows runners keep Ollama loaded between generations by default.
+The interactive runner asks for platform, prompt content, format, TTS/voice, optional OP-image generation, and video creation. Because it routes through the production entrypoint, generated videos receive the P2 audit automatically.
 
 Default outputs:
 
@@ -78,47 +66,66 @@ output/cache/images/*.txt
 output/audio/*.wav
 output/video/*.mp4
 output/video/final.mp4
+output/video/publish_audit.json
 ```
 
-## Build manually
+Local histories:
+
+```text
+data/generation_history.jsonl
+data/publish_history.jsonl
+```
+
+Both history files are git-ignored.
+
+## Build
 
 ```bash
 javac -d out src/redditTxtToImg/*.java
 ```
 
-Or:
+or:
 
 ```bash
 gradle build
 ```
 
-## Production CLI entrypoint
+## Production entrypoints
 
-`CheckedRunner` is the recommended compatibility-friendly CLI entrypoint:
+`CheckedRunner` remains the compatibility-friendly CLI entrypoint:
 
 ```bash
 java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform reddit
 ```
 
-`CheckedRunner` now routes normal work through `P0Entrypoint`, so existing scripts automatically receive the P0 originality, integrity, format and dynamic-video behavior.
+Normal `CheckedRunner`, `Runner`, `OpImageVideoSafeRunner`, the GUI, Gradle application, runnable JAR, and Windows launchers route through `P2Entrypoint`. P2 invokes the full P0 pipeline internally before auditing completed video output.
 
-You can also invoke the production entrypoint directly:
+Direct final production entrypoint:
+
+```bash
+java -cp out redditTxtToImg.P2Entrypoint data/comments.txt output --platform reddit
+```
+
+`P0Entrypoint` remains available when you deliberately want P0 generation/rendering without the P2 final audit:
 
 ```bash
 java -cp out redditTxtToImg.P0Entrypoint data/comments.txt output --platform reddit
 ```
 
-`OpImageVideoSafeRunner` is retained as a backward-compatible alias for the same P0 production path:
+Explicit low-level renderer/debug path:
 
 ```bash
-java -cp out redditTxtToImg.OpImageVideoSafeRunner --platform x --auto \
-  --topic "I just saw something weird and I need someone else to explain it." \
-  --count 10 \
-  --tts kokoro \
-  --tts-command .venv-kokoro/Scripts/python.exe \
-  --voice af_heart \
-  --video --concat-video
+java -cp out redditTxtToImg.RawCheckedRunner data/comments.txt output --platform reddit
 ```
+
+Direct renderers also remain available for development:
+
+```bash
+java -cp out redditTxtToImg.RedditScreenshotGenerator data/comments.txt output
+java -cp out redditTxtToImg.XThreadGenerator data/comments.txt output
+```
+
+Raw rendering bypasses P0/P2 orchestration. Renderer-source integrity rules still prevent fabricated engagement or X verification.
 
 Supported platforms:
 
@@ -126,34 +133,17 @@ Supported platforms:
 - `x`
 - `twitter` as an alias for `x`
 
-### Explicit raw/debug path
-
-If you intentionally need the low-level checked renderer without P0 format/novelty/timed-video orchestration, use:
-
-```bash
-java -cp out redditTxtToImg.RawCheckedRunner data/comments.txt output --platform reddit
-```
-
-Direct renderer classes also remain available for development/debugging:
-
-```bash
-java -cp out redditTxtToImg.RedditScreenshotGenerator data/comments.txt output
-java -cp out redditTxtToImg.XThreadGenerator data/comments.txt output
-```
-
-Even raw renderer output no longer fabricates engagement counts or X verification because that integrity rule is enforced at the renderer source.
-
 ## GUI
 
 ```bash
 java -cp out redditTxtToImg.GuiApp
 ```
 
-The GUI calls `CheckedRunner`, which now means GUI generation also uses the P0 production path.
+The GUI calls `CheckedRunner`, so normal GUI video generation inherits P0 + P2 behavior.
 
 ## Local AI generation
 
-Make sure Ollama is running. Normal Windows setup already pulls the required models; for a manual setup:
+Make sure Ollama is running. Manual model setup:
 
 ```bash
 ollama pull llama3.1:8b
@@ -179,11 +169,17 @@ java -cp out redditTxtToImg.CheckedRunner --platform x --auto \
   --count 10
 ```
 
-For X, `--post-title` is a hidden reply-style instruction; `--topic` is the visible original post. If no X style is supplied, ThreadGens does not inherit the Reddit default title.
+For X, `--post-title` is a hidden reply-style instruction and `--topic` is the visible original post. If no X style is supplied, ThreadGens does not inherit the Reddit default title.
 
 ## P0 content formats
 
-Use `--format auto` for content-aware selection plus recent-format rotation. Explicit formats are:
+Recommended:
+
+```text
+--format auto
+```
+
+Explicit formats:
 
 ```text
 thread_story
@@ -193,39 +189,19 @@ best_answers
 escalating_conversation
 ```
 
-Example:
+The formats alter generation structure, layout, motion, timed visual focus, pacing, and final transitions rather than acting as cosmetic skins.
 
-```bash
-java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto \
-  --format debate \
-  --post-title "Am I wrong here?" \
-  --topic "My roommate and I disagree about the lease." \
-  --count 8
-```
+## P0 novelty
 
-The formats alter generation structure, layout, motion, timed visual focus, pacing and final transitions—not just colors.
-
-## P0 novelty system
-
-Accepted scripts are recorded in:
+Accepted generated scripts are recorded in:
 
 ```text
 data/generation_history.jsonl
 ```
 
-The file is git-ignored.
+P0 first runs deterministic checks for exact/near duplicate wording, hooks, and structure. It then uses local Ollama embeddings to catch substantially reworded versions of the same premise.
 
-Auto-generation first runs deterministic checks for exact/near duplicate wording, hooks and structural reuse. It then compares semantic embeddings against recent scripts to catch the same underlying story/joke/conflict after substantial paraphrasing.
-
-Default semantic model:
-
-```text
-nomic-embed-text
-```
-
-A malformed existing history file fails the auto-generation run instead of silently being treated as empty history.
-
-Useful controls:
+Useful P0 controls:
 
 - `--history-file PATH`
 - `--history-limit N`
@@ -234,31 +210,102 @@ Useful controls:
 - `--embedding-model MODEL`
 - `--semantic-threshold 0.86`
 - `--semantic-history-limit N`
-- `--no-novelty` for deliberate one-off/debug runs
-- `--no-semantic-novelty` to disable the embedding comparison while retaining deterministic novelty and strict history validation
+- `--no-novelty`
+- `--no-semantic-novelty`
+
+A malformed existing generation history fails closed when strict novelty validation is active.
+
+## P2 pre-publish audit
+
+P2 audits the finished video package against previously approved output in:
+
+```text
+data/publish_history.jsonl
+```
+
+The fingerprint includes:
+
+- exact script hash;
+- lexical content similarity;
+- Ollama semantic premise similarity;
+- final MP4/clip byte fingerprint;
+- perceptual hashes of rendered social frames;
+- selected content format;
+- known voice and TTS engine;
+- normalized real narration-segment durations from FFprobe;
+- recent same-format / same-voice streaks;
+- optional caption/identity/profile/provenance metadata signatures.
+
+P2 outputs one of:
+
+```text
+PASS
+WARN
+BLOCK
+```
+
+Default production behavior is `block` mode. A BLOCK writes the audit report but returns failure before a caller can promote the video as publish-ready.
+
+Default P2 settings:
+
+```properties
+publishAuditEnabled=true
+publishAuditMode=block
+publishHistoryFile=data/publish_history.jsonl
+publishHistoryLimit=100
+publishAuditWarnThreshold=58
+publishAuditBlockThreshold=78
+```
+
+P2 CLI controls:
+
+- `--publish-audit`
+- `--no-publish-audit`
+- `--publish-history PATH`
+- `--publish-history-limit N`
+- `--publish-audit-warn N`
+- `--publish-audit-threshold N`
+- `--publish-audit-mode block|warn`
+- `--audit-report PATH`
+- `--publish-metadata PATH`
+
+`--no-semantic-novelty` also disables the P2 embedding comparison for deliberate offline/debug runs.
+
+### P1 metadata integration hook
+
+P2 has no compile-time dependency on the separate P1 work. When P1 metadata becomes available, P2 can incorporate it through relevant caption/identity/profile/provenance/voice-style CLI values and these optional sidecars:
+
+```text
+production_manifest.json
+p1_manifest.json
+```
+
+Those files are checked in the output/image and video directories. Additional manifests can be supplied with `--publish-metadata PATH`.
+
+This keeps the P2 branch independently buildable while allowing richer P1 state to become part of the final repetition fingerprint after integration.
 
 ## Social-render integrity
 
 Generated fictional social frames do not invent platform engagement signals:
 
-- no generated Reddit upvote/view counts,
-- no generated X reply/repost/like/view counts,
-- no generated X verification badge,
+- no generated Reddit upvote/view counts;
+- no generated X reply/repost/like/view counts;
+- no generated X verification badge;
 - no fixed precise fake X timestamp.
 
-Relative chronology and neutral fictional-thread labels may still be shown to preserve a readable thread layout.
+Relative chronology and neutral fictional-thread labels may still be shown for readable thread layout.
 
 ## OP image generation
 
 OP image generation is optional.
 
-Use local ComfyUI:
+Local ComfyUI:
 
 ```bash
 --image-mode comfyui
 ```
 
-Or use an existing local image:
+Existing local image:
 
 ```bash
 --image-mode local --op-image path/to/image.png
@@ -276,21 +323,7 @@ Default checkpoint:
 RealVisXL_V5.0_fp32.safetensors
 ```
 
-Example:
-
-```bash
-java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto \
-  --post-title "Finish this story in the comments" \
-  --topic "weird everyday stories" \
-  --count 10 \
-  --image-mode comfyui \
-  --tts kokoro \
-  --tts-command .venv-kokoro/Scripts/python.exe \
-  --voice af_heart \
-  --video --concat-video
-```
-
-Important OP-image options:
+Important options:
 
 - `--image-mode none|local|comfyui`
 - `--op-image FILE`
@@ -326,16 +359,6 @@ java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto \
   --voice af_heart
 ```
 
-Piper example:
-
-```bash
-java -cp out redditTxtToImg.CheckedRunner --platform reddit --auto \
-  --topic "creepy small town stories" \
-  --count 10 \
-  --tts piper \
-  --voice voices/en_US-lessac-medium.onnx
-```
-
 TTS options:
 
 - `--voice NAME_OR_PATH`
@@ -359,7 +382,7 @@ java -cp out redditTxtToImg.CheckedRunner --platform x --auto \
   --video --concat-video
 ```
 
-P0 video generation does not simply loop one unchanged screenshot. Each narration segment is split into timed visual states based on its actual audio duration, targeting a visible focus/content change roughly every 2.5 seconds for normal narration. Each state still has continuous motion, then the final clips are stitched using a transition profile specific to the selected content format.
+Each narration segment is split into timed visual states based on actual audio duration, targeting a visible focus/content change roughly every 2.5 seconds for normal narration. Motion continues inside each state, and clips are stitched with format-specific transitions.
 
 Delivery remains conventional H.264/AAC/yuv420p with `+faststart`.
 
@@ -397,17 +420,13 @@ line 1 = hidden reply style
 line 2 = visible X post text
 ```
 
-Then run:
+Run:
 
 ```text
 batch_create_videos_windows.bat
 ```
 
-The batch PowerShell runner accepts:
-
-```text
--Format auto|thread_story|confession|debate|best_answers|escalating_conversation
-```
+The batch runner executes jobs sequentially through the P2 production path. A successful video is added to publish history before the next job, so later jobs are compared with earlier successful videos in the same batch.
 
 Final copies are collected under:
 
@@ -415,9 +434,11 @@ Final copies are collected under:
 output/batch_videos/<platform>_<timestamp>/final_videos/
 ```
 
+A P2 BLOCK returns failure before the batch script performs that final copy. The per-job render and audit report remain available for diagnosis.
+
 ## Profile pictures and usernames
 
-Run:
+Generate profile assets:
 
 ```text
 generate_profiles_windows.bat
@@ -439,35 +460,43 @@ Generated profiles go to `assets/pfp/`; generated usernames go to `data/author_n
 
 ## Validation
 
-The repository smoke workflow compiles Java 21 and runs:
+The repository smoke workflow validates:
 
-- deterministic P0 unit tests,
-- strict novelty-history tests,
-- visual-cadence tests,
-- real FFmpeg/ffprobe timed-video tests for all five formats,
-- production Reddit/X rendering tests,
-- raw compatibility tests,
-- OP-image overlay tests,
-- expected-failure tests,
-- Windows Java compilation and PowerShell parser validation.
+- Java 21 compilation on Ubuntu and Windows;
+- deterministic P0 novelty and strict history behavior;
+- real P0 FFmpeg/ffprobe timed-video generation for all five formats;
+- deterministic P2 scoring and strict publish-history behavior;
+- semantic P2 hard-block behavior;
+- real P2 FFmpeg/ffprobe artifact capture;
+- perceptual rendered-image hashing;
+- exact artifact/script blocking;
+- audit report creation;
+- production Reddit/X rendering;
+- raw compatibility behavior;
+- OP-image integration;
+- stale-output and invalid video failure paths;
+- Windows PowerShell parser validation.
 
-See `P0_IMPLEMENTATION.md` for the detailed architecture and acceptance behavior.
+Detailed architecture:
+
+- `P0_IMPLEMENTATION.md`
+- `P2_IMPLEMENTATION.md`
 
 ## Important files
 
-- `src/redditTxtToImg/P0Entrypoint.java` — production orchestration entrypoint.
-- `src/redditTxtToImg/P0Runner.java` — render/video/history orchestration.
+- `src/redditTxtToImg/P2Entrypoint.java` — final production orchestration and publish gate.
+- `src/redditTxtToImg/PublishFingerprint.java` — finished-output fingerprint capture.
+- `src/redditTxtToImg/PublishAuditHistory.java` — strict approved publish history.
+- `src/redditTxtToImg/PrePublishAuditor.java` — PASS/WARN/BLOCK risk scoring.
+- `src/redditTxtToImg/P0Entrypoint.java` — P0 generation/originality orchestration.
+- `src/redditTxtToImg/P0Runner.java` — P0 render/video/history orchestration.
 - `src/redditTxtToImg/CheckedRunner.java` — compatibility-friendly production CLI.
-- `src/redditTxtToImg/RawCheckedRunner.java` — explicit raw/debug compatibility path.
-- `src/redditTxtToImg/FormatAwareTextGenerator.java` — hidden format-aware generation.
-- `src/redditTxtToImg/NoveltyGuard.java` — deterministic novelty.
-- `src/redditTxtToImg/SemanticNoveltyGuard.java` — Ollama embedding novelty.
+- `src/redditTxtToImg/RawCheckedRunner.java` — explicit raw/debug renderer path.
+- `src/redditTxtToImg/NoveltyGuard.java` — deterministic generation novelty.
+- `src/redditTxtToImg/SemanticNoveltyGuard.java` — local Ollama embedding novelty.
 - `src/redditTxtToImg/VideoTimeline.java` — duration-based visual timing.
 - `src/redditTxtToImg/TimedVisualStateRenderer.java` — per-segment visual states.
-- `src/redditTxtToImg/DynamicVisualRenderer.java` — format-specific compositions.
-- `src/redditTxtToImg/DynamicVideoGenerator.java` — FFmpeg timed-state rendering and format transitions.
-- `src/redditTxtToImg/RedditScreenshotGenerator.java` — source-clean Reddit frame renderer.
-- `src/redditTxtToImg/XThreadGenerator.java` — source-clean X frame renderer.
+- `src/redditTxtToImg/DynamicVideoGenerator.java` — FFmpeg timed-state rendering/transitions.
 - `defaults.txt` — production defaults.
 - `tools/run_ai_windows.ps1` — interactive Windows pipeline.
 - `tools/batch_create_videos.ps1` — Windows batch pipeline.
@@ -476,15 +505,16 @@ See `P0_IMPLEMENTATION.md` for the detailed architecture and acceptance behavior
 
 ```bash
 gradle jar
-java -jar build/libs/ThreadGens-0.5.0-p0-originality.jar data/comments.txt output
+java -jar build/libs/ThreadGens-0.6.0-p2-publish-audit.jar data/comments.txt output
 ```
 
-Auto-generation example:
+Video example:
 
 ```bash
-java -jar build/libs/ThreadGens-0.5.0-p0-originality.jar --platform x --auto \
+java -jar build/libs/ThreadGens-0.6.0-p2-publish-audit.jar --platform x --auto \
   --post-title "Wrong answers only" \
   --topic "Why is there a shopping cart in my living room?" \
   --count 10 \
-  --tts kokoro --voice af_heart
+  --tts kokoro --voice af_heart \
+  --video --concat-video
 ```
