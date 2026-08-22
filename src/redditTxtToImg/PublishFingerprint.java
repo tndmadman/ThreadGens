@@ -17,7 +17,7 @@ import javax.imageio.ImageIO;
 
 /** Canonical viewer-facing fingerprint used by the P2 pre-publish audit. */
 final class PublishFingerprint {
-    static final int SCHEMA_VERSION = 1;
+    static final int SCHEMA_VERSION = 2;
     private static final double[] VIDEO_SAMPLE_POSITIONS = {0.18, 0.50, 0.82};
 
     record CaptureInput(
@@ -41,6 +41,7 @@ final class PublishFingerprint {
     final String scriptHash;
     final String artifactHash;
     final List<Long> visualHashes;
+    final List<Long> identityHashes;
     final String voice;
     final String ttsEngine;
     final List<Double> segmentDurations;
@@ -55,6 +56,7 @@ final class PublishFingerprint {
             String scriptHash,
             String artifactHash,
             List<Long> visualHashes,
+            List<Long> identityHashes,
             String voice,
             String ttsEngine,
             List<Double> segmentDurations,
@@ -68,11 +70,31 @@ final class PublishFingerprint {
         this.scriptHash = clean(scriptHash, sha256(this.script.getBytes(StandardCharsets.UTF_8)));
         this.artifactHash = clean(artifactHash, "");
         this.visualHashes = visualHashes == null ? List.of() : List.copyOf(visualHashes);
+        this.identityHashes = identityHashes == null ? List.of() : List.copyOf(identityHashes);
         this.voice = clean(voice, "unknown");
         this.ttsEngine = clean(ttsEngine, "unknown");
         this.segmentDurations = segmentDurations == null ? List.of() : List.copyOf(segmentDurations);
         this.totalDuration = Math.max(0.0, totalDuration);
         this.metadataHash = clean(metadataHash, "");
+    }
+
+    /** Backward-compatible constructor for schema-1 records/tests. */
+    PublishFingerprint(
+            String created,
+            String platform,
+            String format,
+            String script,
+            String scriptHash,
+            String artifactHash,
+            List<Long> visualHashes,
+            String voice,
+            String ttsEngine,
+            List<Double> segmentDurations,
+            double totalDuration,
+            String metadataHash
+    ) {
+        this(created, platform, format, script, scriptHash, artifactHash, visualHashes, List.of(),
+                voice, ttsEngine, segmentDurations, totalDuration, metadataHash);
     }
 
     static PublishFingerprint capture(CaptureInput input) throws IOException, InterruptedException {
@@ -87,8 +109,10 @@ final class PublishFingerprint {
 
         DynamicVideoGenerator media = new DynamicVideoGenerator(input.videoCommand(), 90, 30);
         List<Long> visuals = new ArrayList<>();
+        List<Long> identities = new ArrayList<>();
         for (Path image : existing(input.imagePaths())) {
             visuals.add(dHash(image));
+            identities.addAll(identityHashes(image, input.platform()));
         }
 
         // Sample the actual completed video, not just the pre-video screenshots.
@@ -127,6 +151,7 @@ final class PublishFingerprint {
                 sha256(script.getBytes(StandardCharsets.UTF_8)),
                 combinedFileHash(artifacts),
                 visuals,
+                identities,
                 input.voice(),
                 input.ttsEngine(),
                 durations,
@@ -144,20 +169,33 @@ final class PublishFingerprint {
             List<Double> durations,
             String metadataHash
     ) {
+        return forTest(script, artifactHash, visualHash, Long.MIN_VALUE, format, voice, durations, metadataHash);
+    }
+
+    static PublishFingerprint forTest(
+            String script,
+            String artifactHash,
+            long visualHash,
+            long identityHash,
+            String format,
+            String voice,
+            List<Double> durations,
+            String metadataHash
+    ) {
         double total = durations == null ? 0.0 : durations.stream().mapToDouble(Double::doubleValue).sum();
+        List<Long> identities = identityHash == Long.MIN_VALUE ? List.of() : List.of(identityHash);
         return new PublishFingerprint(
                 Instant.now().toString(), "reddit", format, script,
                 sha256((script == null ? "" : script).getBytes(StandardCharsets.UTF_8)),
-                artifactHash, List.of(visualHash), voice, "kokoro", durations, total, metadataHash);
+                artifactHash, List.of(visualHash), identities, voice, "kokoro", durations, total, metadataHash);
     }
 
     String visualHashCsv() {
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < visualHashes.size(); i++) {
-            if (i > 0) out.append(',');
-            out.append(Long.toUnsignedString(visualHashes.get(i), 16));
-        }
-        return out.toString();
+        return hashCsv(visualHashes);
+    }
+
+    String identityHashCsv() {
+        return hashCsv(identityHashes);
     }
 
     String pacingCsv() {
@@ -165,6 +203,15 @@ final class PublishFingerprint {
         for (int i = 0; i < segmentDurations.size(); i++) {
             if (i > 0) out.append(',');
             out.append(String.format(Locale.US, "%.3f", segmentDurations.get(i)));
+        }
+        return out.toString();
+    }
+
+    private static String hashCsv(List<Long> hashes) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < hashes.size(); i++) {
+            if (i > 0) out.append(',');
+            out.append(Long.toUnsignedString(hashes.get(i), 16));
         }
         return out.toString();
     }
@@ -235,11 +282,49 @@ final class PublishFingerprint {
         return List.copyOf(hashes);
     }
 
+    static List<Long> identityHashes(Path imagePath, String platform) throws IOException {
+        BufferedImage source = ImageIO.read(imagePath.toFile());
+        if (source == null) {
+            throw new IOException("Could not decode image for identity fingerprint: " + imagePath);
+        }
+        boolean x = "x".equalsIgnoreCase(platform) || "twitter".equalsIgnoreCase(platform);
+        double yTop = x ? 0.105 : 0.145;
+        double yBottom = x ? 0.225 : 0.245;
+        BufferedImage avatar = cropNormalized(source, 0.07, yTop, 0.27, yBottom);
+        BufferedImage header = cropNormalized(source, 0.07, yTop, 0.72, yBottom);
+        return List.of(dHash(avatar), dHash(header));
+    }
+
+    private static BufferedImage cropNormalized(
+            BufferedImage source, double left, double top, double right, double bottom) throws IOException {
+        int width = source.getWidth();
+        int height = source.getHeight();
+        if (width < 9 || height < 8) {
+            throw new IOException("Image is too small for P2 identity fingerprinting.");
+        }
+        int x0 = clamp((int) Math.round(width * left), 0, width - 1);
+        int y0 = clamp((int) Math.round(height * top), 0, height - 1);
+        int x1 = clamp((int) Math.round(width * right), x0 + 1, width);
+        int y1 = clamp((int) Math.round(height * bottom), y0 + 1, height);
+        BufferedImage crop = new BufferedImage(x1 - x0, y1 - y0, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = crop.createGraphics();
+        try {
+            g.drawImage(source, 0, 0, crop.getWidth(), crop.getHeight(), x0, y0, x1, y1, null);
+        } finally {
+            g.dispose();
+        }
+        return crop;
+    }
+
     static long dHash(Path imagePath) throws IOException {
         BufferedImage source = ImageIO.read(imagePath.toFile());
         if (source == null) {
             throw new IOException("Could not decode image for perceptual hash: " + imagePath);
         }
+        return dHash(source);
+    }
+
+    private static long dHash(BufferedImage source) {
         BufferedImage scaled = new BufferedImage(9, 8, BufferedImage.TYPE_BYTE_GRAY);
         Graphics2D graphics = scaled.createGraphics();
         try {
@@ -262,6 +347,12 @@ final class PublishFingerprint {
 
     static double visualSimilarity(List<Long> a, List<Long> b) {
         if (a == null || b == null || a.isEmpty() || b.isEmpty()) return 0.0;
+        double symmetric = (directionalSimilarity(a, b) + directionalSimilarity(b, a)) / 2.0;
+        double countPenalty = (double) Math.min(a.size(), b.size()) / Math.max(a.size(), b.size());
+        return symmetric * countPenalty;
+    }
+
+    private static double directionalSimilarity(List<Long> a, List<Long> b) {
         double sum = 0.0;
         for (long left : a) {
             double best = 0.0;
@@ -271,9 +362,7 @@ final class PublishFingerprint {
             }
             sum += best;
         }
-        double directional = sum / a.size();
-        double countPenalty = (double) Math.min(a.size(), b.size()) / Math.max(a.size(), b.size());
-        return directional * countPenalty;
+        return sum / a.size();
     }
 
     static String sha256(byte[] bytes) {
@@ -292,6 +381,10 @@ final class PublishFingerprint {
 
     private static String clean(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private static void deleteTree(Path root) {
