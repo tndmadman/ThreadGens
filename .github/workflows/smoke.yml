@@ -37,6 +37,63 @@ jobs:
       - name: Run P2 real-media fingerprint smoke test
         run: java -Djava.awt.headless=true -cp out redditTxtToImg.P2ArtifactSmokeTest
 
+      - name: Run P2 production entrypoint end-to-end gate
+        shell: bash
+        run: |
+          cat > fake_piper.py <<'PY'
+          #!/usr/bin/env python3
+          import argparse, math, struct, sys, wave
+          parser = argparse.ArgumentParser()
+          parser.add_argument('--model')
+          parser.add_argument('--output_file', required=True)
+          args = parser.parse_args()
+          _ = sys.stdin.read()
+          rate = 16000
+          duration = 0.8
+          frames = int(rate * duration)
+          with wave.open(args.output_file, 'wb') as wav:
+              wav.setnchannels(1)
+              wav.setsampwidth(2)
+              wav.setframerate(rate)
+              for i in range(frames):
+                  sample = int(3500 * math.sin(2 * math.pi * 440 * i / rate))
+                  wav.writeframesraw(struct.pack('<h', sample))
+          PY
+          chmod +x fake_piper.py
+          touch fake_voice.onnx fake_voice.onnx.json
+          printf '%s\n' 'A unique end to end P2 production gate story about a broken greenhouse sensor.' > p2_e2e_comments.txt
+          rm -rf output/p2_e2e
+          rm -f data/p2_e2e_publish.jsonl
+          mkdir -p output/p2_e2e/images output/p2_e2e/audio output/p2_e2e/video
+
+          java -Djava.awt.headless=true -cp out redditTxtToImg.P2Entrypoint \
+            p2_e2e_comments.txt output/p2_e2e/images \
+            --platform reddit --count 1 --prefix e2e \
+            --tts piper --tts-command ./fake_piper.py --voice ./fake_voice.onnx \
+            --audio-dir output/p2_e2e/audio \
+            --video --concat-video --video-dir output/p2_e2e/video --final-video final.mp4 \
+            --publish-history data/p2_e2e_publish.jsonl \
+            --audit-report output/p2_e2e/video/publish_audit.json \
+            --no-novelty --no-semantic-novelty
+
+          test -f output/p2_e2e/video/final.mp4
+          test -f output/p2_e2e/video/publish_audit.json
+          grep -q '"status": "PASS"' output/p2_e2e/video/publish_audit.json
+          test "$(grep -cve '^$' data/p2_e2e_publish.jsonl)" -eq 1
+
+          ! java -Djava.awt.headless=true -cp out redditTxtToImg.P2Entrypoint \
+            p2_e2e_comments.txt output/p2_e2e/images \
+            --platform reddit --count 1 --prefix e2e \
+            --tts piper --tts-command ./fake_piper.py --voice ./fake_voice.onnx \
+            --audio-dir output/p2_e2e/audio \
+            --video --concat-video --video-dir output/p2_e2e/video --final-video final.mp4 \
+            --publish-history data/p2_e2e_publish.jsonl \
+            --audit-report output/p2_e2e/video/publish_audit.json \
+            --no-novelty --no-semantic-novelty
+
+          grep -q '"status": "BLOCK"' output/p2_e2e/video/publish_audit.json
+          test "$(grep -cve '^$' data/p2_e2e_publish.jsonl)" -eq 1
+
       - name: Run production Reddit image generation smoke test
         run: java -cp out redditTxtToImg.CheckedRunner data/comments.txt output --platform reddit --count 1 --prefix smoke --no-novelty
 
