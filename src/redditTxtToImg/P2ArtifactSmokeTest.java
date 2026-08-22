@@ -52,6 +52,12 @@ public final class P2ArtifactSmokeTest {
                     "ffprobe audio duration must exist");
             require(first.totalDuration > 0, "ffprobe final-video duration must exist");
 
+            PublishFingerprint defaultVoice = PublishFingerprint.capture(new PublishFingerprint.CaptureInput(
+                    "reddit", "thread_story", "Default voice identity probe.",
+                    List.of(video), List.of(image), List.of(audio), "unknown", "piper", "", "ffmpeg"));
+            require(!"unknown".equalsIgnoreCase(defaultVoice.voice),
+                    "P2 must resolve the renderer's configured default voice instead of recording unknown");
+
             Path historyPath = dir.resolve("publish_history.jsonl");
             PublishAuditHistory history = new PublishAuditHistory(historyPath, 20);
             history.record(first, "PASS", 10);
