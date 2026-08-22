@@ -48,8 +48,13 @@ final class PrePublishAuditor {
     }
 
     Result assess(PublishFingerprint candidate, List<PublishAuditHistory.Entry> history) {
+        return assess(candidate, history, 0.0);
+    }
+
+    Result assess(PublishFingerprint candidate, List<PublishAuditHistory.Entry> history, double semanticSimilarity) {
         if (candidate == null) throw new IllegalArgumentException("candidate fingerprint is null");
         List<PublishAuditHistory.Entry> safeHistory = history == null ? List.of() : history;
+        double semantic = Math.max(0.0, Math.min(1.0, semanticSimilarity));
         if (safeHistory.isEmpty()) {
             return new Result(Status.PASS, 0,
                     new Scores(0, 0, 0, 0, 0, 0, 0), null,
@@ -88,6 +93,11 @@ final class PrePublishAuditor {
             closestScores = new Scores(0, 0, 0, 0, 0, 0, 0);
         }
 
+        if (semantic > closestScores.content) {
+            closestScores = withContentScore(closestScores, semantic);
+        }
+        if (semantic >= 0.90) hardContentDuplicate = true;
+
         int streakPenalty = streakPenalty(candidate, safeHistory);
         int risk = clamp((int) Math.round(closestScores.overall * 100.0) + streakPenalty, 0, 100);
         boolean hardBlock = exactArtifact || exactScript || hardContentDuplicate || hardPresentationDuplicate;
@@ -98,7 +108,13 @@ final class PrePublishAuditor {
         List<String> findings = new ArrayList<>();
         if (exactArtifact) findings.add("Exact final-artifact duplicate of an approved video.");
         if (exactScript) findings.add("Exact script duplicate of an approved video.");
-        if (hardContentDuplicate && !exactScript) {
+        if (semantic >= 0.90) {
+            findings.add(String.format(Locale.US,
+                    "Semantic premise similarity %.0f%% crossed the hard duplicate threshold.", semantic * 100.0));
+        } else if (semantic >= 0.80) {
+            findings.add(String.format(Locale.US, "Semantic premise similarity is %.0f%%.", semantic * 100.0));
+        }
+        if (hardContentDuplicate && !exactScript && semantic < 0.90) {
             findings.add(String.format(Locale.US,
                     "Content similarity %.0f%% crossed the hard duplicate threshold.",
                     closestScores.content * 100.0));
@@ -153,6 +169,16 @@ final class PrePublishAuditor {
                 + "  \"findings\": " + findings + "\n"
                 + "}\n";
         Files.writeString(path, json, StandardCharsets.UTF_8);
+    }
+
+    private static Scores withContentScore(Scores scores, double content) {
+        double overall = content * 0.34
+                + scores.visual * 0.18
+                + scores.audio * 0.10
+                + scores.format * 0.10
+                + scores.pacing * 0.18
+                + scores.metadata * 0.10;
+        return new Scores(content, scores.visual, scores.audio, scores.format, scores.pacing, scores.metadata, overall);
     }
 
     private static Scores compare(PublishFingerprint a, PublishFingerprint b) {
