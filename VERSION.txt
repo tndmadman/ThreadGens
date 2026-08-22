@@ -1,27 +1,29 @@
-ThreadGens 0.4.2-op-image-generation
+ThreadGens 0.5.0-p0-originality
 
-Branch: fix/runtime-cleanup-image-ready
+Branch: p0-content-originality
 
-Included in this version:
-- starts OP-only image generation for Reddit and X
-- keeps image generation disabled by default with imageMode=none
-- adds --image-mode comfyui for local ComfyUI generation
-- adds --image-mode local --op-image path for testing an existing image overlay
-- uses Ollama to expand the OP body into a detailed SDXL/RealVisXL prompt
-- generates images through local ComfyUI with RealVisXL_V5.0_fp32.safetensors defaults
-- saves generated OP images under output/images/
-- saves generated image prompts under output/cache/images/
-- overlays the generated image only onto the OP screenshot, never replies
-- adds a Windows runner prompt for OP image generation
+P0 content-originality release:
+- production entrypoints route through P0Entrypoint
+- CheckedRunner and the GUI inherit P0 behavior
+- RawCheckedRunner is the explicit low-level compatibility/debug path
+- five content-aware formats: thread_story, confession, debate, best_answers, escalating_conversation
+- persistent deterministic novelty history with regeneration on rejected auto content
+- local Ollama semantic novelty with nomic-embed-text for reworded story/joke/conflict detection
+- malformed existing novelty history fails closed during automatic generation
+- generated Reddit/X renderers omit fabricated engagement at source
+- generated X output omits verification badges and precise fake timestamps
+- narration is split into timed visual states targeting roughly 2.5-second content/focus changes
+- each format has its own layout, motion behavior and final transition profile
+- final delivery remains conventional H.264/AAC/yuv420p/+faststart
+- stale segment/final MP4 files are removed before regeneration
+- Windows setup pulls both llama3.1:8b and nomic-embed-text
+- CI includes Java 21 compilation, P0 unit tests, real FFmpeg/ffprobe video tests for all five formats, and Windows PowerShell parser validation
 
-Still included from 0.4.1:
-- fixes process timeout handling for Piper and FFmpeg helpers
-- uses the checked runner as the safe CLI/script entrypoint
-- aligns Gradle, runner, and version labels on one release name
-- keeps X post dates dynamic instead of hard-coded
-- shares CLI value-option handling
-- moves generated/imported profile image runtime assets under output/cache/pfp
-- documents setup downloads as best-effort third-party downloads
+Still included:
+- optional OP-only image generation through local ComfyUI / RealVisXL
+- local Kokoro and Piper TTS
+- generated/imported profile images and usernames
+- batch video creation and interactive Windows generation
 
 Default output folders:
 - generated script: output/script/generated_comments.txt
@@ -31,3 +33,4 @@ Default output folders:
 - OP images: output/images/
 - audio: output/audio/
 - video clips and final video: output/video/
+- novelty history: data/generation_history.jsonl (git-ignored)
