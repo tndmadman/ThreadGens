@@ -9,18 +9,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /** Persistent history of videos that passed or were explicitly warned through P2. */
 final class PublishAuditHistory {
-    private static final Pattern FIELD =
-            Pattern.compile("\"([a-zA-Z0-9_]+)\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
     private static final ConcurrentHashMap<Path, ReentrantLock> PROCESS_LOCKS = new ConcurrentHashMap<>();
 
     record Entry(PublishFingerprint fingerprint, String status, int risk) {
@@ -98,7 +92,7 @@ final class PublishAuditHistory {
             if (line.isBlank()) continue;
             try {
                 entries.add(parse(line));
-            } catch (RuntimeException e) {
+            } catch (IOException | RuntimeException e) {
                 throw new IOException("Publish audit history is malformed at line " + (i + 1)
                         + " in " + file + ". P2 fails closed instead of treating corrupt history as empty.", e);
             }
@@ -147,31 +141,34 @@ final class PublishAuditHistory {
                 + "}";
     }
 
-    private static Entry parse(String line) {
-        Map<String, String> values = new HashMap<>();
-        Matcher matcher = FIELD.matcher(line);
-        while (matcher.find()) values.put(matcher.group(1), unescape(matcher.group(2)));
-        require(values, "schema", "created", "platform", "format", "script_b64", "script_hash",
-                "artifact_hash", "visuals", "voice_b64", "tts", "pacing", "total_duration",
-                "metadata_hash", "status", "risk");
-        int schema = Integer.parseInt(values.get("schema"));
+    private static Entry parse(String line) throws IOException {
+        int schema = Integer.parseInt(required(line, "schema"));
         if (schema < 1 || schema > PublishFingerprint.SCHEMA_VERSION) {
             throw new IllegalArgumentException("unsupported schema " + schema);
         }
-        if (schema >= 2 && !values.containsKey("identities")) {
+
+        String identitiesValue = JsonText.extractString(line, "identities");
+        if (schema >= 2 && identitiesValue == null) {
             throw new IllegalArgumentException("missing field: identities");
         }
-        String script = dec(values.get("script_b64"));
-        String voice = dec(values.get("voice_b64"));
-        List<Long> visuals = parseHashes(values.get("visuals"));
-        List<Long> identities = schema >= 2 ? parseHashes(values.get("identities")) : List.of();
-        List<Double> pacing = parseDoubles(values.get("pacing"));
+
+        String script = dec(required(line, "script_b64"));
+        String voice = dec(required(line, "voice_b64"));
+        List<Long> visuals = parseHashes(required(line, "visuals"));
+        List<Long> identities = schema >= 2 ? parseHashes(identitiesValue) : List.of();
+        List<Double> pacing = parseDoubles(required(line, "pacing"));
         PublishFingerprint fp = new PublishFingerprint(
-                values.get("created"), values.get("platform"), values.get("format"), script,
-                values.get("script_hash"), values.get("artifact_hash"), visuals, identities, voice,
-                values.get("tts"), pacing, Double.parseDouble(values.get("total_duration")),
-                values.get("metadata_hash"));
-        return new Entry(fp, values.get("status"), Integer.parseInt(values.get("risk")));
+                required(line, "created"), required(line, "platform"), required(line, "format"), script,
+                required(line, "script_hash"), required(line, "artifact_hash"), visuals, identities, voice,
+                required(line, "tts"), pacing, Double.parseDouble(required(line, "total_duration")),
+                required(line, "metadata_hash"));
+        return new Entry(fp, required(line, "status"), Integer.parseInt(required(line, "risk")));
+    }
+
+    private static String required(String line, String key) throws IOException {
+        String value = JsonText.extractString(line, key);
+        if (value == null) throw new IllegalArgumentException("missing field: " + key);
+        return value;
     }
 
     private static List<Long> parseHashes(String csv) {
@@ -188,35 +185,12 @@ final class PublishAuditHistory {
         return List.copyOf(values);
     }
 
-    private static void require(Map<String, String> values, String... keys) {
-        for (String key : keys) {
-            if (!values.containsKey(key)) throw new IllegalArgumentException("missing field: " + key);
-        }
-    }
-
     private static String q(String key, String value) {
         return "\"" + key + "\":\"" + escape(value == null ? "" : value) + "\"";
     }
 
     private static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-
-    private static String unescape(String value) {
-        StringBuilder out = new StringBuilder();
-        boolean escaped = false;
-        for (char c : value.toCharArray()) {
-            if (escaped) {
-                out.append(c);
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else {
-                out.append(c);
-            }
-        }
-        if (escaped) out.append('\\');
-        return out.toString();
     }
 
     private static String enc(String value) {
