@@ -1,6 +1,8 @@
 package redditTxtToImg;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,6 +17,7 @@ public final class IntegratedPipelineSmokeTest {
         testCorruptIdentityHistoryFailsClosed();
         testP2OptionsDoNotLeakIntoP1();
         testStableP1ProvenanceSignature();
+        testRenderedVoiceSidecarsDriveP2Fingerprint();
         System.out.println("Integrated pipeline smoke tests passed.");
     }
 
@@ -85,6 +88,39 @@ public final class IntegratedPipelineSmokeTest {
                     new String[]{"--captions", "sentence", "--tts-delivery", "calm"});
             require(!first.equals(changedCaption),
                     "meaningful P1 caption configuration changes must change the P2 metadata signature");
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
+    private static void testRenderedVoiceSidecarsDriveP2Fingerprint() throws Exception {
+        Path dir = Files.createTempDirectory("threadgens-integrated-voices-");
+        try {
+            Path firstAudio = dir.resolve("0voice.wav");
+            Path secondAudio = dir.resolve("1voice.wav");
+            Files.write(firstAudio, new byte[]{0});
+            Files.write(secondAudio, new byte[]{0});
+            Files.writeString(dir.resolve("0voice.voice.json"),
+                    "{\"engine\":\"kokoro\",\"voice\":\"am_adam\"}\n", StandardCharsets.UTF_8);
+            Files.writeString(dir.resolve("1voice.voice.json"),
+                    "{\"engine\":\"kokoro\",\"voice\":\"af_bella\"}\n", StandardCharsets.UTF_8);
+
+            Method resolver = PublishFingerprint.class.getDeclaredMethod(
+                    "resolveVoiceIdentity", String.class, String.class, List.class);
+            resolver.setAccessible(true);
+            String signature = (String) resolver.invoke(
+                    null, "configured-but-not-rendered", "kokoro", List.of(firstAudio, secondAudio));
+            require("kokoro:af_bella|kokoro:am_adam".equals(signature),
+                    "P2 must fingerprint the actual rendered P1 voice set, not the requested CLI voice");
+
+            Files.delete(dir.resolve("1voice.voice.json"));
+            boolean failedClosed = false;
+            try {
+                resolver.invoke(null, "configured-but-not-rendered", "kokoro", List.of(firstAudio, secondAudio));
+            } catch (InvocationTargetException expected) {
+                failedClosed = expected.getCause() instanceof IOException;
+            }
+            require(failedClosed, "incomplete P1 voice metadata must fail the P2 fingerprint closed");
         } finally {
             deleteTree(dir);
         }
