@@ -68,29 +68,32 @@ if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="
 if /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
 
 echo Defaults:
-echo   platform:              %PLATFORM%
-echo   approved video target: %TARGET_VIDEOS%
-echo   slides per video:      %COUNT%
-echo   model:                 %MODEL%
-echo   tts:                   kokoro
-echo   voices:                %VOICE_SERIES% ^(one stable selection per video^)
-echo   ideas:                  generated automatically and persisted to data\batch_idea_history.jsonl
-echo   retry behavior:         rejected ideas are replaced until approved target is reached
-echo   text:                   narration-timed reveal inside the rendered social image
-echo   captions:               bottom duplicate subtitles disabled
-echo   video motion:           locked/static social frame ^(no pan/zoom/crop drift^)
-echo   final texture:          subtle full-frame grain
-echo   metadata:               AI disclosure and provenance sidecars
+echo   platform:               %PLATFORM%
+echo   approved video target:  %TARGET_VIDEOS%
+echo   slides per video:       %COUNT%
+echo   model:                  %MODEL%
+echo   tts:                    kokoro
+echo   voices:                 %VOICE_SERIES% ^(one stable selection per video^)
+echo   ideas:                   generated automatically and persisted to data\batch_idea_history.jsonl
+echo   retry behavior:          rejected ideas are replaced until approved target is reached
+echo   text:                    narration-timed reveal inside the rendered social image
+echo   captions:                bottom duplicate subtitles disabled
+echo   visible counters:        disabled ^(no conversation 1/10, ranks, or message numbers^)
+echo   final filenames:         title-based with no numeric prefix
+echo   background:              rotates through dark color palettes from video to video
+echo   video motion:            locked/static social frame ^(no pan/zoom/crop drift^)
+echo   final texture:           subtle full-frame temporal grain on completed MP4
+echo   metadata:                AI disclosure and provenance sidecars
 if "%OP_IMAGE_FLAG%"=="" (
-  echo   OP image:              disabled
+  echo   OP image:               disabled
 ) else (
-  echo   OP image:              ComfyUI RealVisXL enabled for each OP post
+  echo   OP image:               ComfyUI RealVisXL enabled for each OP post
 )
-echo   kokoro console:          quiet
+echo   kokoro console:           quiet
 if "%KEEP_OLLAMA_FLAG%"=="" (
-  echo   Ollama:                unload between calls
+  echo   Ollama:                 unload between calls
 ) else (
-  echo   Ollama:                keep loaded between ideas/videos
+  echo   Ollama:                 keep loaded between ideas/videos
 )
 echo.
 if not "%OP_IMAGE_FLAG%"=="" (
