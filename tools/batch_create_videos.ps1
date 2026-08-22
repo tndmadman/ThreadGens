@@ -15,7 +15,8 @@ param(
     [ValidateSet('auto', 'thread_story', 'confession', 'debate', 'best_answers', 'escalating_conversation')]
     [string]$Format = 'auto',
     [switch]$KeepOllamaLoaded,
-    [switch]$GenerateOpImage
+    [switch]$GenerateOpImage,
+    [switch]$StopOnError
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,6 +98,11 @@ if ($KeepOllamaLoaded) {
 } else {
     Write-Host 'Ollama unload: enabled after each script'
 }
+if ($StopOnError) {
+    Write-Host 'Batch error mode: stop on first failed/rejected video' -ForegroundColor Yellow
+} else {
+    Write-Host 'Batch error mode: continue after failed/rejected videos' -ForegroundColor Green
+}
 
 if (-not (Test-Path $InputPath)) {
     Create-SampleInput $InputPath
@@ -135,6 +141,8 @@ New-Item -ItemType Directory -Force -Path $FinalDir | Out-Null
 
 $jobCount = [int]([Math]::Floor($lines.Count / 2))
 $jobCountLabel = '{0:D3}' -f $jobCount
+$failedJobs = @()
+$succeededJobs = 0
 Write-Step "Creating $jobCount video(s)"
 
 for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
@@ -216,26 +224,60 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
         $javaArgs += @('--series-id', $SeriesId)
     }
 
-    & java @javaArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "Video job $jobLabel failed with exit code $LASTEXITCODE."
-    }
+    try {
+        & java @javaArgs
+        $javaExitCode = $LASTEXITCODE
+        if ($javaExitCode -ne 0) {
+            throw "Video job $jobLabel failed with exit code $javaExitCode."
+        }
 
-    $finalVideo = Join-Path $videoDir $finalVideoName
-    if (-not (Test-Path $finalVideo)) {
-        throw "Video job $jobLabel finished but final video was not found: $finalVideo"
-    }
+        $finalVideo = Join-Path $videoDir $finalVideoName
+        if (-not (Test-Path $finalVideo)) {
+            throw "Video job $jobLabel finished but final video was not found: $finalVideo"
+        }
 
-    $copyTo = Join-Path $FinalDir $finalVideoName
-    Copy-Item -Force -Path $finalVideo -Destination $copyTo
-    $provenanceSidecar = "$finalVideo.provenance.json"
-    if (-not (Test-Path $provenanceSidecar)) {
-        throw "Video job $jobLabel finished but provenance sidecar was not found: $provenanceSidecar"
+        $provenanceSidecar = "$finalVideo.provenance.json"
+        if (-not (Test-Path $provenanceSidecar)) {
+            throw "Video job $jobLabel finished but provenance sidecar was not found: $provenanceSidecar"
+        }
+
+        $copyTo = Join-Path $FinalDir $finalVideoName
+        Copy-Item -Force -Path $finalVideo -Destination $copyTo
+        Copy-Item -Force -Path $provenanceSidecar -Destination "$copyTo.provenance.json"
+        $succeededJobs++
+        Write-Host "Saved final copy: $copyTo" -ForegroundColor Green
+    } catch {
+        $reason = $_.Exception.Message
+        $failedJobs += [pscustomobject]@{
+            Job = $jobLabel
+            Title = $title
+            Reason = $reason
+        }
+        Write-Host "Video job $jobLabel was not approved/saved: $reason" -ForegroundColor Red
+        if ($StopOnError) {
+            throw
+        }
+        Write-Host 'Continuing to the next batch job.' -ForegroundColor Yellow
     }
-    Copy-Item -Force -Path $provenanceSidecar -Destination "$copyTo.provenance.json"
-    Write-Host "Saved final copy: $copyTo" -ForegroundColor Green
 }
 
 Write-Step 'Batch complete'
-Write-Host "All per-video folders: $OutputRoot" -ForegroundColor Green
-Write-Host "Final MP4 copies:      $FinalDir" -ForegroundColor Green
+Write-Host "Successful approved videos: $succeededJobs/$jobCount" -ForegroundColor Green
+Write-Host "All per-video folders:       $OutputRoot" -ForegroundColor Green
+Write-Host "Final MP4 copies:            $FinalDir" -ForegroundColor Green
+
+if ($failedJobs.Count -gt 0) {
+    $failureReport = Join-Path $OutputRoot 'failed_jobs.txt'
+    $reportLines = @('ThreadGens batch failures/skips', '')
+    foreach ($failure in $failedJobs) {
+        $line = "[$($failure.Job)] $($failure.Title) :: $($failure.Reason)"
+        $reportLines += $line
+        Write-Host $line -ForegroundColor Yellow
+    }
+    $reportLines | Set-Content -Path $failureReport -Encoding UTF8
+    Write-Host "Failure report: $failureReport" -ForegroundColor Yellow
+    Write-Host 'The remaining jobs were still attempted; only approved videos were copied to final_videos.' -ForegroundColor Yellow
+    exit 2
+}
+
+exit 0
