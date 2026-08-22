@@ -6,6 +6,7 @@ set "INPUT_FILE=data\batch_videos.txt"
 set "COUNT=10"
 set "MODEL=llama3.1:8b"
 set "VOICE=af_heart"
+set "VOICE_SERIES=af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george"
 set "PLATFORM=reddit"
 set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
 set "OP_IMAGE_FLAG="
@@ -50,7 +51,9 @@ echo   platform: %PLATFORM%
 echo   model:    %MODEL%
 echo   count:    %COUNT%
 echo   tts:      kokoro
-echo   voice:    %VOICE%
+echo   voices:   %VOICE_SERIES% ^(one stable selection per video^)
+echo   captions: word-timed
+echo   metadata: AI disclosure and provenance sidecars
 echo   video:    stitched MP4, watermark off, body text top-aligned
 if "%OP_IMAGE_FLAG%"=="" (
   echo   OP image: disabled
@@ -75,7 +78,7 @@ if not exist "tools\batch_create_videos.ps1" (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -Platform "%PLATFORM%" %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -InputFile "%INPUT_FILE%" -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -Platform "%PLATFORM%" %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

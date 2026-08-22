@@ -1,36 +1,28 @@
-ThreadGens 0.5.0-p0-originality
+ThreadGens 0.7.0-p0-p1-p2-integrated
 
-Branch: p0-content-originality
+Branch: integration/p0-p1-p2-final
 
-P0 content-originality release:
-- production entrypoints route through P0Entrypoint
-- CheckedRunner and the GUI inherit P0 behavior
-- RawCheckedRunner is the explicit low-level compatibility/debug path
-- five content-aware formats: thread_story, confession, debate, best_answers, escalating_conversation
-- persistent deterministic novelty history with regeneration on rejected auto content
-- local Ollama semantic novelty with nomic-embed-text for reworded story/joke/conflict detection
-- malformed existing novelty history fails closed during automatic generation
-- generated Reddit/X renderers omit fabricated engagement at source
-- generated X output omits verification badges and precise fake timestamps
-- narration is split into timed visual states targeting roughly 2.5-second content/focus changes
-- each format has its own layout, motion behavior and final transition profile
-- final delivery remains conventional H.264/AAC/yuv420p/+faststart
-- stale segment/final MP4 files are removed before regeneration
-- Windows setup pulls both llama3.1:8b and nomic-embed-text
-- CI includes Java 21 compilation, P0 unit tests, real FFmpeg/ffprobe video tests for all five formats, and Windows PowerShell parser validation
+Integrated release:
+- P0 content originality, semantic novelty, source-clean social rendering, five dynamic formats, timed visual states, and safe production routing
+- P1 word/sentence captions, voice pools and delivery presets, concurrency-safe identity recency, and AI/manual provenance/disclosure metadata
+- P2 final pre-publish repetition audit with exact/semantic/content/visual/identity/audio/format/pacing checks
+- P2 consumes actual P1 per-segment voice sidecars and stable P1 provenance fields rather than relying on inferred launch-time state
+- P1 identity history and P2 publish history both fail closed on malformed state
+- P2 publish decisions use in-process plus OS-level transaction locking
+- normal CLI, GUI compatibility path, legacy Runner, batch runner, Gradle application, and runnable JAR route through P2Entrypoint
+- blocked output receives an audit report but is not recorded as approved publish history or promoted by the batch runner
 
-Still included:
-- optional OP-only image generation through local ComfyUI / RealVisXL
-- local Kokoro and Piper TTS
-- generated/imported profile images and usernames
-- batch video creation and interactive Windows generation
+Default histories:
+- P0 generation history: data/generation_history.jsonl
+- P1 identity history: data/identity_history.jsonl
+- P2 approved publish history: data/publish_history.jsonl
 
-Default output folders:
+Default outputs:
 - generated script: output/script/generated_comments.txt
 - screenshots: output/
-- generated/imported profile cache: output/cache/pfp/
-- OP image prompts/cache: output/cache/images/
-- OP images: output/images/
-- audio: output/audio/
-- video clips and final video: output/video/
-- novelty history: data/generation_history.jsonl (git-ignored)
+- audio and P1 voice sidecars: output/audio/
+- video clips/final video: output/video/
+- P1 provenance: <output>/metadata/<prefix>-provenance.json and final.mp4.provenance.json
+- P2 audit report: output/video/publish_audit.json
+
+Release acceptance requires the exact integrated head to pass the combined Ubuntu and Windows smoke workflow.

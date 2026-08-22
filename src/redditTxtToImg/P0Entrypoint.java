@@ -179,6 +179,12 @@ public final class P0Entrypoint {
             if ("--auto".equals(arg)) {
                 continue;
             }
+            if ("--content-origin".equals(arg)) {
+                if (i + 1 < args.length) {
+                    i++;
+                }
+                continue;
+            }
             if ("--format".equals(arg)) {
                 if (i + 1 < args.length) {
                     i++;
@@ -212,6 +218,8 @@ public final class P0Entrypoint {
             result.add("--format");
             result.add(format.id());
         }
+        result.add("--content-origin");
+        result.add("ai");
         return result.toArray(new String[0]);
     }
 

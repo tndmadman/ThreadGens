@@ -3,6 +3,14 @@ param(
     [int]$Count = 10,
     [string]$Model = 'llama3.1:8b',
     [string]$Voice = 'af_heart',
+    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george',
+    [ValidateSet('single', 'series', 'per-slide')]
+    [string]$VoiceSelection = 'series',
+    [string]$SeriesId = '',
+    [ValidateSet('natural', 'calm', 'energetic', 'dramatic')]
+    [string]$TtsDelivery = 'natural',
+    [ValidateSet('off', 'word', 'sentence')]
+    [string]$Captions = 'word',
     [string]$Platform = 'reddit',
     [ValidateSet('auto', 'thread_story', 'confession', 'debate', 'best_answers', 'escalating_conversation')]
     [string]$Format = 'auto',
@@ -75,7 +83,8 @@ if ($Platform -eq 'x') {
     Write-Host 'Reddit format: line 1 = post title, line 2 = post body.'
 }
 Write-Host "Output root: $OutputRoot"
-Write-Host "Defaults: platform=$Platform, format=$Format, model=$Model, count=$Count, tts=$TtsEngine, voice=$Voice"
+Write-Host "Defaults: platform=$Platform, format=$Format, model=$Model, count=$Count, tts=$TtsEngine"
+Write-Host "P1 voice selection: $VoiceSelection from [$VoiceSeries], delivery=$TtsDelivery, captions=$Captions"
 Write-Host 'Kokoro console: quiet'
 if ($GenerateOpImage) {
     Write-Host 'OP image generation: enabled through local ComfyUI RealVisXL' -ForegroundColor Green
@@ -143,6 +152,7 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
     $scriptDir = Join-Path $jobRoot 'script'
     $opImageDir = Join-Path $jobRoot 'op_images'
     $opImageCacheDir = Join-Path $jobRoot 'image_cache'
+    $metadataDir = Join-Path $jobRoot 'metadata'
     $scriptOut = Join-Path $scriptDir 'generated_comments.txt'
 
     New-Item -ItemType Directory -Force -Path $imageDir, $audioDir, $videoDir, $scriptDir | Out-Null
@@ -176,12 +186,17 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
         '--tts', $TtsEngine,
         '--tts-command', $KokoroPython,
         '--voice', $Voice,
+        '--voice-series', $VoiceSeries,
+        '--voice-selection', $VoiceSelection,
+        '--tts-delivery', $TtsDelivery,
         '--audio-dir', $audioDir,
         '--video',
         '--concat-video',
         '--video-dir', $videoDir,
         '--script-out', $scriptOut,
         '--final-video', $finalVideoName,
+        '--captions', $Captions,
+        '--metadata-dir', $metadataDir,
         '--no-watermark',
         '--top'
     )
@@ -197,6 +212,9 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
     if ($KeepOllamaLoaded) {
         $javaArgs += '--keep-ollama-loaded'
     }
+    if (-not [string]::IsNullOrWhiteSpace($SeriesId)) {
+        $javaArgs += @('--series-id', $SeriesId)
+    }
 
     & java @javaArgs
     if ($LASTEXITCODE -ne 0) {
@@ -210,6 +228,11 @@ for ($i = 0; $i -lt ($jobCount * 2); $i += 2) {
 
     $copyTo = Join-Path $FinalDir $finalVideoName
     Copy-Item -Force -Path $finalVideo -Destination $copyTo
+    $provenanceSidecar = "$finalVideo.provenance.json"
+    if (-not (Test-Path $provenanceSidecar)) {
+        throw "Video job $jobLabel finished but provenance sidecar was not found: $provenanceSidecar"
+    }
+    Copy-Item -Force -Path $provenanceSidecar -Destination "$copyTo.provenance.json"
     Write-Host "Saved final copy: $copyTo" -ForegroundColor Green
 }
 

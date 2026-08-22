@@ -297,8 +297,20 @@ public class XThreadGenerator {
         TextFileReader comments = TextFileReader.fromFile(settings.commentsFile);
         TextFileReader authors = TextFileReader.fromFile(settings.authorNamesFile);
         RandomProfileName profileName = new RandomProfileName(settings.profileDirectory);
-        VoiceGenerator voiceGenerator = new VoiceGenerator(
-                settings.ttsEngine, settings.ttsCommand, settings.voiceModel, settings.ttsTimeoutSeconds);
+        VoicePlan voicePlan = new VoicePlan(
+                settings.ttsEngine,
+                settings.ttsCommand,
+                settings.voiceModel,
+                settings.voiceSeries,
+                settings.voiceDirectory,
+                settings.voiceSelection,
+                settings.seriesId.isBlank() ? settings.postTitle + "|" + settings.topic : settings.seriesId,
+                VoicePlan.Delivery.resolve(
+                        settings.ttsDelivery,
+                        settings.ttsSpeedConfigured ? settings.ttsSpeed : null,
+                        settings.ttsLanguage,
+                        settings.ttsSentencePauseConfigured ? settings.ttsSentencePauseMs : null),
+                settings.ttsTimeoutSeconds);
         VideoGenerator videoGenerator = new VideoGenerator(settings.videoCommand, settings.videoTimeoutSeconds);
         List<Path> clips = new ArrayList<>();
         List<FrameJob> jobs = new ArrayList<>();
@@ -307,11 +319,25 @@ public class XThreadGenerator {
         List<String> lines = new ArrayList<>(comments.getLines());
         if (settings.shuffle) Collections.shuffle(lines, rand);
         int total = settings.count > -1 ? Math.min(lines.size(), settings.count) : lines.size();
-        String originalAuthor = normalizeDisplayName(authors.getRandomEntry(rand));
+        if (total <= 0) {
+            throw new IOException("No non-empty thread lines were available to render.");
+        }
+        IdentityHistory identityHistory = new IdentityHistory(
+                settings.identityHistoryFile,
+                settings.identityHistoryLimit,
+                settings.identityHistoryEnabled);
+        List<IdentityHistory.Identity> identities = identityHistory.selectAndRecord(
+                authors.getLines(),
+                profileName.profileImageNames(),
+                profileName.aiProfileImageNames(),
+                total,
+                settings.outputPrefix + "-" + System.currentTimeMillis());
+        String originalAuthor = normalizeDisplayName(identities.get(0).name());
         settings.originalHandle = toHandle(originalAuthor, rand);
 
         for (int i = 0; i < total; i++) {
-            String author = i == 0 ? originalAuthor : normalizeDisplayName(authors.getRandomEntry(rand));
+            IdentityHistory.Identity identity = identities.get(i);
+            String author = i == 0 ? originalAuthor : normalizeDisplayName(identity.name());
             String handle = i == 0 ? settings.originalHandle : toHandle(author, rand);
             String current = lines.get(i);
             String narration = i == 0 && settings.postTitle != null && !settings.postTitle.isBlank()
@@ -321,22 +347,22 @@ public class XThreadGenerator {
             Path audio = settings.audioDirectory.resolve(base + ".wav");
             Path video = settings.videoDirectory.resolve(base + ".mp4");
             XThreadGenerator renderer = new XThreadGenerator(
-                    base, author, handle, profileName.getRandomProfileName(), current,
+                    base, author, handle, identity.profileImage(), current,
                     i, total, 0, 0, 0, 0, settings.outputDirectory, settings);
-            jobs.add(new FrameJob(narration, image, audio, video, renderer));
+            jobs.add(new FrameJob(i, narration, image, audio, video, renderer));
         }
 
         System.out.println("Phase 1/4: rendering X images without synthetic engagement or verification...");
         for (FrameJob job : jobs) {
             job.generator.generateImage();
         }
-        if (voiceGenerator.isEnabled()) {
+        if (voicePlan.isEnabled()) {
             System.out.println("Phase 2/4: generating audio with " + settings.ttsEngine + "...");
-            for (FrameJob job : jobs) voiceGenerator.generateSpeech(job.text, job.audioPath);
+            for (FrameJob job : jobs) voicePlan.generateSpeech(job.text, job.audioPath, job.index);
         } else {
             System.out.println("Phase 2/4: skipping audio because TTS is disabled.");
         }
-        if (settings.createVideo && voiceGenerator.isEnabled()) {
+        if (settings.createVideo && voicePlan.isEnabled()) {
             System.out.println("Phase 3/4: rendering legacy-compatible video clips...");
             for (FrameJob job : jobs) {
                 videoGenerator.makeClip(job.imagePath, job.audioPath, job.videoPath,
@@ -372,16 +398,20 @@ public class XThreadGenerator {
     private static void printUsage() {
         System.out.println("Usage: java -cp out redditTxtToImg.XThreadGenerator [comments.txt] [output] [options]");
         System.out.println("Generated X output never fabricates engagement, verification, or precise timestamps.");
+        System.out.println("P1 voice options: --voice-series LIST --voice-selection single|series|per-slide --series-id ID --tts-delivery PRESET --tts-speed RATE --tts-language CODE --tts-sentence-pause-ms N");
+        System.out.println("P1 identity options: --identity-history-file PATH --identity-history-limit N --no-identity-history");
     }
 
     private static class FrameJob {
+        final int index;
         final String text;
         final Path imagePath;
         final Path audioPath;
         final Path videoPath;
         final XThreadGenerator generator;
 
-        FrameJob(String text, Path imagePath, Path audioPath, Path videoPath, XThreadGenerator generator) {
+        FrameJob(int index, String text, Path imagePath, Path audioPath, Path videoPath, XThreadGenerator generator) {
+            this.index = index;
             this.text = text;
             this.imagePath = imagePath;
             this.audioPath = audioPath;
@@ -396,6 +426,8 @@ public class XThreadGenerator {
         int count = -1;
         int autoTextCount = 10;
         int ttsTimeoutSeconds = 120;
+        int ttsSentencePauseMs = 180;
+        int identityHistoryLimit = 500;
         int videoTimeoutSeconds = 180;
         int videoFps = 30;
         boolean shuffle = false;
@@ -405,6 +437,10 @@ public class XThreadGenerator {
         boolean createVideo = false;
         boolean concatVideo = false;
         boolean showVerifiedBadge = false;
+        boolean identityHistoryEnabled = true;
+        boolean voiceExplicit = false;
+        boolean ttsSpeedConfigured = false;
+        boolean ttsSentencePauseConfigured = false;
         String fontName = "Arial";
         String postTitle = "Finish this story in the comments";
         String outputPrefix = "aithread";
@@ -413,6 +449,11 @@ public class XThreadGenerator {
         String ollamaUrl = "http://localhost:11434/api/generate";
         String ttsEngine = "none";
         String ttsCommand = "piper";
+        String voiceSeries = "";
+        String voiceSelection = "single";
+        String seriesId = "";
+        String ttsDelivery = "natural";
+        String ttsLanguage = "a";
         String videoCommand = "ffmpeg";
         String finalVideoName = "final.mp4";
         String originalHandle = "op";
@@ -425,6 +466,8 @@ public class XThreadGenerator {
         Path videoDirectory = Path.of("output", "video");
         Path voiceDirectory = Path.of("voices");
         Path voiceModel = Path.of("voices", "en_US-lessac-medium.onnx");
+        Path identityHistoryFile = Path.of("data", "identity_history.jsonl");
+        double ttsSpeed = 1.0;
 
         static Settings fromArgs(String[] args) {
             Settings settings = loadDefaults();
@@ -448,10 +491,24 @@ public class XThreadGenerator {
                 else if ("--tts".equals(arg) && i + 1 < args.length) settings.ttsEngine = args[++i].toLowerCase(Locale.ROOT);
                 else if ("--voice".equals(arg) && i + 1 < args.length) {
                     String voiceValue = args[++i];
+                    settings.voiceExplicit = true;
                     settings.voiceModel = "kokoro".equals(settings.ttsEngine)
                             ? Path.of(voiceValue) : VoiceCatalog.resolveVoice(voiceValue, settings.voiceDirectory);
                 }
                 else if ("--voice-dir".equals(arg) && i + 1 < args.length) settings.voiceDirectory = Path.of(args[++i]);
+                else if ("--voice-series".equals(arg) && i + 1 < args.length) settings.voiceSeries = args[++i];
+                else if ("--voice-selection".equals(arg) && i + 1 < args.length) settings.voiceSelection = args[++i];
+                else if ("--series-id".equals(arg) && i + 1 < args.length) settings.seriesId = args[++i];
+                else if ("--tts-delivery".equals(arg) && i + 1 < args.length) settings.ttsDelivery = args[++i];
+                else if ("--tts-speed".equals(arg) && i + 1 < args.length) {
+                    settings.ttsSpeed = parseDouble(args[++i], settings.ttsSpeed);
+                    settings.ttsSpeedConfigured = true;
+                }
+                else if ("--tts-language".equals(arg) && i + 1 < args.length) settings.ttsLanguage = args[++i];
+                else if ("--tts-sentence-pause-ms".equals(arg) && i + 1 < args.length) {
+                    settings.ttsSentencePauseMs = parseInt(args[++i], settings.ttsSentencePauseMs);
+                    settings.ttsSentencePauseConfigured = true;
+                }
                 else if ("--list-voices".equals(arg)) settings.listVoices = true;
                 else if ("--tts-command".equals(arg) && i + 1 < args.length) settings.ttsCommand = args[++i];
                 else if ("--audio-dir".equals(arg) && i + 1 < args.length) settings.audioDirectory = Path.of(args[++i]);
@@ -463,8 +520,26 @@ public class XThreadGenerator {
                 else if ("--fps".equals(arg) && i + 1 < args.length) settings.videoFps = parseInt(args[++i], settings.videoFps);
                 else if ("--video-timeout".equals(arg) && i + 1 < args.length) settings.videoTimeoutSeconds = parseInt(args[++i], settings.videoTimeoutSeconds);
                 else if ("--final-video".equals(arg) && i + 1 < args.length) settings.finalVideoName = args[++i];
+                else if ("--identity-history-file".equals(arg) && i + 1 < args.length) settings.identityHistoryFile = Path.of(args[++i]);
+                else if ("--identity-history-limit".equals(arg) && i + 1 < args.length) settings.identityHistoryLimit = parseInt(args[++i], settings.identityHistoryLimit);
+                else if ("--no-identity-history".equals(arg)) settings.identityHistoryEnabled = false;
             }
+            settings.normalizeVoiceForEngine();
             return settings;
+        }
+
+        private void normalizeVoiceForEngine() {
+            if (voiceExplicit) {
+                return;
+            }
+            String configured = voiceModel == null ? "" : voiceModel.toString();
+            if ("kokoro".equalsIgnoreCase(ttsEngine)
+                    && (configured.isBlank() || configured.toLowerCase(Locale.ROOT).endsWith(".onnx"))) {
+                voiceModel = Path.of("af_heart");
+            } else if ("piper".equalsIgnoreCase(ttsEngine)
+                    && !configured.toLowerCase(Locale.ROOT).endsWith(".onnx")) {
+                voiceModel = VoiceCatalog.resolveVoice(configured, voiceDirectory);
+            }
         }
 
         private static Settings loadDefaults() {
@@ -483,6 +558,21 @@ public class XThreadGenerator {
                 settings.ollamaUrl = properties.getProperty("ollamaUrl", settings.ollamaUrl);
                 settings.ttsEngine = properties.getProperty("ttsEngine", settings.ttsEngine);
                 settings.ttsCommand = properties.getProperty("ttsCommand", settings.ttsCommand);
+                settings.voiceSeries = properties.getProperty("voiceSeries", settings.voiceSeries);
+                settings.voiceSelection = properties.getProperty("voiceSelection", settings.voiceSelection);
+                settings.seriesId = properties.getProperty("seriesId", settings.seriesId);
+                settings.ttsDelivery = properties.getProperty("ttsDelivery", settings.ttsDelivery);
+                String configuredSpeed = properties.getProperty("ttsSpeed", "").trim();
+                if (!configuredSpeed.isBlank()) {
+                    settings.ttsSpeed = parseDouble(configuredSpeed, settings.ttsSpeed);
+                    settings.ttsSpeedConfigured = true;
+                }
+                settings.ttsLanguage = properties.getProperty("ttsLanguage", settings.ttsLanguage);
+                String configuredPause = properties.getProperty("ttsSentencePauseMs", "").trim();
+                if (!configuredPause.isBlank()) {
+                    settings.ttsSentencePauseMs = parseInt(configuredPause, settings.ttsSentencePauseMs);
+                    settings.ttsSentencePauseConfigured = true;
+                }
                 settings.voiceDirectory = Path.of(properties.getProperty("voiceDirectory", settings.voiceDirectory.toString()));
                 String defaultVoice = properties.getProperty("voiceModel", settings.voiceModel.toString());
                 settings.voiceModel = "kokoro".equals(settings.ttsEngine)
@@ -492,6 +582,12 @@ public class XThreadGenerator {
                 settings.videoCommand = properties.getProperty("videoCommand", settings.videoCommand);
                 settings.finalVideoName = properties.getProperty("finalVideoName", settings.finalVideoName);
                 settings.unloadOllamaAfterText = Boolean.parseBoolean(properties.getProperty("unloadOllamaAfterText", "true"));
+                settings.identityHistoryFile = Path.of(properties.getProperty(
+                        "identityHistoryFile", settings.identityHistoryFile.toString()));
+                settings.identityHistoryLimit = parseInt(
+                        properties.getProperty("identityHistoryLimit"), settings.identityHistoryLimit);
+                settings.identityHistoryEnabled = Boolean.parseBoolean(properties.getProperty(
+                        "identityHistoryEnabled", String.valueOf(settings.identityHistoryEnabled)));
             } catch (IOException ignored) {
                 return settings;
             }
@@ -502,6 +598,15 @@ public class XThreadGenerator {
             if (value == null) return fallback;
             try {
                 return Integer.parseInt(value.trim());
+            } catch (NumberFormatException e) {
+                return fallback;
+            }
+        }
+
+        private static double parseDouble(String value, double fallback) {
+            if (value == null) return fallback;
+            try {
+                return Double.parseDouble(value.trim());
             } catch (NumberFormatException e) {
                 return fallback;
             }

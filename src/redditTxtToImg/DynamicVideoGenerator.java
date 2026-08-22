@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -39,6 +40,21 @@ final class DynamicVideoGenerator {
             ContentFormat format,
             int itemIndex
     ) throws IOException, InterruptedException {
+        return renderClip(
+                states, audioFile, null, outputFile, width, height, format, itemIndex, Map.of());
+    }
+
+    Path renderClip(
+            List<TimedVisualStateRenderer.RenderedState> states,
+            Path audioFile,
+            Path captionFile,
+            Path outputFile,
+            int width,
+            int height,
+            ContentFormat format,
+            int itemIndex,
+            Map<String, String> metadata
+    ) throws IOException, InterruptedException {
         if (states == null || states.isEmpty()) {
             throw new IOException("No timed visual states were supplied for dynamic clip rendering.");
         }
@@ -60,7 +76,8 @@ final class DynamicVideoGenerator {
             throw new IOException("Could not determine positive audio duration for: " + audioFile);
         }
         double outputDuration = audioDuration + END_PAUSE_SECONDS;
-        List<Double> stateDurations = allocateStateDurations(states, outputDuration);
+        List<Double> stateDurations = allocateStateDurations(states, audioDuration, END_PAUSE_SECONDS);
+        Path filterCaptionFile = prepareCaptionAlias(captionFile);
 
         int safeWidth = even(Math.max(64, width));
         int safeHeight = even(Math.max(64, height));
@@ -92,7 +109,14 @@ final class DynamicVideoGenerator {
         for (int i = 0; i < states.size(); i++) {
             filter.append("[v").append(i).append(']');
         }
-        filter.append("concat=n=").append(states.size()).append(":v=1:a=0[vout]");
+        filter.append("concat=n=").append(states.size()).append(":v=1:a=0[vbase];");
+        if (filterCaptionFile != null) {
+            filter.append("[vbase]ass=filename='")
+                    .append(escapeFilterPath(filterCaptionFile))
+                    .append("'[vout]");
+        } else {
+            filter.append("[vbase]null[vout]");
+        }
 
         double fadeOutStart = Math.max(0.0, audioDuration - FADE_OUT_SECONDS);
         String audioFilter = "afade=t=in:st=0:d=" + formatSeconds(FADE_IN_SECONDS)
@@ -111,9 +135,16 @@ final class DynamicVideoGenerator {
         command.add("-t");
         command.add(formatSeconds(outputDuration));
         addEncodingArgs(command);
+        addMetadata(command, metadata);
         command.add(outputFile.toString());
 
-        run(command, "timed-state dynamic video render");
+        try {
+            run(command, "timed-state dynamic video render");
+        } finally {
+            if (filterCaptionFile != null && !filterCaptionFile.equals(captionFile)) {
+                Files.deleteIfExists(filterCaptionFile);
+            }
+        }
         verifyNonEmpty(outputFile, "Dynamic video render");
         return outputFile;
     }
@@ -135,6 +166,35 @@ final class DynamicVideoGenerator {
     }
 
     Path combineClips(List<Path> clips, Path outputFile, ContentFormat format)
+            throws IOException, InterruptedException {
+        return combineClips(clips, outputFile, format, Map.of());
+    }
+
+    Path combineClips(
+            List<Path> clips,
+            Path outputFile,
+            ContentFormat format,
+            Map<String, String> metadata
+    ) throws IOException, InterruptedException {
+        if (metadata == null || metadata.isEmpty()) {
+            return combineClipsInternal(clips, outputFile, format);
+        }
+        if (outputFile.getParent() != null) {
+            Files.createDirectories(outputFile.getParent());
+        }
+        Path temporary = outputFile.resolveSibling(outputFile.getFileName() + ".unmarked.mp4");
+        Files.deleteIfExists(temporary);
+        try {
+            combineClipsInternal(clips, temporary, format);
+            remuxWithMetadata(temporary, outputFile, metadata);
+            verifyNonEmpty(outputFile, "Final metadata remux");
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+        return outputFile;
+    }
+
+    private Path combineClipsInternal(List<Path> clips, Path outputFile, ContentFormat format)
             throws IOException, InterruptedException {
         List<Path> existing = new ArrayList<>();
         if (clips != null) {
@@ -351,26 +411,90 @@ final class DynamicVideoGenerator {
 
     private static List<Double> allocateStateDurations(
             List<TimedVisualStateRenderer.RenderedState> states,
-            double totalDuration
+            double audioDuration,
+            double endPauseDuration
     ) {
         double weightTotal = 0.0;
         for (TimedVisualStateRenderer.RenderedState state : states) {
             weightTotal += Math.max(0.05, state.weight());
         }
+        double totalWeight = weightTotal;
+        double shortestWeightedDuration = states.stream()
+                .mapToDouble(state -> audioDuration * Math.max(0.05, state.weight()) / totalWeight)
+                .min()
+                .orElse(audioDuration);
+        double minimumPerState = shortestWeightedDuration >= 0.10
+                ? 0.0
+                : Math.min(0.10, Math.max(0.005, audioDuration * 0.45 / states.size()));
+        double distributable = Math.max(0.0, audioDuration - (minimumPerState * states.size()));
         List<Double> result = new ArrayList<>();
         double assigned = 0.0;
         for (int i = 0; i < states.size(); i++) {
             double duration;
             if (i == states.size() - 1) {
-                duration = Math.max(0.10, totalDuration - assigned);
+                duration = Math.max(0.005, audioDuration - assigned) + Math.max(0.0, endPauseDuration);
             } else {
-                duration = totalDuration * Math.max(0.05, states.get(i).weight()) / weightTotal;
-                duration = Math.max(0.10, duration);
+                duration = minimumPerState
+                        + distributable * Math.max(0.05, states.get(i).weight()) / weightTotal;
                 assigned += duration;
             }
             result.add(duration);
         }
         return result;
+    }
+
+    private void remuxWithMetadata(Path input, Path output, Map<String, String> metadata)
+            throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegCommand);
+        command.add("-y");
+        command.add("-i");
+        command.add(input.toString());
+        command.add("-map");
+        command.add("0");
+        command.add("-c");
+        command.add("copy");
+        command.add("-movflags");
+        command.add("+faststart");
+        addMetadata(command, metadata);
+        command.add(output.toString());
+        run(command, "provenance metadata remux");
+    }
+
+    private static void addMetadata(List<String> command, Map<String, String> metadata) {
+        if (metadata == null) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : metadata.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null) {
+                continue;
+            }
+            command.add("-metadata");
+            command.add(entry.getKey().trim() + "=" + entry.getValue());
+        }
+    }
+
+    private static String escapeFilterPath(Path path) {
+        return path.toAbsolutePath().normalize().toString()
+                .replace('\\', '/')
+                .replace(":", "\\:")
+                .replace("'", "'\\''")
+                .replace(",", "\\,")
+                .replace(";", "\\;")
+                .replace("[", "\\[")
+                .replace("]", "\\]");
+    }
+
+    private static Path prepareCaptionAlias(Path captionFile) throws IOException {
+        if (captionFile == null) {
+            return null;
+        }
+        if (!Files.isRegularFile(captionFile)) {
+            throw new IOException("Caption file not found: " + captionFile);
+        }
+        Path alias = Files.createTempFile("threadgens-caption-", ".ass");
+        Files.copy(captionFile, alias, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        return alias;
     }
 
     private static TransitionProfile transitionProfile(ContentFormat format) {

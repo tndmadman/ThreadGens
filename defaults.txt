@@ -26,17 +26,45 @@ semanticThreshold=0.86
 semanticHistoryLimit=50
 integritySanitize=true
 
+# P1 identity rotation defaults
+identityHistoryFile=data/identity_history.jsonl
+identityHistoryLimit=500
+identityHistoryEnabled=true
+
 # TTS defaults
 ttsEngine=none
 ttsCommand=piper
 voiceDirectory=voices
 voiceModel=voices/en_US-lessac-medium.onnx
+voiceSeries=
+voiceSelection=single
+seriesId=
+ttsDelivery=natural
+ttsSpeed=
+ttsLanguage=a
+ttsSentencePauseMs=
 audioDirectory=output/audio
 
 # Video defaults
 videoDirectory=output/video
 videoCommand=ffmpeg
 finalVideoName=final.mp4
+captionMode=word
+captionWordsPerCue=6
+visualMaxScenes=20
+
+# P1 provenance and disclosure defaults
+provenanceEnabled=true
+metadataDirectory=
+disclosureText=
+
+# P2 final publish-audit defaults
+publishAuditEnabled=true
+publishAuditMode=block
+publishHistoryFile=data/publish_history.jsonl
+publishHistoryLimit=100
+publishAuditWarnThreshold=58
+publishAuditBlockThreshold=78
 
 # OP image integration defaults
 # Leave this off for smoke tests / text-only runs. Use --image-mode comfyui to enable.
