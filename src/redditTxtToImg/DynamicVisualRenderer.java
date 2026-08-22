@@ -42,7 +42,11 @@ final class DynamicVisualRenderer {
             Files.createDirectories(outputPath.getParent());
         }
 
-        Palette palette = Palette.resolve(System.getenv("THREADGENS_PALETTE"), format);
+        String configuredPalette = System.getProperty("threadgens.palette");
+        if (configuredPalette == null || configuredPalette.isBlank()) {
+            configuredPalette = System.getenv("THREADGENS_PALETTE");
+        }
+        Palette palette = Palette.resolve(configuredPalette, format);
         BufferedImage target = tintNeutralDarkUi(source, palette);
         ImageIO.write(target, "png", outputPath.toFile());
         return outputPath;
@@ -73,8 +77,6 @@ final class DynamicVisualRenderer {
                 int min = Math.min(r, Math.min(green, b));
                 int luminance = (r * 54 + green * 183 + b * 19) >> 8;
 
-                // Restrict the tint to dark, nearly-neutral UI pixels so profile
-                // photos and intentional accent colors are not recolored.
                 if (luminance >= 92 || (max - min) > 22) {
                     continue;
                 }
