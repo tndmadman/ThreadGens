@@ -86,17 +86,13 @@ final class DynamicVideoGenerator {
 
         if (states.size() == 1 && TimedVisualStateRenderer.hasSmoothRevealAssets(states.get(0).imagePath())) {
             return renderSmoothRevealClip(
-                    states.get(0).imagePath(),
-                    audioFile,
-                    captionFile,
-                    outputFile,
-                    width,
-                    height,
-                    audioDuration,
-                    metadata);
+                    states.get(0).imagePath(), audioFile, captionFile, outputFile,
+                    width, height, audioDuration, metadata);
         }
 
-        return renderLegacyStateClip(states, audioFile, captionFile, outputFile, width, height, audioDuration, metadata);
+        return renderLegacyStateClip(
+                states, audioFile, captionFile, outputFile,
+                width, height, audioDuration, metadata);
     }
 
     private Path renderSmoothRevealClip(
@@ -116,10 +112,7 @@ final class DynamicVideoGenerator {
 
         List<NarrationTiming.Word> measured = NarrationTiming.load(audioFile);
         List<NarrationTiming.Word> timing = NarrationTiming.fitToCount(
-                measured,
-                layout.narration(),
-                audioDuration,
-                layout.words().size());
+                measured, layout.narration(), audioDuration, layout.words().size());
         boolean exactTiming = !measured.isEmpty() && measured.size() == layout.words().size();
         System.out.println("Narration reveal timing: "
                 + (exactTiming ? "exact Kokoro model timestamps" : "measured-duration fallback")
@@ -140,7 +133,7 @@ final class DynamicVideoGenerator {
         command.add(audioFile.toString());
 
         String frameFilter = lockedFrameFilter(safeWidth, safeHeight, "rgba");
-        String maskExpression = buildSmoothRevealMask(layout, timing, safeWidth, safeHeight);
+        String maskExpression = buildSmoothRevealMask(layout, timing, safeWidth, safeHeight, fps);
         StringBuilder filter = new StringBuilder();
         filter.append("[0:v]").append(frameFilter).append(",setpts=PTS-STARTPTS[full];")
                 .append("[1:v]").append(frameFilter).append(",setpts=PTS-STARTPTS,split=2[base][masksrc];")
@@ -181,22 +174,26 @@ final class DynamicVideoGenerator {
     }
 
     /**
-     * Builds one frame-evaluated grayscale mask. Every completed word remains
-     * visible, while the currently spoken word exposes from left to right using
-     * its exact start/end timestamps. Hidden words contribute no pixels at all.
+     * Builds a frame-evaluated grayscale mask. Completed words remain visible;
+     * the active word exposes continuously from left to right between its exact
+     * narration start/end timestamps. At progress zero the edge is left-1, so
+     * absolutely no glyph column can leak before the word starts.
      */
     static String buildSmoothRevealMask(
             TimedVisualStateRenderer.RevealLayout layout,
             List<NarrationTiming.Word> timing,
             int outputWidth,
-            int outputHeight
+            int outputHeight,
+            int fps
     ) {
         int count = Math.min(layout.words().size(), timing.size());
         if (count <= 0) {
             return "0";
         }
+        int safeFps = Math.max(1, fps);
         double scaleX = outputWidth / (double) Math.max(1, layout.sourceWidth());
         double scaleY = outputHeight / (double) Math.max(1, layout.sourceHeight());
+        String time = "(N/" + safeFps + ".0)";
         StringBuilder expression = new StringBuilder("clip(");
         for (int i = 0; i < count; i++) {
             TimedVisualStateRenderer.WordBox box = layout.words().get(i);
@@ -212,10 +209,6 @@ final class DynamicVideoGenerator {
             if (i > 0) {
                 expression.append('+');
             }
-            String time = "(N/" + Math.max(1, 30) + ")";
-            // The actual fps is substituted below to keep this helper directly
-            // testable without shell quoting or filter parsing.
-            time = time.replace("/30", "/" + Math.max(1, CURRENT_MASK_FPS.get()));
             String progress = "clip((" + time + "-" + formatMask(start) + ")/"
                     + formatMask(duration) + ",0,1)";
             String edge = "(" + (left - 1) + "+" + pixelWidth + "*" + progress + ")";
@@ -225,24 +218,6 @@ final class DynamicVideoGenerator {
         }
         expression.append(",0,255)");
         return expression.toString();
-    }
-
-    // buildSmoothRevealMask is static for focused regression testing. This
-    // thread-local lets the instance render path inject its configured fps.
-    private static final ThreadLocal<Integer> CURRENT_MASK_FPS = ThreadLocal.withInitial(() -> 30);
-
-    private String buildSmoothRevealMask(
-            TimedVisualStateRenderer.RevealLayout layout,
-            List<NarrationTiming.Word> timing,
-            int outputWidth,
-            int outputHeight
-    ) {
-        CURRENT_MASK_FPS.set(fps);
-        try {
-            return buildSmoothRevealMask(layout, timing, outputWidth, outputHeight);
-        } finally {
-            CURRENT_MASK_FPS.remove();
-        }
     }
 
     private Path renderLegacyStateClip(
@@ -562,7 +537,6 @@ final class DynamicVideoGenerator {
         verifyNonEmpty(outputFile, "Single static video finalize");
     }
 
-    /** Keep the full social frame locked to the requested canvas. */
     private String staticFrameFilter(int width, int height) {
         return lockedFrameFilter(width, height, "yuv420p");
     }
@@ -575,10 +549,6 @@ final class DynamicVideoGenerator {
                 + ",format=" + pixelFormat;
     }
 
-    /**
-     * Apply one fresh randomly seeded Perlin texture plus faint temporal grain
-     * after the complete video has been stitched.
-     */
     private void applyFinalTextureAndMetadata(Path input, Path output, Map<String, String> metadata)
             throws IOException, InterruptedException {
         int seed = FINAL_TEXTURE_RANDOM.nextInt(Integer.MAX_VALUE - 1) + 1;
