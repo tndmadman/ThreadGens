@@ -410,7 +410,7 @@ Write-Host "Idea history: $IdeaHistoryPath"
 Write-Host "Output root: $OutputRoot"
 Write-Host "Defaults: platform=$Platform, format=$Format, model=$Model, tts=$TtsEngine"
 Write-Host "P1 voice selection: $VoiceSelection from [$VoiceSeries], delivery=$TtsDelivery, captions=$Captions"
-Write-Host 'Video style: locked/static social frame, rotating dark background palette, subtle final grain'
+Write-Host 'Video style: locked/static social frame, rotating dark background palette, seeded Perlin texture plus subtle final temporal grain'
 Write-Host 'Visible format/progress counters: disabled'
 Write-Host 'Final MP4 names: title-based with no numeric prefix'
 Write-Host 'Self-filling mode: generate ideas until approved target is reached' -ForegroundColor Green
@@ -608,7 +608,7 @@ while ($succeededVideos -lt $TargetVideos) {
             Reason = $reason
         }
 
-        Write-Host "Attempt $attemptLabel did not fill approved slot $slotLabel: $reason" -ForegroundColor Red
+        Write-Host "Attempt $attemptLabel did not fill approved slot ${slotLabel}: $reason" -ForegroundColor Red
         if ($StopOnError) {
             throw
         }
