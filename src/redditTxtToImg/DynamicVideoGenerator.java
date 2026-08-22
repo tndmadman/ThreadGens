@@ -6,6 +6,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -18,14 +19,16 @@ import java.util.concurrent.TimeUnit;
  *
  * The social frame itself stays spatially locked. Narration-timed states may
  * reveal different pixels/text, but the frame no longer pans, zooms, drifts or
- * changes crop position between states. A very light temporal grain pass is
- * applied once to the completed video so Reddit and X use the same final look.
+ * changes crop position between states. A faint seeded Perlin texture plus
+ * subtle temporal grain is applied once to the completed video.
  */
 final class DynamicVideoGenerator {
     private static final double END_PAUSE_SECONDS = 0.55;
     private static final double FADE_IN_SECONDS = 0.08;
     private static final double FADE_OUT_SECONDS = 0.14;
-    private static final int FINAL_GRAIN_STRENGTH = 2;
+    private static final int FINAL_GRAIN_STRENGTH = 1;
+    private static final double FINAL_PERLIN_OPACITY = 0.025;
+    private static final SecureRandom FINAL_TEXTURE_RANDOM = new SecureRandom();
 
     private final String ffmpegCommand;
     private final int timeoutSeconds;
@@ -189,8 +192,8 @@ final class DynamicVideoGenerator {
         Files.deleteIfExists(stitched);
         try {
             combineClipsInternal(clips, stitched, format);
-            applyFinalGrainAndMetadata(stitched, outputFile, metadata);
-            verifyNonEmpty(outputFile, "Final grain/metadata render");
+            applyFinalTextureAndMetadata(stitched, outputFile, metadata);
+            verifyNonEmpty(outputFile, "Final texture/metadata render");
         } finally {
             Files.deleteIfExists(stitched);
         }
@@ -256,6 +259,31 @@ final class DynamicVideoGenerator {
             return Double.parseDouble(firstLine);
         } catch (NumberFormatException e) {
             throw new IOException("ffprobe returned an invalid duration for " + mediaFile + ": " + firstLine);
+        }
+    }
+
+    private int[] probeVideoDimensions(Path mediaFile) throws IOException, InterruptedException {
+        List<String> command = List.of(
+                resolveFfprobeCommand(),
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=s=x:p=0",
+                mediaFile.toString()
+        );
+        String output = runAndCollect(command, "video dimension probe", Math.min(timeoutSeconds, 45));
+        String firstLine = output.lines().map(String::trim).filter(line -> !line.isBlank())
+                .findFirst().orElse("");
+        String[] parts = firstLine.toLowerCase(Locale.ROOT).split("x", 2);
+        if (parts.length != 2) {
+            throw new IOException("ffprobe returned invalid dimensions for " + mediaFile + ": " + firstLine);
+        }
+        try {
+            int width = even(Math.max(64, Integer.parseInt(parts[0].trim())));
+            int height = even(Math.max(64, Integer.parseInt(parts[1].trim())));
+            return new int[]{width, height};
+        } catch (NumberFormatException e) {
+            throw new IOException("ffprobe returned invalid dimensions for " + mediaFile + ": " + firstLine);
         }
     }
 
@@ -352,10 +380,7 @@ final class DynamicVideoGenerator {
         verifyNonEmpty(outputFile, "Single static video finalize");
     }
 
-    /**
-     * Keep the full social frame locked to the requested canvas. No scale-up,
-     * animated crop, sine-wave pan, per-state phase or other spatial motion.
-     */
+    /** Keep the full social frame locked to the requested canvas. */
     private String staticFrameFilter(int width, int height) {
         return "scale=" + width + ":" + height
                 + ":force_original_aspect_ratio=decrease"
@@ -365,27 +390,54 @@ final class DynamicVideoGenerator {
     }
 
     /**
-     * Apply subtle temporal grain once, after the complete video has been
-     * stitched. Strength 2 is intentionally faint; this is a visual texture,
-     * not a heavy TV-static effect.
+     * Apply one fresh randomly seeded Perlin texture plus faint temporal grain
+     * after the complete video has been stitched. The Perlin layer is generated
+     * in Java so the result works even on FFmpeg builds that do not yet expose
+     * the newer perlin source filter.
      */
-    private void applyFinalGrainAndMetadata(Path input, Path output, Map<String, String> metadata)
+    private void applyFinalTextureAndMetadata(Path input, Path output, Map<String, String> metadata)
             throws IOException, InterruptedException {
-        List<String> command = new ArrayList<>();
-        command.add(ffmpegCommand);
-        command.add("-y");
-        command.add("-i");
-        command.add(input.toString());
-        command.add("-map");
-        command.add("0:v:0");
-        command.add("-map");
-        command.add("0:a?");
-        command.add("-vf");
-        command.add("noise=alls=" + FINAL_GRAIN_STRENGTH + ":allf=t");
-        addEncodingArgs(command);
-        addMetadata(command, metadata);
-        command.add(output.toString());
-        run(command, "final subtle grain render");
+        int seed = FINAL_TEXTURE_RANDOM.nextInt(Integer.MAX_VALUE - 1) + 1;
+        int[] dimensions = probeVideoDimensions(input);
+        double duration = probeDurationSeconds(input);
+        int textureWidth = even(Math.max(64, dimensions[0] / 6));
+        int textureHeight = even(Math.max(64, dimensions[1] / 6));
+        Path texture = Files.createTempFile("threadgens-perlin-", ".png");
+
+        try {
+            PerlinNoiseTexture.generate(texture, textureWidth, textureHeight, seed);
+
+            List<String> command = new ArrayList<>();
+            command.add(ffmpegCommand);
+            command.add("-y");
+            command.add("-i");
+            command.add(input.toString());
+            command.add("-loop");
+            command.add("1");
+            command.add("-framerate");
+            command.add(String.valueOf(fps));
+            command.add("-i");
+            command.add(texture.toString());
+            command.add("-filter_complex");
+            command.add("[1:v]scale=" + dimensions[0] + ":" + dimensions[1]
+                    + ":flags=bicubic,format=yuv420p[perlin];"
+                    + "[0:v:0][perlin]blend=all_mode=softlight:all_opacity="
+                    + String.format(Locale.US, "%.3f", FINAL_PERLIN_OPACITY)
+                    + ",noise=alls=" + FINAL_GRAIN_STRENGTH
+                    + ":allf=t+a:all_seed=" + seed + "[vout]");
+            command.add("-map");
+            command.add("[vout]");
+            command.add("-map");
+            command.add("0:a?");
+            command.add("-t");
+            command.add(formatSeconds(duration));
+            addEncodingArgs(command);
+            addMetadata(command, metadata);
+            command.add(output.toString());
+            run(command, "final seeded Perlin/grain render");
+        } finally {
+            Files.deleteIfExists(texture);
+        }
     }
 
     private static List<Double> allocateStateDurations(
