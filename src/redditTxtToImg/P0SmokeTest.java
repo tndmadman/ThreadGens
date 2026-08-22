@@ -20,6 +20,7 @@ public final class P0SmokeTest {
             testFormats(temp);
             testIntegrityAndVisuals(temp);
             testEntrypointArgumentIsolation(temp);
+            testContentAwareFormatSelection(temp);
             System.out.println("P0 smoke tests passed.");
         } finally {
             deleteRecursively(temp);
@@ -116,6 +117,20 @@ public final class P0SmokeTest {
                 });
         require(!String.join("|", manual).contains("output/script/generated_comments.txt"),
                 "Manual runs must not read a stale generated script path.");
+    }
+
+    private static void testContentAwareFormatSelection(Path temp) {
+        NoveltyGuard guard = new NoveltyGuard(temp.resolve("selector_history.jsonl"));
+        require(FormatSelector.resolve("auto", guard, "Am I wrong here?", "We disagree about the lease")
+                        == ContentFormat.DEBATE,
+                "Dispute prompts should prefer debate format.");
+        require(FormatSelector.resolve("auto", guard, "Wrong answers only", "Why is there a cart here?")
+                        == ContentFormat.BEST_ANSWERS,
+                "Wrong-answer prompts should prefer independent answer format.");
+        ContentFormat story = FormatSelector.resolve(
+                "auto", guard, "Finish this story in the replies", "The basement door opened by itself");
+        require(story == ContentFormat.THREAD_STORY || story == ContentFormat.ESCALATING_CONVERSATION,
+                "Story-continuation prompts should select a story-compatible format.");
     }
 
     private static void require(boolean condition, String message) {
