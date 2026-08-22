@@ -6,21 +6,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
 
 /**
- * P0 production pipeline.
+ * P0 render/orchestration engine.
  *
- * Flow:
- *   format-aware prompt -> base render/audio -> cross-video novelty gate
- *   -> integrity sanitization -> format-specific composition -> dynamic video
- *   -> history record
- *
- * Existing renderers remain available through CheckedRunner for smoke tests and
- * compatibility, but production entry points use this class by default.
+ * P0Entrypoint owns auto-generation. If --auto reaches this class directly, it
+ * is routed back through that safe entry point so hidden prompt instructions
+ * can never be transported through visible post fields.
  */
 public final class P0Runner {
     private P0Runner() {
@@ -39,6 +34,10 @@ public final class P0Runner {
     public static void runOrThrow(String[] args) throws IOException, InterruptedException {
         String[] safeArgs = args == null ? new String[0] : args.clone();
 
+        if (contains(safeArgs, "--auto")) {
+            P0Entrypoint.runOrThrow(safeArgs);
+            return;
+        }
         if (contains(safeArgs, "--list-voices") || contains(safeArgs, "--gui")) {
             CheckedRunner.runOrThrow(stripP0Options(safeArgs));
             return;
@@ -56,71 +55,29 @@ public final class P0Runner {
         System.out.println("P0 format: " + format.id() + " (" + format.label() + ")");
         System.out.println("P0 novelty history: " + noveltyGuard.historyFile());
 
-        String rejectionHint = "";
-        String acceptedScript = "";
+        String currentScript = config.readCurrentScript();
         NoveltyGuard.Result noveltyResult = null;
-        int maxAttempts = config.autoGenerateText && config.noveltyEnabled
-                ? Math.max(1, config.noveltyRetries + 1)
-                : 1;
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            if (maxAttempts > 1) {
-                System.out.println("P0 generation attempt " + attempt + "/" + maxAttempts);
-            }
-
-            String[] delegatedArgs = stripP0Options(safeArgs);
-            if (config.createVideo) {
-                delegatedArgs = stripVideoModeFlags(delegatedArgs);
-            }
-            if (config.autoGenerateText) {
-                delegatedArgs = withTopic(
-                        delegatedArgs,
-                        format.augmentTopic(config.topic, rejectionHint)
-                );
-            }
-
-            CheckedRunner.runOrThrow(delegatedArgs);
-
-            acceptedScript = config.readScriptForNovelty();
-            if (!config.noveltyEnabled || acceptedScript.isBlank()) {
-                if (acceptedScript.isBlank()) {
-                    System.out.println("P0 novelty: no script text found; continuing without history comparison.");
-                }
-                break;
-            }
-
-            noveltyResult = noveltyGuard.assess(acceptedScript);
+        if (config.noveltyEnabled && !currentScript.isBlank()) {
+            noveltyResult = noveltyGuard.assess(currentScript);
             printNoveltyResult(noveltyResult);
-
-            if (noveltyResult.accepted()) {
-                break;
-            }
-
-            if (!config.autoGenerateText) {
+            if (!noveltyResult.accepted()) {
                 System.err.println(
-                        "P0 novelty warning: supplied/manual content resembles recent output; "
-                                + "manual input is not regenerated automatically.");
-                break;
+                        "P0 novelty warning: supplied/manual content resembles recent output. "
+                                + "It will be rendered because explicit input is authoritative, but it will not be re-recorded as a new history item.");
             }
-
-            if (attempt >= maxAttempts) {
-                throw new IOException(
-                        "Novelty guard rejected all " + maxAttempts + " generated candidates. "
-                                + "Last score: " + noveltyResult.noveltyScore() + "/100. "
-                                + String.join(" ", noveltyResult.reasons()));
-            }
-
-            rejectionHint = noveltyResult.feedbackForRegeneration();
-            System.out.println("P0 novelty: regenerating with explicit anti-repeat feedback.");
         }
 
-        int artifactCount = config.expectedCount();
+        String[] delegatedArgs = stripP0Options(safeArgs);
+        if (config.createVideo) {
+            delegatedArgs = stripVideoModeFlags(delegatedArgs);
+        }
+        CheckedRunner.runOrThrow(delegatedArgs);
 
+        int artifactCount = config.expectedCount();
         if (config.integritySanitize) {
             System.out.println("P0 integrity: removing synthetic engagement and verification markers...");
             for (int i = 0; i < artifactCount; i++) {
-                Path image = config.imagePath(i);
-                IntegritySanitizer.sanitize(image, config.platform);
+                IntegritySanitizer.sanitize(config.imagePath(i), config.platform);
             }
         }
 
@@ -128,12 +85,14 @@ public final class P0Runner {
             renderDynamicVideos(config, format, artifactCount);
         }
 
-        if (config.noveltyEnabled && acceptedScript != null && !acceptedScript.isBlank()) {
-            noveltyGuard.record(acceptedScript, config.topic, format);
+        if (config.noveltyEnabled
+                && !currentScript.isBlank()
+                && (noveltyResult == null || noveltyResult.accepted())) {
+            noveltyGuard.record(currentScript, config.topic, format);
             System.out.println("P0 novelty: accepted script recorded in history.");
         }
 
-        if (noveltyResult != null && !noveltyResult.accepted() && !config.autoGenerateText) {
+        if (noveltyResult != null && !noveltyResult.accepted()) {
             System.out.println("P0 completed with a manual-content novelty warning.");
         } else {
             System.out.println("P0 pipeline complete.");
@@ -180,6 +139,7 @@ public final class P0Runner {
         try {
             Files.deleteIfExists(frameDirectory);
         } catch (IOException ignored) {
+            // Leave diagnostic intermediates only if another process has them open.
         }
     }
 
@@ -219,28 +179,10 @@ public final class P0Runner {
     private static String[] stripVideoModeFlags(String[] args) {
         List<String> result = new ArrayList<>();
         for (String arg : args) {
-            if ("--video".equals(arg) || "--concat-video".equals(arg)) {
-                continue;
-            }
-            result.add(arg);
-        }
-        return result.toArray(new String[0]);
-    }
-
-    private static String[] withTopic(String[] args, String topic) {
-        List<String> result = new ArrayList<>(Arrays.asList(args));
-        for (int i = 0; i < result.size(); i++) {
-            if ("--topic".equals(result.get(i))) {
-                if (i + 1 < result.size()) {
-                    result.set(i + 1, topic);
-                } else {
-                    result.add(topic);
-                }
-                return result.toArray(new String[0]);
+            if (!"--video".equals(arg) && !"--concat-video".equals(arg)) {
+                result.add(arg);
             }
         }
-        result.add("--topic");
-        result.add(topic);
         return result.toArray(new String[0]);
     }
 
@@ -409,9 +351,6 @@ public final class P0Runner {
         }
 
         int expectedCount() throws IOException {
-            if (autoGenerateText) {
-                return count >= 0 ? count : 10;
-            }
             if (!Files.exists(commentsFile)) {
                 throw new IOException("Input comments file was not found: " + commentsFile);
             }
@@ -421,39 +360,19 @@ public final class P0Runner {
             }
         }
 
-        String readScriptForNovelty() throws IOException {
-            if (Files.exists(scriptOut)) {
-                return Files.readString(scriptOut, StandardCharsets.UTF_8).trim();
+        String readCurrentScript() throws IOException {
+            if (!Files.exists(commentsFile)) {
+                return "";
             }
-
-            List<String> sidecars = new ArrayList<>();
-            int expected = expectedCount();
-            for (int i = 0; i < expected; i++) {
-                Path textSidecar = audioTextPath(i);
-                if (Files.exists(textSidecar)) {
-                    String text = Files.readString(textSidecar, StandardCharsets.UTF_8).trim();
-                    if (!text.isBlank()) {
-                        sidecars.add(text);
-                    }
-                }
-            }
-            if (!sidecars.isEmpty()) {
-                return String.join(System.lineSeparator(), sidecars);
-            }
-
-            if (!autoGenerateText && Files.exists(commentsFile)) {
-                return Files.readString(commentsFile, StandardCharsets.UTF_8).trim();
-            }
-            return "";
+            return Files.readString(commentsFile, StandardCharsets.UTF_8).trim();
         }
 
         List<String> readNarrationLines() throws IOException {
-            Path source = Files.exists(scriptOut) ? scriptOut : commentsFile;
-            if (!Files.exists(source)) {
+            if (!Files.exists(commentsFile)) {
                 return List.of();
             }
             List<String> result = new ArrayList<>();
-            for (String line : Files.readAllLines(source, StandardCharsets.UTF_8)) {
+            for (String line : Files.readAllLines(commentsFile, StandardCharsets.UTF_8)) {
                 String trimmed = line.trim();
                 if (!trimmed.isBlank()) {
                     result.add(trimmed);
@@ -473,10 +392,7 @@ public final class P0Runner {
 
             String line = index >= 0 && index < fallbackLines.size() ? fallbackLines.get(index) : "";
             if (index == 0 && postTitle != null && !postTitle.isBlank()) {
-                if (line.isBlank()) {
-                    return postTitle;
-                }
-                return postTitle + ". " + line;
+                return line.isBlank() ? postTitle : postTitle + ". " + line;
             }
             return line;
         }
