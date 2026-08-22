@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 $Model = 'llama3.1:8b'
+$EmbeddingModel = 'nomic-embed-text'
 $VoiceName = 'en_US-lessac-medium'
 $VoiceDir = Join-Path $PSScriptRoot 'voices'
 $VoiceFile = Join-Path $VoiceDir "$VoiceName.onnx"
@@ -110,6 +111,8 @@ function Ensure-Ollama {
 
     Write-Host "Pulling local LLM model: $Model"
     ollama pull $Model
+    Write-Host "Pulling semantic novelty embedding model: $EmbeddingModel"
+    ollama pull $EmbeddingModel
 }
 
 function Ensure-Piper {
@@ -227,6 +230,8 @@ Write-Step 'Setup complete'
 Write-Host 'Run this next:' -ForegroundColor Green
 Write-Host '  run_ai_windows.bat' -ForegroundColor Green
 Write-Host ''
+Write-Host 'P0 semantic novelty model:' -ForegroundColor Green
+Write-Host "  $EmbeddingModel" -ForegroundColor Green
 Write-Host 'Kokoro now uses this isolated Python:' -ForegroundColor Green
 Write-Host "  $KokoroPython" -ForegroundColor Green
 Write-Host ''
