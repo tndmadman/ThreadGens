@@ -15,7 +15,9 @@ public final class P2SmokeTest {
         testEmptyHistoryPasses();
         testExactArtifactBlocks();
         testExactScriptBlocks();
+        testSemanticPremiseBlocks();
         testSameVoiceAloneDoesNotBlock();
+        testUnknownVoiceDoesNotCreateReusePenalty();
         testHistoryRoundTripAndCorruptionFailsClosed();
         testReportWriting();
         System.out.println("P2 smoke tests passed.");
@@ -52,6 +54,20 @@ public final class P2SmokeTest {
         require(result.status() == PrePublishAuditor.Status.BLOCK, "exact script must block");
     }
 
+    private static void testSemanticPremiseBlocks() {
+        PrePublishAuditor auditor = new PrePublishAuditor(58, 78);
+        PublishFingerprint prior = fp(
+                "I found an old suitcase under my uncle's bed after the funeral and it contained a second set of family photos.",
+                "artifact-semantic-1", 0x11112222L, "confession", "voice-a", List.of(2.2, 3.1), "meta-a");
+        PublishFingerprint candidate = fp(
+                "While clearing a relative's room I discovered a sealed trunk with photographs of people who looked exactly like us.",
+                "artifact-semantic-2", 0x99998888L, "thread_story", "voice-b", List.of(4.7, 1.8), "meta-b");
+        PrePublishAuditor.Result result = auditor.assess(candidate,
+                List.of(new PublishAuditHistory.Entry(prior, "PASS", 20)), 0.92);
+        require(result.status() == PrePublishAuditor.Status.BLOCK,
+                "semantic premise similarity above the hard threshold must block");
+    }
+
     private static void testSameVoiceAloneDoesNotBlock() {
         PrePublishAuditor auditor = new PrePublishAuditor(58, 78);
         PublishFingerprint prior = fp(
@@ -64,6 +80,25 @@ public final class P2SmokeTest {
                 List.of(new PublishAuditHistory.Entry(prior, "PASS", 20)));
         require(result.status() != PrePublishAuditor.Status.BLOCK,
                 "same voice by itself must not block original content");
+    }
+
+    private static void testUnknownVoiceDoesNotCreateReusePenalty() {
+        PrePublishAuditor auditor = new PrePublishAuditor(58, 78);
+        PublishFingerprint candidate = fp("New candidate topic about coral restoration.", "artifact-new", 0x1234L,
+                "debate", "unknown", List.of(2.0, 4.5), "");
+        List<PublishAuditHistory.Entry> history = List.of(
+                new PublishAuditHistory.Entry(fp("Alpha mountain rescue story.", "a1", 0xffffL,
+                        "confession", "unknown", List.of(1.0, 8.0), ""), "PASS", 10),
+                new PublishAuditHistory.Entry(fp("Beta bakery argument.", "a2", 0xff00L,
+                        "best_answers", "unknown", List.of(9.0), ""), "PASS", 10),
+                new PublishAuditHistory.Entry(fp("Gamma weather balloon story.", "a3", 0xf0f0L,
+                        "thread_story", "unknown", List.of(3.0, 3.0, 3.0), ""), "PASS", 10),
+                new PublishAuditHistory.Entry(fp("Delta antique radio mystery.", "a4", 0xaaaaL,
+                        "escalating_conversation", "unknown", List.of(7.0, 1.0), ""), "PASS", 10)
+        );
+        PrePublishAuditor.Result result = auditor.assess(candidate, history);
+        require(result.scores().audio() < 0.95,
+                "unknown voice identifiers must not be treated as a known repeated voice");
     }
 
     private static void testHistoryRoundTripAndCorruptionFailsClosed() throws Exception {
