@@ -13,8 +13,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Semantic cross-video novelty check backed by Ollama embeddings.
@@ -29,8 +27,6 @@ final class SemanticNoveltyGuard {
     static final String DEFAULT_MODEL = "nomic-embed-text";
     static final double DEFAULT_THRESHOLD = 0.86;
     static final int DEFAULT_HISTORY_LIMIT = 50;
-
-    private static final Pattern SCRIPT_FIELD = Pattern.compile("\\\"script_b64\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
 
     record Result(boolean accepted, double highestSimilarity, String closestExcerpt, String reason) {
         String feedbackForRegeneration() {
@@ -104,13 +100,21 @@ final class SemanticNoveltyGuard {
             if (line.isBlank()) {
                 continue;
             }
-            Matcher matcher = SCRIPT_FIELD.matcher(line);
-            if (!matcher.find()) {
+
+            String encoded;
+            try {
+                encoded = JsonText.extractString(line, "script_b64");
+            } catch (IOException e) {
+                throw new IOException("Novelty history is malformed at line " + (i + 1)
+                        + " in " + historyFile + ". Refusing to treat corrupt history as empty.", e);
+            }
+            if (encoded == null) {
                 throw new IOException("Novelty history is malformed at line " + (i + 1)
                         + " in " + historyFile + ". Refusing to treat corrupt history as empty.");
             }
+
             try {
-                String decoded = new String(Base64.getDecoder().decode(matcher.group(1)), StandardCharsets.UTF_8).trim();
+                String decoded = decodeHistoryBase64(encoded).trim();
                 if (decoded.isBlank()) {
                     throw new IllegalArgumentException("empty decoded script");
                 }
@@ -123,6 +127,21 @@ final class SemanticNoveltyGuard {
         int safeLimit = Math.max(1, limit);
         int start = Math.max(0, scripts.size() - safeLimit);
         return List.copyOf(scripts.subList(start, scripts.size()));
+    }
+
+    private static String decodeHistoryBase64(String encoded) {
+        byte[] decoded;
+        try {
+            decoded = Base64.getUrlDecoder().decode(encoded);
+        } catch (IllegalArgumentException urlFailure) {
+            try {
+                decoded = Base64.getDecoder().decode(encoded);
+            } catch (IllegalArgumentException standardFailure) {
+                standardFailure.addSuppressed(urlFailure);
+                throw standardFailure;
+            }
+        }
+        return new String(decoded, StandardCharsets.UTF_8);
     }
 
     private List<double[]> requestEmbeddings(List<String> inputs) throws IOException, InterruptedException {
