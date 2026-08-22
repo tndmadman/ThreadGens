@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'tndmadman'
-version = '0.4.2-op-image-generation'
+version = '0.5.0-p0-originality'
 
 repositories {
     mavenCentral()
@@ -12,12 +12,12 @@ repositories {
 sourceSets.main.java.srcDirs = ['src']
 
 application {
-    mainClass = 'redditTxtToImg.CheckedRunner'
+    mainClass = 'redditTxtToImg.P0Entrypoint'
 }
 
 jar {
     archiveBaseName = 'ThreadGens'
     manifest {
-        attributes 'Main-Class': 'redditTxtToImg.CheckedRunner'
+        attributes 'Main-Class': 'redditTxtToImg.P0Entrypoint'
     }
 }

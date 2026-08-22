@@ -5,6 +5,7 @@ Set-Location $RepoRoot
 $Model = 'llama3.1:8b'
 $Count = 10
 $Platform = 'reddit'
+$Format = 'auto'
 $Tts = 'kokoro'
 $Voice = 'af_heart'
 $VideoFlags = @()
@@ -21,7 +22,7 @@ $env:TOKENIZERS_PARALLELISM = 'false'
 
 Write-Host ''
 Write-Host 'ThreadGens local AI runner'
-Write-Host 'Branch: fix/runtime-cleanup-image-ready'
+Write-Host 'Pipeline: P0 content originality + dynamic video'
 Write-Host ''
 
 Write-Host 'Choose platform/thread style:'
@@ -74,6 +75,32 @@ if ($Platform -eq 'x') {
     if ([string]::IsNullOrWhiteSpace($topic)) { $topic = 'weird everyday stories' }
 }
 
+Write-Host ''
+Write-Host 'Choose P0 content/video format:'
+Write-Host '1. Auto - fit the prompt and rotate recent formats (recommended)'
+Write-Host '2. Thread story'
+Write-Host '3. Confession'
+Write-Host '4. Debate'
+Write-Host '5. Best answers'
+Write-Host '6. Escalating conversation'
+$formatChoice = Read-Host 'Choice [1-6, default 1]'
+switch ($formatChoice.ToLowerInvariant()) {
+    '2' { $Format = 'thread_story' }
+    'thread_story' { $Format = 'thread_story' }
+    'thread' { $Format = 'thread_story' }
+    '3' { $Format = 'confession' }
+    'confession' { $Format = 'confession' }
+    '4' { $Format = 'debate' }
+    'debate' { $Format = 'debate' }
+    '5' { $Format = 'best_answers' }
+    'best_answers' { $Format = 'best_answers' }
+    'answers' { $Format = 'best_answers' }
+    '6' { $Format = 'escalating_conversation' }
+    'escalating_conversation' { $Format = 'escalating_conversation' }
+    'conversation' { $Format = 'escalating_conversation' }
+    default { $Format = 'auto' }
+}
+
 $countInput = Read-Host 'How many total slides/posts [10]'
 if (-not [string]::IsNullOrWhiteSpace($countInput)) { $Count = [int]$countInput }
 
@@ -82,7 +109,7 @@ if ($makeImage.ToLowerInvariant() -eq 'y' -or $makeImage.ToLowerInvariant() -eq 
     $ImageFlags = @('--image-mode', 'comfyui')
 }
 
-$makeVideo = Read-Host 'Make stitched MP4 video with smooth transitions? y/N'
+$makeVideo = Read-Host 'Make stitched MP4 video with dynamic P0 compositions? y/N'
 if ($makeVideo.ToLowerInvariant() -eq 'y' -or $makeVideo.ToLowerInvariant() -eq 'yes') {
     $VideoFlags = @('--video', '--concat-video')
 }
@@ -94,6 +121,7 @@ if ($unloadOllama.ToLowerInvariant() -eq 'y' -or $unloadOllama.ToLowerInvariant(
 
 Write-Host ''
 Write-Host "Platform:     $Platform"
+Write-Host "Format:       $Format"
 Write-Host "Reply style:  $postTitle"
 Write-Host "Original:     $topic"
 Write-Host "Count:        $Count"
@@ -111,6 +139,7 @@ $javaArgs = @(
     '--auto',
     '--topic', $topic,
     '--count', $Count,
+    '--format', $Format,
     '--llm-model', $Model,
     '--tts', $Tts,
     '--tts-command', $TtsCmd,
