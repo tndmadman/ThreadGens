@@ -15,6 +15,11 @@ public final class P2SmokeTest {
     }
 
     public static void main(String[] args) throws Exception {
+        if (args != null && args.length == 2 && "lock-process".equals(args[0])) {
+            runCrossProcessLockProbe(Path.of(args[1]));
+            return;
+        }
+
         testEmptyHistoryPasses();
         testExactArtifactBlocks();
         testExactScriptBlocks();
@@ -27,6 +32,22 @@ public final class P2SmokeTest {
         testConcurrentHistoryTransactionSerializes();
         testReportWriting();
         System.out.println("P2 smoke tests passed.");
+    }
+
+    private static void runCrossProcessLockProbe(Path historyFile) throws Exception {
+        PublishAuditHistory history = new PublishAuditHistory(historyFile, 20);
+        PublishFingerprint candidate = PublishFingerprint.forTest(
+                "Cross-process lock candidate.", "cross-process-artifact", 0x1234L, 0x5678L,
+                "confession", "voice-a", List.of(2.0, 3.0), "meta-a");
+        try (PublishAuditHistory.LockHandle ignored = history.lockExclusive()) {
+            if (history.load().isEmpty()) {
+                Thread.sleep(300);
+                history.record(candidate, "PASS", 1);
+                System.out.println("P2 lock probe recorded first candidate.");
+            } else {
+                System.out.println("P2 lock probe observed existing candidate.");
+            }
+        }
     }
 
     private static void testEmptyHistoryPasses() {
