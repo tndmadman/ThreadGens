@@ -226,7 +226,9 @@ final class TimedVisualStateRenderer {
         int h = image.getHeight();
         int x0 = clamp((int) Math.round(w * (itemIndex == 0 ? 0.085 : 0.145)), 0, w - 1);
         int x1 = clamp((int) Math.round(w * 0.91), x0 + 1, w);
-        int y0 = clamp((int) Math.round(h * 0.215), 0, h - 1);
+        // Start below the author/reply pill. At 1080x1920 this is ~451px,
+        // immediately above the first reply baseline and the OP title/body area.
+        int y0 = clamp((int) Math.round(h * 0.235), 0, h - 1);
         int y1 = clamp((int) Math.round(h * 0.77), y0 + 1, h);
         int minimumBrightPixels = Math.max(5, (x1 - x0) / 175);
 
@@ -313,6 +315,7 @@ final class TimedVisualStateRenderer {
         double remaining = Math.max(0.0, Math.min(1.0, progress)) * totalWeight;
         Graphics2D g = image.createGraphics();
         configure(g);
+        Color background = sampleCardBackground(image);
 
         for (TextBand band : bands) {
             if (remaining >= band.weight()) {
@@ -331,7 +334,6 @@ final class TimedVisualStateRenderer {
             int maskTop = clamp(band.top() - 5, 0, image.getHeight() - 1);
             int maskBottom = clamp(band.bottom() + 7, maskTop + 1, image.getHeight());
 
-            Color background = sampleCardBackground(image, band);
             g.setColor(background);
             g.fillRect(maskStart, maskTop, maskRight - maskStart, maskBottom - maskTop);
             remaining = 0.0;
@@ -339,10 +341,24 @@ final class TimedVisualStateRenderer {
         g.dispose();
     }
 
-    private static Color sampleCardBackground(BufferedImage image, TextBand band) {
-        int sampleX = clamp((int) Math.round(image.getWidth() * 0.925), 0, image.getWidth() - 1);
-        int sampleY = clamp((band.top() + band.bottom()) / 2, 0, image.getHeight() - 1);
-        return new Color(image.getRGB(sampleX, sampleY));
+    /**
+     * Both OP and reply cards end at x=1016 on the default 1080 renderer and
+     * their wrapped text ends near x=974. Sampling at 93.5% width therefore
+     * lands in a stable, empty strip of the actual card. Half-height is also
+     * safely inside the card and away from header/footer decoration.
+     */
+    private static Color sampleCardBackground(BufferedImage image) {
+        int sampleX = clamp((int) Math.round(image.getWidth() * 0.935), 0, image.getWidth() - 1);
+        int sampleY = clamp((int) Math.round(image.getHeight() * 0.50), 0, image.getHeight() - 1);
+        Color sampled = new Color(image.getRGB(sampleX, sampleY));
+        int brightness = (sampled.getRed() + sampled.getGreen() + sampled.getBlue()) / 3;
+        if (brightness <= 115) {
+            return sampled;
+        }
+
+        // Fail visually dark rather than ever painting a bright unread-text mask
+        // if a future renderer layout places decoration at the preferred sample.
+        return new Color(31, 31, 33);
     }
 
     /**
