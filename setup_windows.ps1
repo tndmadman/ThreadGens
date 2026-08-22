@@ -61,6 +61,9 @@ function Install-WithWinget($Id, $Name) {
 
     Write-Host "Installing $Name with winget..."
     winget install --id $Id -e --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+        throw "winget failed to install $Name (package $Id), exit code $LASTEXITCODE."
+    }
     Refresh-Path
 }
 
@@ -111,8 +114,27 @@ function Ensure-Ollama {
 
     Write-Host "Pulling local LLM model: $Model"
     ollama pull $Model
+    if ($LASTEXITCODE -ne 0) { throw "Could not pull Ollama model: $Model" }
     Write-Host "Pulling semantic novelty embedding model: $EmbeddingModel"
     ollama pull $EmbeddingModel
+    if ($LASTEXITCODE -ne 0) { throw "Could not pull Ollama embedding model: $EmbeddingModel" }
+}
+
+function Ensure-FFmpeg {
+    Write-Step 'Checking FFmpeg and FFprobe'
+    Refresh-Path
+    if (-not (Test-Command 'ffmpeg') -or -not (Test-Command 'ffprobe')) {
+        Install-WithWinget 'Gyan.FFmpeg' 'FFmpeg'
+    }
+    Refresh-Path
+    if (-not (Test-Command 'ffmpeg')) {
+        throw 'ffmpeg was not found after install. Close this window, open a new terminal, and rerun setup_windows.bat.'
+    }
+    if (-not (Test-Command 'ffprobe')) {
+        throw 'ffprobe was not found after install. ThreadGens P0 video timing requires ffprobe.'
+    }
+    ffmpeg -version | Select-Object -First 1
+    ffprobe -version | Select-Object -First 1
 }
 
 function Ensure-Piper {
@@ -200,12 +222,15 @@ function Ensure-Kokoro {
 
     Write-Host 'Upgrading pip inside Kokoro venv...'
     & $KokoroPython -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to upgrade pip in Kokoro venv.' }
 
     Write-Host 'Installing Kokoro Python packages inside Kokoro venv...'
     & $KokoroPython -m pip install --upgrade -r $KokoroRequirements
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to install Kokoro requirements.' }
 
     Write-Host 'Testing Kokoro imports inside Kokoro venv...'
     & $KokoroPython -c "from kokoro import KPipeline; import soundfile; import numpy; print('Kokoro venv import test passed')"
+    if ($LASTEXITCODE -ne 0) { throw 'Kokoro import validation failed.' }
 }
 
 function Build-ThreadGens {
@@ -216,11 +241,13 @@ function Build-ThreadGens {
         throw 'No Java source files found in src\redditTxtToImg.'
     }
     javac -d (Join-Path $PSScriptRoot 'out') $javaFiles
+    if ($LASTEXITCODE -ne 0) { throw "ThreadGens Java build failed with exit code $LASTEXITCODE." }
     Write-Host 'Build complete.'
 }
 
 Ensure-Java
 Ensure-Ollama
+Ensure-FFmpeg
 Ensure-Piper
 Ensure-PiperVoice
 Ensure-Kokoro
@@ -232,6 +259,7 @@ Write-Host '  run_ai_windows.bat' -ForegroundColor Green
 Write-Host ''
 Write-Host 'P0 semantic novelty model:' -ForegroundColor Green
 Write-Host "  $EmbeddingModel" -ForegroundColor Green
+Write-Host 'FFmpeg/FFprobe are ready for timed P0 video.' -ForegroundColor Green
 Write-Host 'Kokoro now uses this isolated Python:' -ForegroundColor Green
 Write-Host "  $KokoroPython" -ForegroundColor Green
 Write-Host ''
