@@ -76,6 +76,7 @@ final class PublishAuditHistory {
                 + q("script_hash", fp.scriptHash) + ","
                 + q("artifact_hash", fp.artifactHash) + ","
                 + q("visuals", fp.visualHashCsv()) + ","
+                + q("identities", fp.identityHashCsv()) + ","
                 + q("voice_b64", enc(fp.voice)) + ","
                 + q("tts", fp.ttsEngine) + ","
                 + q("pacing", fp.pacingCsv()) + ","
@@ -93,22 +94,27 @@ final class PublishAuditHistory {
         require(values, "schema", "created", "platform", "format", "script_b64", "script_hash",
                 "artifact_hash", "visuals", "voice_b64", "tts", "pacing", "total_duration",
                 "metadata_hash", "status", "risk");
-        if (Integer.parseInt(values.get("schema")) != PublishFingerprint.SCHEMA_VERSION) {
-            throw new IllegalArgumentException("unsupported schema " + values.get("schema"));
+        int schema = Integer.parseInt(values.get("schema"));
+        if (schema < 1 || schema > PublishFingerprint.SCHEMA_VERSION) {
+            throw new IllegalArgumentException("unsupported schema " + schema);
+        }
+        if (schema >= 2 && !values.containsKey("identities")) {
+            throw new IllegalArgumentException("missing field: identities");
         }
         String script = dec(values.get("script_b64"));
         String voice = dec(values.get("voice_b64"));
-        List<Long> visuals = parseVisuals(values.get("visuals"));
+        List<Long> visuals = parseHashes(values.get("visuals"));
+        List<Long> identities = schema >= 2 ? parseHashes(values.get("identities")) : List.of();
         List<Double> pacing = parseDoubles(values.get("pacing"));
         PublishFingerprint fp = new PublishFingerprint(
                 values.get("created"), values.get("platform"), values.get("format"), script,
-                values.get("script_hash"), values.get("artifact_hash"), visuals, voice,
+                values.get("script_hash"), values.get("artifact_hash"), visuals, identities, voice,
                 values.get("tts"), pacing, Double.parseDouble(values.get("total_duration")),
                 values.get("metadata_hash"));
         return new Entry(fp, values.get("status"), Integer.parseInt(values.get("risk")));
     }
 
-    private static List<Long> parseVisuals(String csv) {
+    private static List<Long> parseHashes(String csv) {
         if (csv == null || csv.isBlank()) return List.of();
         List<Long> values = new ArrayList<>();
         for (String token : csv.split(",")) values.add(Long.parseUnsignedLong(token, 16));
