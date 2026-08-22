@@ -6,22 +6,27 @@ P2 pre-publish audit release:
 - P2Entrypoint is the final production entrypoint and runs after the complete P0 pipeline
 - final videos are fingerprinted before they are considered publish-ready
 - persistent approved-output history lives at data/publish_history.jsonl and fails closed if malformed
+- publish-history decisions are concurrency-safe with in-process and OS file locking
 - exact final-artifact and exact-script duplicates hard-block
 - local Ollama semantic comparison catches heavily paraphrased copies of approved premises
 - source screenshot perceptual hashes detect visually repeated presentation/content
+- rendered avatar and author/header regions are independently fingerprinted to measure actual profile/username reuse
 - completed MP4s are sampled perceptually so burned captions, overlays and final presentation are included in visual similarity
 - final artifact hashing is filename-independent
 - actual auto-selected P0 format is recorded even when generation-history recording is explicitly disabled
-- known voice/TTS reuse, selected content format, normalized segment pacing, and optional metadata signatures contribute to aggregate risk
-- missing/unknown voice identifiers do not create false voice-reuse penalties
-- recent same-format and same-known-voice streaks add feed-level repetition risk
+- known voice/TTS reuse, selected content format, normalized segment pacing, rendered identity reuse, and optional metadata signatures contribute to aggregate risk
+- omitted --voice resolves to the renderer's configured default voice instead of being recorded as unknown
+- genuinely missing/unknown voice identifiers do not create false voice-reuse penalties
+- recent same-format, same-known-voice, and rendered-identity streaks add feed-level repetition risk
+- publish-history schema 2 stores identity fingerprints while schema-1 history remains readable
 - optional P1 caption/identity/provenance metadata is consumed through CLI signatures or production_manifest.json / p1_manifest.json without a compile-time P1 dependency
 - every audited video receives a JSON publish_audit.json report with PASS/WARN/BLOCK, component scores and findings
 - production defaults use block mode; blocked videos are not recorded as approved history
 - warn mode allows an explicit WARN_OVERRIDE while retaining the audit result in history
 - batch jobs naturally compare against earlier successful jobs because approved outputs share publish history
 - the existing batch copy to final_videos only happens after the P2 entrypoint returns success
-- CI covers deterministic scoring/history, semantic hard-block behavior, malformed-history fail-closed behavior, report generation, real FFmpeg/ffprobe fingerprint capture, final-video frame sampling, exact-artifact blocking, and Windows Java/PowerShell validation
+- CI covers deterministic scoring/history, semantic hard-block behavior, malformed-history fail-closed behavior, backward-compatible history parsing, concurrency locking, rendered identity scoring, default voice resolution, real FFmpeg/ffprobe fingerprint capture, final-video frame sampling, exact-artifact blocking, and an end-to-end P2Entrypoint PASS-then-BLOCK production gate
+- Windows CI covers Java compilation, P2 unit tests, and PowerShell launcher parsing
 
 P0 remains fully included:
 - five content-aware formats
@@ -44,3 +49,4 @@ Default output/history locations:
 - P2 audit report: output/video/publish_audit.json (or each batch job's video directory)
 - P0 novelty history: data/generation_history.jsonl (git-ignored)
 - P2 approved publish history: data/publish_history.jsonl (git-ignored)
+- P2 lock: data/publish_history.jsonl.lock (git-ignored)
