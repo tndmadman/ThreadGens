@@ -1,0 +1,77 @@
+package redditTxtToImg;
+
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import javax.imageio.ImageIO;
+
+/** Exercises P2 capture with real FFmpeg/ffprobe media and perceptual image hashing. */
+public final class P2ArtifactSmokeTest {
+    private P2ArtifactSmokeTest() {
+    }
+
+    public static void main(String[] args) throws Exception {
+        Path dir = Files.createTempDirectory("threadgens-p2-artifact-");
+        try {
+            Path image = dir.resolve("0audit.png");
+            BufferedImage buffered = new BufferedImage(320, 568, BufferedImage.TYPE_INT_RGB);
+            Graphics2D graphics = buffered.createGraphics();
+            try {
+                graphics.fillRect(0, 0, 320, 568);
+                graphics.drawString("P2 artifact smoke", 40, 120);
+                graphics.drawString("different visible states", 40, 220);
+            } finally {
+                graphics.dispose();
+            }
+            ImageIO.write(buffered, "png", image.toFile());
+
+            Path audio = dir.resolve("0audit.wav");
+            run(List.of("ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+                    "-t", "0.8", audio.toString()));
+            Path video = dir.resolve("final.mp4");
+            run(List.of("ffmpeg", "-y", "-loop", "1", "-i", image.toString(), "-i", audio.toString(),
+                    "-t", "1.0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", video.toString()));
+
+            PublishFingerprint first = PublishFingerprint.capture(new PublishFingerprint.CaptureInput(
+                    "reddit", "thread_story", "A unique P2 artifact smoke test story.",
+                    List.of(video), List.of(image), List.of(audio), "smoke_voice", "kokoro", "", "ffmpeg"));
+            require(!first.artifactHash.isBlank(), "artifact hash must exist");
+            require(!first.visualHashes.isEmpty(), "visual perceptual hash must exist");
+            require(!first.segmentDurations.isEmpty() && first.segmentDurations.get(0) > 0,
+                    "ffprobe audio duration must exist");
+
+            Path historyPath = dir.resolve("publish_history.jsonl");
+            PublishAuditHistory history = new PublishAuditHistory(historyPath, 20);
+            history.record(first, "PASS", 10);
+            PublishFingerprint duplicate = PublishFingerprint.capture(new PublishFingerprint.CaptureInput(
+                    "reddit", "thread_story", "Different text but same finished artifact.",
+                    List.of(video), List.of(image), List.of(audio), "other_voice", "kokoro", "", "ffmpeg"));
+            PrePublishAuditor.Result result = new PrePublishAuditor(58, 78).assess(duplicate, history.load());
+            require(result.status() == PrePublishAuditor.Status.BLOCK, "same finished artifact must block");
+            System.out.println("P2 artifact smoke test passed.");
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
+    private static void run(List<String> command) throws Exception {
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        String output = new String(process.getInputStream().readAllBytes());
+        int exit = process.waitFor();
+        if (exit != 0) throw new IOException("Command failed (" + exit + "): " + String.join(" ", command) + "\n" + output);
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        if (root == null || !Files.exists(root)) return;
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted((a, b) -> b.compareTo(a)).toList()) Files.deleteIfExists(path);
+        }
+    }
+}
