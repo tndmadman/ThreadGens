@@ -39,7 +39,7 @@ public final class P0Runner {
             return;
         }
         if (contains(safeArgs, "--list-voices") || contains(safeArgs, "--gui")) {
-            CheckedRunner.runOrThrow(stripP0Options(safeArgs));
+            CheckedRunner.runRawOrThrow(stripP0Options(safeArgs));
             return;
         }
 
@@ -74,10 +74,10 @@ public final class P0Runner {
         if (config.createVideo) {
             delegatedArgs = stripVideoModeFlags(delegatedArgs);
         }
-        CheckedRunner.runOrThrow(delegatedArgs);
+        CheckedRunner.runRawOrThrow(delegatedArgs);
 
         if (config.integritySanitize) {
-            System.out.println("P0 integrity: removing synthetic engagement and verification markers...");
+            System.out.println("P0 integrity: validating rendered social frames...");
             for (int i = 0; i < artifactCount; i++) {
                 IntegritySanitizer.sanitize(config.imagePath(i), config.platform);
             }
@@ -123,32 +123,49 @@ public final class P0Runner {
         List<Path> clips = new ArrayList<>();
         List<String> narrationFallback = config.readNarrationLines();
 
-        System.out.println("P0 video: building dynamic " + format.id() + " compositions...");
+        System.out.println("P0 video: building timed multi-state " + format.id() + " compositions...");
         for (int i = 0; i < artifactCount; i++) {
             Path image = config.imagePath(i);
             Path audio = config.audioPath(i);
             Path clip = config.videoPath(i);
             String narration = config.readExactNarration(i, narrationFallback);
+            double audioDuration = dynamicVideo.probeDurationSeconds(audio);
 
-            Path frame = frameDirectory.resolve(config.baseName(i) + "_" + format.id() + ".png");
-            DynamicVisualRenderer.render(image, narration, format, i, artifactCount, frame);
-            Files.deleteIfExists(clip);
-            dynamicVideo.renderClip(
-                    frame, audio, clip, config.width, config.height, format, i);
+            List<TimedVisualStateRenderer.RenderedState> states = TimedVisualStateRenderer.renderStates(
+                    image,
+                    narration,
+                    format,
+                    i,
+                    artifactCount,
+                    audioDuration,
+                    frameDirectory,
+                    config.baseName(i) + "_" + format.id()
+            );
+            try {
+                Files.deleteIfExists(clip);
+                dynamicVideo.renderClip(
+                        states,
+                        audio,
+                        clip,
+                        config.width,
+                        config.height,
+                        format,
+                        i
+                );
+            } finally {
+                TimedVisualStateRenderer.cleanup(states);
+            }
             clips.add(clip);
-            System.out.println("Generated dynamic clip: " + clip);
+            System.out.println("Generated timed-state clip: " + clip);
         }
 
         if (config.concatVideo && !clips.isEmpty()) {
             Path finalVideo = config.videoDirectory.resolve(config.finalVideoName);
             Files.deleteIfExists(finalVideo);
-            dynamicVideo.combineClips(clips, finalVideo);
-            System.out.println("Generated dynamic final video: " + finalVideo);
+            dynamicVideo.combineClips(clips, finalVideo, format);
+            System.out.println("Generated format-specific final video: " + finalVideo);
         }
 
-        for (int i = 0; i < artifactCount; i++) {
-            Files.deleteIfExists(frameDirectory.resolve(config.baseName(i) + "_" + format.id() + ".png"));
-        }
         try {
             Files.deleteIfExists(frameDirectory);
         } catch (IOException ignored) {
@@ -173,7 +190,9 @@ public final class P0Runner {
                 }
                 continue;
             }
-            if ("--no-novelty".equals(arg) || "--no-integrity-sanitize".equals(arg)) {
+            if ("--no-novelty".equals(arg)
+                    || "--no-integrity-sanitize".equals(arg)
+                    || "--no-semantic-novelty".equals(arg)) {
                 continue;
             }
             result.add(arg);
@@ -186,7 +205,10 @@ public final class P0Runner {
                 || "--history-file".equals(arg)
                 || "--history-limit".equals(arg)
                 || "--novelty-threshold".equals(arg)
-                || "--novelty-retries".equals(arg);
+                || "--novelty-retries".equals(arg)
+                || "--embedding-model".equals(arg)
+                || "--semantic-threshold".equals(arg)
+                || "--semantic-history-limit".equals(arg);
     }
 
     private static String[] stripVideoModeFlags(String[] args) {
@@ -315,8 +337,14 @@ public final class P0Runner {
                         case "--novelty-retries" -> {
                             if (i + 1 < args.length) config.noveltyRetries = parseInt(args[++i], config.noveltyRetries);
                         }
+                        case "--embedding-model", "--semantic-threshold", "--semantic-history-limit" -> {
+                            if (i + 1 < args.length) i++;
+                        }
                         case "--no-novelty" -> config.noveltyEnabled = false;
                         case "--no-integrity-sanitize" -> config.integritySanitize = false;
+                        case "--no-semantic-novelty" -> {
+                            // Consumed by P0Entrypoint during automatic generation.
+                        }
                         default -> {
                             if (CliOptions.isValueOption(arg) && i + 1 < args.length) {
                                 i++;
