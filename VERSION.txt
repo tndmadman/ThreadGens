@@ -9,15 +9,19 @@ P2 pre-publish audit release:
 - exact final-artifact and exact-script duplicates hard-block
 - local Ollama semantic comparison catches heavily paraphrased copies of approved premises
 - source screenshot perceptual hashes detect visually repeated presentation/content
-- voice/TTS reuse, selected content format, normalized segment pacing, and optional metadata signatures contribute to aggregate risk
-- recent same-format and same-voice streaks add feed-level repetition risk
+- completed MP4s are sampled perceptually so burned captions, overlays and final presentation are included in visual similarity
+- final artifact hashing is filename-independent
+- actual auto-selected P0 format is recorded even when generation-history recording is explicitly disabled
+- known voice/TTS reuse, selected content format, normalized segment pacing, and optional metadata signatures contribute to aggregate risk
+- missing/unknown voice identifiers do not create false voice-reuse penalties
+- recent same-format and same-known-voice streaks add feed-level repetition risk
 - optional P1 caption/identity/provenance metadata is consumed through CLI signatures or production_manifest.json / p1_manifest.json without a compile-time P1 dependency
 - every audited video receives a JSON publish_audit.json report with PASS/WARN/BLOCK, component scores and findings
 - production defaults use block mode; blocked videos are not recorded as approved history
 - warn mode allows an explicit WARN_OVERRIDE while retaining the audit result in history
 - batch jobs naturally compare against earlier successful jobs because approved outputs share publish history
 - the existing batch copy to final_videos only happens after the P2 entrypoint returns success
-- CI covers deterministic scoring/history, malformed-history fail-closed behavior, report generation, real FFmpeg/ffprobe fingerprint capture, perceptual image hashing, exact-artifact blocking, and Windows Java/PowerShell validation
+- CI covers deterministic scoring/history, semantic hard-block behavior, malformed-history fail-closed behavior, report generation, real FFmpeg/ffprobe fingerprint capture, final-video frame sampling, exact-artifact blocking, and Windows Java/PowerShell validation
 
 P0 remains fully included:
 - five content-aware formats
