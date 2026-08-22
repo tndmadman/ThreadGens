@@ -33,8 +33,15 @@ public final class P0Entrypoint {
             P0Runner.runOrThrow(protectManualScriptInput(safeArgs));
             return;
         }
+
+        P0Runner.RunConfig initialConfig = P0Runner.RunConfig.fromArgs(safeArgs);
+        if ("x".equals(initialConfig.platform) && !hasValueOption(safeArgs, "--post-title")) {
+            safeArgs = appendValueOption(safeArgs, "--post-title", "");
+            initialConfig.postTitle = "";
+        }
+
         if (!contains(safeArgs, "--auto")) {
-            P0Runner.RunConfig manualConfig = P0Runner.RunConfig.fromArgs(safeArgs);
+            P0Runner.RunConfig manualConfig = initialConfig;
             NoveltyGuard manualHistory = new NoveltyGuard(
                     manualConfig.historyFile, manualConfig.noveltyThreshold, manualConfig.historyLimit);
             ContentFormat manualFormat = FormatSelector.resolve(
@@ -47,7 +54,7 @@ public final class P0Entrypoint {
             return;
         }
 
-        P0Runner.RunConfig config = P0Runner.RunConfig.fromArgs(safeArgs);
+        P0Runner.RunConfig config = initialConfig;
         AutoSettings auto = AutoSettings.fromArgs(safeArgs);
         NoveltyGuard guard = new NoveltyGuard(
                 config.historyFile, config.noveltyThreshold, config.historyLimit);
@@ -192,6 +199,22 @@ public final class P0Entrypoint {
             result.add("--script-out");
             result.add(Path.of("output", ".p0-manual-unused", "generated_comments.txt").toString());
         }
+        return result.toArray(new String[0]);
+    }
+
+    private static boolean hasValueOption(String[] args, String option) {
+        for (int i = 0; i < args.length; i++) {
+            if (option.equals(args[i])) {
+                return i + 1 < args.length;
+            }
+        }
+        return false;
+    }
+
+    private static String[] appendValueOption(String[] args, String option, String value) {
+        List<String> result = new ArrayList<>(List.of(args));
+        result.add(option);
+        result.add(value == null ? "" : value);
         return result.toArray(new String[0]);
     }
 
