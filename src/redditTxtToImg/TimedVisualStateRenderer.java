@@ -236,12 +236,16 @@ final class TimedVisualStateRenderer {
             String narration,
             int itemIndex
     ) {
-        boolean reddit = looksLikeReddit(image);
         int expectedWords = countWords(narration);
+        if (expectedWords <= 0) {
+            return List.of();
+        }
+
+        boolean reddit = looksLikeReddit(image);
         List<WordBox> best = List.of();
         int bestDifference = Integer.MAX_VALUE;
 
-        for (int gap = 5; gap <= 22; gap++) {
+        for (int gap = 3; gap <= 24; gap++) {
             List<WordBox> candidate = detectWordBoxes(image, reddit, itemIndex, gap);
             int difference = Math.abs(candidate.size() - expectedWords);
             if (!candidate.isEmpty() && difference < bestDifference) {
@@ -251,6 +255,17 @@ final class TimedVisualStateRenderer {
             if (difference == 0) {
                 break;
             }
+        }
+
+        // Never attach narration timings to an arbitrary block of bright text.
+        // Smooth reveal is only safe when the raster segmentation accounts for
+        // essentially the same number of words as the narration. This rejects
+        // generic smoke frames and avoids timing drift if a social layout cannot
+        // be segmented confidently.
+        int allowedDifference = Math.max(1, expectedWords / 10);
+        int minimumCoverage = Math.max(1, (int) Math.ceil(expectedWords * 0.90));
+        if (best.isEmpty() || bestDifference > allowedDifference || best.size() < minimumCoverage) {
+            return List.of();
         }
         return best;
     }
@@ -269,7 +284,9 @@ final class TimedVisualStateRenderer {
         int y1 = clamp((int) Math.round(h * 0.76), 1, h);
         if (reddit) {
             x0 = clamp((int) Math.round(w * (itemIndex == 0 ? 0.085 : 0.145)), 0, w - 1);
-            y0 = clamp((int) Math.round(h * 0.235), 0, h - 1);
+            // Include the full OP title glyphs. Small header/pill lettering is
+            // rejected below by the scale-aware minimum text-band height.
+            y0 = clamp((int) Math.round(h * 0.195), 0, h - 1);
         } else {
             x0 = clamp((int) Math.round(w * (itemIndex == 0 ? 0.09 : 0.18)), 0, w - 1);
             y0 = clamp((int) Math.round(h * (itemIndex == 0 ? 0.19 : 0.205)), 0, h - 1);
@@ -292,6 +309,7 @@ final class TimedVisualStateRenderer {
             return List.of();
         }
 
+        int minimumBandHeight = Math.max(7, h / 100);
         List<int[]> bands = new ArrayList<>();
         int start = activeRows.get(0);
         int previous = start;
@@ -302,7 +320,8 @@ final class TimedVisualStateRenderer {
                 previous = current;
                 continue;
             }
-            if (previous - start + 1 >= 7 && previous - start + 1 <= 92) {
+            int bandHeight = previous - start + 1;
+            if (bandHeight >= minimumBandHeight && bandHeight <= 92) {
                 bands.add(new int[]{start, previous});
             }
             if (!end) {
