@@ -15,6 +15,13 @@ set "PYTHONWARNINGS=ignore"
 set "HF_HUB_DISABLE_PROGRESS_BARS=1"
 set "TOKENIZERS_PARALLELISM=false"
 
+if /I "%~1"=="--self-test" (
+  call :EnsureBatchRunner
+  if errorlevel 1 exit /b 1
+  echo Batch launcher self-test passed.
+  exit /b 0
+)
+
 if not "%~1"=="" set "INPUT_FILE=%~1"
 if not "%~2"=="" set "COUNT=%~2"
 
