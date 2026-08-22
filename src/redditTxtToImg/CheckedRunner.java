@@ -12,14 +12,19 @@ import java.util.Properties;
 import java.util.Set;
 
 /**
- * Runs the selected platform generator and verifies that the expected artifacts were created.
+ * User-facing checked entry point.
+ *
+ * Normal calls route through P0Entrypoint so CLI, GUI and older scripts inherit
+ * the production originality/integrity pipeline. The package-private raw method
+ * remains available to P0Runner and explicit compatibility tests without
+ * creating recursion.
  */
 public class CheckedRunner {
     private static final Set<String> VOICE_DEPENDENCY_OPTIONS = Set.of("--tts", "--voice-dir");
 
     public static void main(String[] args) {
         try {
-            runOrThrow(args);
+            runOrThrow(args == null ? new String[0] : args);
         } catch (Exception e) {
             System.err.println("Checked run failed: " + e.getMessage());
             e.printStackTrace();
@@ -28,6 +33,10 @@ public class CheckedRunner {
     }
 
     public static void runOrThrow(String[] args) throws IOException, InterruptedException {
+        P0Entrypoint.runOrThrow(args == null ? new String[0] : args);
+    }
+
+    static void runRawOrThrow(String[] args) throws IOException, InterruptedException {
         String[] normalizedArgs = normalizeArgsForRenderer(args);
         ExpectedOutputs expected = ExpectedOutputs.fromArgs(normalizedArgs);
         String[] rendererArgs = stripPlatformArgs(normalizedArgs);
@@ -39,10 +48,8 @@ public class CheckedRunner {
 
         expected.validateRequestedModes();
         expected.deleteExpectedArtifacts();
-
         runSelectedPlatform(expected.platform, rendererArgs);
         expected.generateAndOverlayOpImageIfRequested();
-
         expected.verifyArtifactsExist();
     }
 
@@ -58,10 +65,6 @@ public class CheckedRunner {
         throw new IllegalArgumentException("Unsupported platform: " + platform + ". Supported values: reddit, x.");
     }
 
-    /**
-     * Platform is consumed by CheckedRunner. The raw renderers do not need it, and values like
-     * --platform x can otherwise be mistaken for positional output directories.
-     */
     private static String[] stripPlatformArgs(String[] args) {
         if (args == null || args.length == 0) {
             return new String[0];
@@ -80,10 +83,6 @@ public class CheckedRunner {
         return result.toArray(new String[0]);
     }
 
-    /**
-     * The renderers resolve --voice immediately using the current --tts and --voice-dir values.
-     * Moving those dependencies before --voice makes CLI argument order forgiving.
-     */
     private static String[] normalizeArgsForRenderer(String[] args) {
         if (args == null || args.length == 0 || !Arrays.asList(args).contains("--voice")) {
             return args == null ? new String[0] : args.clone();
