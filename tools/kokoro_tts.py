@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 import contextlib
 import os
+import re
 import sys
 import time
 import warnings
 from pathlib import Path
+
+
+TIMING_HEADER = "threadgens-kokoro-timing-v1"
+SAMPLE_RATE = 24000
 
 
 def is_verbose(args):
@@ -37,6 +43,81 @@ def log(message, verbose):
         print(f"[kokoro] {message}", flush=True)
 
 
+def normalized_word(value):
+    return re.sub(r"[^\w]+", "", value or "", flags=re.UNICODE).lower().replace("_", "")
+
+
+def timing_path_for(output_path):
+    return output_path.with_name(output_path.stem + ".timing.tsv")
+
+
+def align_model_tokens_to_input_words(text, timed_tokens):
+    source_words = re.findall(r"\S+", text)
+    tokens = [token for token in timed_tokens if normalized_word(token[0])]
+    if not source_words or not tokens:
+        return []
+
+    aligned = []
+    token_index = 0
+    for source_word in source_words:
+        target = normalized_word(source_word)
+        if not target:
+            continue
+
+        match_end = None
+        combined = ""
+        for j in range(token_index, min(len(tokens), token_index + 8)):
+            combined += normalized_word(tokens[j][0])
+            if combined == target:
+                match_end = j
+                break
+            if target.startswith(combined):
+                continue
+            break
+
+        if match_end is None:
+            # Some G2P paths may emit one extra token around punctuation. Search
+            # a very small window rather than silently drifting the whole track.
+            for j in range(token_index, min(len(tokens), token_index + 4)):
+                if normalized_word(tokens[j][0]) == target:
+                    token_index = j
+                    match_end = j
+                    break
+
+        if match_end is None:
+            return []
+
+        start = tokens[token_index][1]
+        end = tokens[match_end][2]
+        if end <= start:
+            return []
+        aligned.append((source_word, start, end))
+        token_index = match_end + 1
+
+    return aligned if len(aligned) == len(source_words) else []
+
+
+def write_timing_sidecar(output_path, text, timed_tokens, verbose):
+    timing_path = timing_path_for(output_path)
+    try:
+        timing_path.unlink(missing_ok=True)
+    except TypeError:
+        if timing_path.exists():
+            timing_path.unlink()
+
+    aligned = align_model_tokens_to_input_words(text, timed_tokens)
+    if not aligned:
+        log("exact token timing unavailable; Java will use its measured-duration fallback", verbose)
+        return
+
+    lines = [TIMING_HEADER]
+    for word, start, end in aligned:
+        encoded = base64.urlsafe_b64encode(word.encode("utf-8")).decode("ascii").rstrip("=")
+        lines.append(f"word\t{start:.6f}\t{end:.6f}\t{encoded}")
+    timing_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log(f"wrote exact timing sidecar: {timing_path} ({len(aligned)} words)", verbose)
+
+
 def main():
     parser = argparse.ArgumentParser(description="ThreadGens Kokoro TTS helper")
     parser.add_argument("--text-file", required=True, help="UTF-8 text file to read")
@@ -65,7 +146,6 @@ def main():
     text = text_path.read_text(encoding="utf-8").strip()
     if not text:
         raise SystemExit("No text to speak.")
-    log(f"text length: {len(text)} chars", verbose)
 
     log("importing Kokoro dependencies...", verbose)
     try:
@@ -73,11 +153,6 @@ def main():
             from kokoro import KPipeline
             import numpy as np
             import soundfile as sf
-            try:
-                import torch
-                log(f"torch cuda available: {torch.cuda.is_available()}", verbose)
-            except Exception as torch_exc:
-                log(f"torch cuda check skipped: {torch_exc}", verbose)
     except Exception as exc:
         raise SystemExit(
             "Kokoro dependencies are missing. Run setup_windows.bat again so it installs into .venv-kokoro.\n"
@@ -85,37 +160,55 @@ def main():
         )
 
     log(f"loading Kokoro pipeline lang={args.lang} voice={args.voice} speed={args.speed}", verbose)
+    chunks = []
+    chunk_token_timings = []
     with quiet_stderr(verbose):
         pipeline = KPipeline(lang_code=args.lang)
-
-        log("starting speech generation...", verbose)
         generator = pipeline(text, voice=args.voice, speed=args.speed)
-
-        chunks = []
-        for index, (_, _, audio) in enumerate(generator, start=1):
+        for index, result in enumerate(generator, start=1):
+            if hasattr(result, "audio"):
+                audio = result.audio
+                tokens = getattr(result, "tokens", None)
+            else:
+                _, _, audio = result
+                tokens = None
             chunks.append(audio)
-            log(f"generated audio chunk {index}", verbose)
+
+            relative_tokens = []
+            if tokens:
+                for token in tokens:
+                    start_ts = getattr(token, "start_ts", None)
+                    end_ts = getattr(token, "end_ts", None)
+                    token_text = getattr(token, "text", "")
+                    if start_ts is None or end_ts is None or end_ts <= start_ts:
+                        continue
+                    relative_tokens.append((str(token_text), float(start_ts), float(end_ts)))
+            chunk_token_timings.append(relative_tokens)
+            log(f"generated audio chunk {index} with {len(relative_tokens)} timed token(s)", verbose)
 
     if not chunks:
         raise SystemExit("Kokoro produced no audio.")
 
-    log(f"combining {len(chunks)} chunk(s)...", verbose)
     pause_ms = max(0, min(2000, args.sentence_pause_ms))
-    if pause_ms > 0 and len(chunks) > 1:
-        silence = np.zeros(int(24000 * pause_ms / 1000), dtype=chunks[0].dtype)
-        combined = []
-        for index, chunk in enumerate(chunks):
-            if index > 0:
-                combined.append(silence)
-            combined.append(chunk)
-        audio = np.concatenate(combined)
-    else:
-        audio = np.concatenate(chunks)
+    silence = np.zeros(int(SAMPLE_RATE * pause_ms / 1000), dtype=chunks[0].dtype) if pause_ms > 0 else None
+    combined = []
+    timed_tokens = []
+    sample_cursor = 0
+    for index, chunk in enumerate(chunks):
+        if index > 0 and silence is not None:
+            combined.append(silence)
+            sample_cursor += len(silence)
+        chunk_start = sample_cursor / SAMPLE_RATE
+        combined.append(chunk)
+        for token_text, start_ts, end_ts in chunk_token_timings[index]:
+            timed_tokens.append((token_text, chunk_start + start_ts, chunk_start + end_ts))
+        sample_cursor += len(chunk)
 
+    audio = np.concatenate(combined)
     log(f"writing WAV: {output_path}", verbose)
-    sf.write(str(output_path), audio, 24000)
-    elapsed = time.time() - started
-    log(f"done in {elapsed:.1f}s", verbose)
+    sf.write(str(output_path), audio, SAMPLE_RATE)
+    write_timing_sidecar(output_path, text, timed_tokens, verbose)
+    log(f"done in {time.time() - started:.1f}s", verbose)
 
 
 if __name__ == "__main__":
