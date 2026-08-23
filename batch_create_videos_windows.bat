@@ -22,9 +22,9 @@ set "TOKENIZERS_PARALLELISM=false"
 if /I "%~1"=="--self-test" (
   call :EnsureBatchRunner
   if errorlevel 1 exit /b 1
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_dashboard.ps1" -SelfTest
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_color_dashboard.ps1" -SelfTest
   if errorlevel 1 exit /b 1
-  echo Live dashboard batch launcher self-test passed.
+  echo Color live dashboard batch launcher self-test passed.
   exit /b 0
 )
 
@@ -100,18 +100,18 @@ if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="
 if /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
 
 echo.
-echo Starting live batch dashboard...
+echo Starting color live batch dashboard...
 echo   target:   %TARGET_VIDEOS% approved videos
- echo   slides:   %COUNT% per video
- echo   workers:  %WORKERS%
- echo   encoder:  %THREADGENS_VIDEO_ENCODER%
- echo   platform: %PLATFORM%
+echo   slides:   %COUNT% per video
+echo   workers:  %WORKERS%
+echo   encoder:  %THREADGENS_VIDEO_ENCODER%
+echo   platform: %PLATFORM%
 echo.
 echo Detailed engine, Ollama, TTS, FFmpeg, P0/P1/P2, and worker output is saved to debug.log.
-echo The live screen will now show only progress, worker stages, slots, events, and system resources.
+echo The live screen will show color-coded progress, worker stages, slots, events, and system resources.
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_dashboard.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Workers %WORKERS% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -VoiceSelection single -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_color_dashboard.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Workers %WORKERS% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -VoiceSelection single -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
@@ -127,18 +127,25 @@ pause
 exit /b %EXITCODE%
 
 :EnsureBatchRunner
+set "COLOR_DASHBOARD_SCRIPT=tools\batch_create_videos_color_dashboard.ps1"
 set "DASHBOARD_SCRIPT=tools\batch_create_videos_dashboard.ps1"
 set "PARALLEL_SCRIPT=tools\batch_create_videos_parallel.ps1"
 set "WORKER_SCRIPT=tools\batch_parallel_worker.ps1"
 set "PROXY_SCRIPT=tools\ollama_serial_proxy.py"
+set "COLOR_DASHBOARD_MARKER=Get-DashboardLineColor"
 set "DASHBOARD_MARKER=ThreadGens LIVE BATCH MONITOR"
 set "PARALLEL_MARKER=Parallel video workers:"
 
 set "NEEDS_REFRESH=0"
+if not exist "%COLOR_DASHBOARD_SCRIPT%" set "NEEDS_REFRESH=1"
 if not exist "%DASHBOARD_SCRIPT%" set "NEEDS_REFRESH=1"
 if not exist "%PARALLEL_SCRIPT%" set "NEEDS_REFRESH=1"
 if not exist "%WORKER_SCRIPT%" set "NEEDS_REFRESH=1"
 if not exist "%PROXY_SCRIPT%" set "NEEDS_REFRESH=1"
+if exist "%COLOR_DASHBOARD_SCRIPT%" (
+  findstr /C:"%COLOR_DASHBOARD_MARKER%" "%COLOR_DASHBOARD_SCRIPT%" >nul 2>&1
+  if errorlevel 1 set "NEEDS_REFRESH=1"
+)
 if exist "%DASHBOARD_SCRIPT%" (
   findstr /C:"%DASHBOARD_MARKER%" "%DASHBOARD_SCRIPT%" >nul 2>&1
   if errorlevel 1 set "NEEDS_REFRESH=1"
@@ -150,7 +157,7 @@ if exist "%PARALLEL_SCRIPT%" (
 if "%NEEDS_REFRESH%"=="0" exit /b 0
 
 echo.
-echo Detected missing/outdated live dashboard or parallel batch runner files.
+echo Detected missing/outdated color dashboard or parallel batch runner files.
 echo Attempting to refresh only the batch launcher files from origin/main...
 
 where git >nul 2>&1
@@ -163,7 +170,7 @@ if not exist ".git" (
   exit /b 1
 )
 
-for %%F in ("%DASHBOARD_SCRIPT%" "%PARALLEL_SCRIPT%" "%WORKER_SCRIPT%" "%PROXY_SCRIPT%") do (
+for %%F in ("%COLOR_DASHBOARD_SCRIPT%" "%DASHBOARD_SCRIPT%" "%PARALLEL_SCRIPT%" "%WORKER_SCRIPT%" "%PROXY_SCRIPT%") do (
   git diff --quiet -- "%%~F"
   if errorlevel 1 (
     echo Local edits exist in %%~F.
@@ -178,16 +185,22 @@ if errorlevel 1 (
   exit /b 1
 )
 
-git restore --source origin/main --worktree -- "%DASHBOARD_SCRIPT%" "%PARALLEL_SCRIPT%" "%WORKER_SCRIPT%" "%PROXY_SCRIPT%"
+git restore --source origin/main --worktree -- "%COLOR_DASHBOARD_SCRIPT%" "%DASHBOARD_SCRIPT%" "%PARALLEL_SCRIPT%" "%WORKER_SCRIPT%" "%PROXY_SCRIPT%"
 if errorlevel 1 (
-  echo Failed to refresh the live dashboard / parallel runner files from origin/main.
+  echo Failed to refresh the color dashboard / parallel runner files from origin/main.
   exit /b 1
 )
 
+if not exist "%COLOR_DASHBOARD_SCRIPT%" exit /b 1
 if not exist "%DASHBOARD_SCRIPT%" exit /b 1
 if not exist "%PARALLEL_SCRIPT%" exit /b 1
 if not exist "%WORKER_SCRIPT%" exit /b 1
 if not exist "%PROXY_SCRIPT%" exit /b 1
+findstr /C:"%COLOR_DASHBOARD_MARKER%" "%COLOR_DASHBOARD_SCRIPT%" >nul 2>&1
+if errorlevel 1 (
+  echo The refreshed color dashboard is still missing its color renderer.
+  exit /b 1
+)
 findstr /C:"%DASHBOARD_MARKER%" "%DASHBOARD_SCRIPT%" >nul 2>&1
 if errorlevel 1 (
   echo The refreshed dashboard is still missing the required live monitor behavior.
@@ -199,5 +212,5 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Refreshed live dashboard and parallel batch runner successfully.
+echo Refreshed color dashboard and parallel batch runner successfully.
 exit /b 0
