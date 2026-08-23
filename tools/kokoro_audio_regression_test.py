@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import importlib.util
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +32,7 @@ class FakeTorchTensor:
         return self._values
 
 
-def main():
+def verify_torch_conversion():
     chunk = FakeTorchTensor([0.1, -0.2, 0.3, -0.4])
     converted = MODULE.audio_chunk_to_numpy(chunk, np)
 
@@ -44,7 +46,41 @@ def main():
     assert mixed.dtype == np.float32
     assert mixed.shape == (13,)
 
-    print("Kokoro torch-audio normalization regression passed.")
+
+def verify_exact_timing_requirement():
+    previous = os.environ.get("THREADGENS_REQUIRE_EXACT_KOKORO_TIMING")
+    os.environ["THREADGENS_REQUIRE_EXACT_KOKORO_TIMING"] = "1"
+    try:
+        with tempfile.TemporaryDirectory(prefix="threadgens-kokoro-timing-") as root:
+            output = Path(root) / "voice.wav"
+            output.write_bytes(b"placeholder")
+
+            failed = False
+            try:
+                MODULE.write_timing_sidecar(output, "hello world", [], False)
+            except RuntimeError as exc:
+                failed = "exact model timestamp" in str(exc)
+            assert failed, "production must reject missing exact Kokoro timings"
+            assert not output.exists(), "rejected exact-timing WAV must be removed"
+
+            output.write_bytes(b"placeholder")
+            tokens = [("hello", 0.10, 0.30), ("world", 0.32, 0.55)]
+            assert MODULE.write_timing_sidecar(output, "hello world", tokens, False)
+            timing = MODULE.timing_path_for(output)
+            lines = timing.read_text(encoding="utf-8").splitlines()
+            assert lines[0] == MODULE.TIMING_HEADER
+            assert len(lines) == 3
+    finally:
+        if previous is None:
+            os.environ.pop("THREADGENS_REQUIRE_EXACT_KOKORO_TIMING", None)
+        else:
+            os.environ["THREADGENS_REQUIRE_EXACT_KOKORO_TIMING"] = previous
+
+
+def main():
+    verify_torch_conversion()
+    verify_exact_timing_requirement()
+    print("Kokoro torch-audio and exact-timing regressions passed.")
 
 
 if __name__ == "__main__":
