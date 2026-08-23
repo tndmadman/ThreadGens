@@ -14,13 +14,11 @@ import java.util.List;
 import javax.imageio.ImageIO;
 
 /**
- * Prepares the social frame for the smooth narration-synced reveal path.
+ * Prepares social frames for narration-synced text reveal.
  *
- * Instead of repeatedly painting opaque rectangles over already-rendered text,
- * this class creates one completely clean base frame plus exact raster word
- * rectangles. DynamicVideoGenerator then reveals the original pixels at video
- * frame rate. Hidden glyphs therefore are genuinely absent rather than merely
- * covered, which prevents stray ascenders/descenders and block-step artifacts.
+ * Recognized social frames use one full frame, one clean frame with narration
+ * glyphs physically removed, and an ordered list of raster word rectangles.
+ * DynamicVideoGenerator exposes those original pixels at the TTS timestamps.
  */
 final class TimedVisualStateRenderer {
     static final String LAYOUT_HEADER = "threadgens-smooth-reveal-v1";
@@ -118,12 +116,20 @@ final class TimedVisualStateRenderer {
             throw new IOException("Could not decode social source frame: " + sourceImage);
         }
 
-        List<WordBox> boxes = detectNarrationWordBoxes(source, narration, itemIndex);
+        SocialKind socialKind = detectSocialKind(source);
+        List<WordBox> boxes = detectNarrationWordBoxes(source, narration, itemIndex, socialKind);
         if (boxes.isEmpty()) {
-            // Compatibility path for synthetic/non-social frames or any social
-            // frame whose raster text cannot be mapped exactly to narration.
-            // We refuse a guessed word-to-pixel mapping because that would drift
-            // away from the spoken timing the feature is meant to follow.
+            if (socialKind != SocialKind.UNKNOWN && requireSmoothReveal()) {
+                throw new IOException(
+                        "Smooth narration reveal is required, but the rendered "
+                                + socialKind.name().toLowerCase()
+                                + " text could not be mapped exactly to the narration for item "
+                                + (itemIndex + 1) + ". Expected " + countWords(narration)
+                                + " visible narration words. The attempt was stopped instead of silently producing a video without the smooth reveal.");
+            }
+
+            // Compatibility remains available for synthetic/non-social fixtures
+            // and explicit callers that did not require the production reveal.
             List<RenderedState> result = new ArrayList<>();
             for (int i = 0; i < timeline.size(); i++) {
                 Path statePath = outputDirectory.resolve(baseName + "_state_" + i + ".png");
@@ -178,6 +184,7 @@ final class TimedVisualStateRenderer {
         if (meta.length != 4 || !"meta".equals(meta[0])) {
             throw new IOException("Malformed smooth reveal metadata: " + path);
         }
+
         int width;
         int height;
         String narration;
@@ -242,15 +249,11 @@ final class TimedVisualStateRenderer {
     private static List<WordBox> detectNarrationWordBoxes(
             BufferedImage image,
             String narration,
-            int itemIndex
+            int itemIndex,
+            SocialKind socialKind
     ) {
         int expectedWords = countWords(narration);
-        if (expectedWords <= 0) {
-            return List.of();
-        }
-
-        SocialKind socialKind = detectSocialKind(image);
-        if (socialKind == SocialKind.UNKNOWN) {
+        if (expectedWords <= 0 || socialKind == SocialKind.UNKNOWN) {
             return List.of();
         }
 
@@ -268,11 +271,13 @@ final class TimedVisualStateRenderer {
             }
         }
 
-        // Exact count is intentional. A one-word offset would associate every
-        // later pixel box with the wrong Kokoro timestamp and create visible
-        // sync drift. If segmentation is uncertain, keep the compatibility path
-        // rather than claim an exact narration mapping that we do not have.
-        return bestDifference == 0 ? best : List.of();
+        if (bestDifference != 0) {
+            System.out.println("Smooth reveal word mapping did not match item " + (itemIndex + 1)
+                    + ": narration=" + expectedWords
+                    + " words, closest raster detection=" + best.size() + " words.");
+            return List.of();
+        }
+        return best;
     }
 
     private static List<WordBox> detectWordBoxes(
@@ -290,13 +295,8 @@ final class TimedVisualStateRenderer {
 
         if (socialKind == SocialKind.REDDIT) {
             x0 = clamp((int) Math.round(w * (itemIndex == 0 ? 0.085 : 0.145)), 0, w - 1);
-            // Include the full OP title glyphs. Small header/pill lettering is
-            // rejected below by the scale-aware minimum text-band height.
             y0 = clamp((int) Math.round(h * 0.195), 0, h - 1);
         } else {
-            // X originals begin near the left card margin, while replies begin
-            // after the avatar/identity column. These values track the renderer's
-            // actual text origins without admitting its header metadata.
             x0 = clamp((int) Math.round(w * (itemIndex == 0 ? 0.04 : 0.19)), 0, w - 1);
             y0 = clamp((int) Math.round(h * (itemIndex == 0 ? 0.17 : 0.19)), 0, h - 1);
         }
@@ -458,11 +458,6 @@ final class TimedVisualStateRenderer {
         return sampled > 0 && branded >= Math.max(18, sampled / 120);
     }
 
-    /**
-     * X's renderer has a distinctive near-black phone/top-bar plus a centered
-     * white X mark. Requiring both prevents arbitrary dark images from being
-     * treated as X merely because they contain some bright text.
-     */
     private static boolean looksLikeX(BufferedImage image) {
         int w = image.getWidth();
         int h = image.getHeight();
@@ -513,6 +508,21 @@ final class TimedVisualStateRenderer {
         int min = Math.min(c.getRed(), Math.min(c.getGreen(), c.getBlue()));
         int average = (c.getRed() + c.getGreen() + c.getBlue()) / 3;
         return average >= 118 && (max - min) <= 54;
+    }
+
+    private static boolean requireSmoothReveal() {
+        return truthy(System.getProperty("threadgens.requireSmoothReveal"))
+                || truthy(System.getenv("THREADGENS_REQUIRE_SMOOTH_REVEAL"));
+    }
+
+    private static boolean truthy(String value) {
+        if (value == null) {
+            return false;
+        }
+        return switch (value.trim().toLowerCase()) {
+            case "1", "true", "yes", "y", "on" -> true;
+            default -> false;
+        };
     }
 
     private static int countWords(String narration) {
