@@ -45,6 +45,7 @@ public class RedditScreenshotGenerator {
     private final Path outputDirectory;
     private final int itemIndex;
     private final int totalItems;
+    private final List<RenderedWordLayout.Box> narrationWordBoxes = new ArrayList<>();
 
     public RedditScreenshotGenerator(String fileName, String userName, String postLocation, String comment,
                                      String profileImageName, int ignoredUpvotes, int ignoredViews,
@@ -64,19 +65,36 @@ public class RedditScreenshotGenerator {
 
     public void generateImage() throws IOException {
         Files.createDirectories(outputDirectory);
+        Path imagePath = outputDirectory.resolve(fileName + ".png");
+        Files.deleteIfExists(RenderedWordLayout.sidecarFor(imagePath));
+        narrationWordBoxes.clear();
+
         BufferedImage image = new BufferedImage(settings.width, settings.height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
-        configure(g);
-        drawBackground(g);
-        drawCommentBox(g);
-        drawProfilePicture(g, profileImageName, contentLeft(), COMMENT_BOX_TOP + 48, isOriginalPost() ? 78 : 66);
-        drawLogo(g);
-        drawHeader(g);
-        drawComment(g);
-        drawNeutralFooter(g);
-        drawWatermark(g);
-        g.dispose();
-        ImageIO.write(image, "png", outputDirectory.resolve(fileName + ".png").toFile());
+        try {
+            configure(g);
+            drawBackground(g);
+            drawCommentBox(g);
+            drawProfilePicture(g, profileImageName, contentLeft(), COMMENT_BOX_TOP + 48, isOriginalPost() ? 78 : 66);
+            drawLogo(g);
+            drawHeader(g);
+            drawComment(g);
+            drawNeutralFooter(g);
+            drawWatermark(g);
+        } finally {
+            g.dispose();
+        }
+
+        ImageIO.write(image, "png", imagePath.toFile());
+        String narration = isOriginalPost() && settings.postTitle != null && !settings.postTitle.isBlank()
+                ? RenderedWordLayout.narrationForReddit(settings.postTitle, comment)
+                : RenderedWordLayout.narrationForVisibleText(comment);
+        try {
+            RenderedWordLayout.write(imagePath, narration, settings.width, settings.height, narrationWordBoxes);
+        } catch (IOException e) {
+            Files.deleteIfExists(imagePath);
+            throw e;
+        }
     }
 
     private boolean isOriginalPost() {
@@ -219,11 +237,21 @@ public class RedditScreenshotGenerator {
         List<String> titleLines = CommentWrapper.wrapComment(settings.postTitle.trim(), titleMetrics,
                 maxTextWidth - (paddingX * 2) - 14);
         if (titleLines.size() > 2) {
-            titleLines = new ArrayList<>(titleLines.subList(0, 2));
-            titleLines.set(1, titleLines.get(1) + "...");
+            throw new IllegalArgumentException(
+                    "Reddit OP title does not fit the visible two-line title panel; regenerate a shorter title.");
         }
         int titleLineHeight = titleFontSize + 8;
         int panelHeight = Math.max(108, titleLines.size() * titleLineHeight + (paddingY * 2));
+
+        List<String> bodyLines = CommentWrapper.wrapComment(comment, bodyMetrics, maxTextWidth);
+        int bodyTop = panelY + panelHeight + 66;
+        int lineHeight = bodyFontSize + 10;
+        int maxBodyLines = bodyTop > bodyBottom ? 0 : ((bodyBottom - bodyTop) / lineHeight) + 1;
+        if (bodyLines.size() > maxBodyLines) {
+            throw new IllegalArgumentException(
+                    "Reddit OP body does not fit the visible social card; regenerate a shorter body instead of truncating narration.");
+        }
+
         g.setColor(new Color(30, 30, 31));
         g.fillRoundRect(textX, panelY, maxTextWidth, panelHeight, 26, 26);
         g.setColor(style.accent);
@@ -235,25 +263,23 @@ public class RedditScreenshotGenerator {
         g.setColor(style.text);
         int titleY = panelY + paddingY + titleMetrics.getAscent();
         for (String line : titleLines) {
-            g.drawString(line, textX + paddingX, titleY);
+            int lineX = textX + paddingX;
+            g.drawString(line, lineX, titleY);
+            RenderedWordLayout.addLineBoxes(
+                    narrationWordBoxes, line, titleMetrics, lineX, titleY, settings.width, settings.height);
             titleY += titleLineHeight;
         }
 
-        List<String> bodyLines = CommentWrapper.wrapComment(comment, bodyMetrics, maxTextWidth);
         g.setFont(bodyFont);
         g.setColor(style.text);
-        int bodyTop = panelY + panelHeight + 66;
-        int lineHeight = bodyFontSize + 10;
         int y = bodyTop;
         if (settings.centerShortComments) {
             y += Math.max(0, ((bodyBottom - bodyTop) - bodyLines.size() * lineHeight) / 2);
         }
         for (String line : bodyLines) {
-            if (y > bodyBottom) {
-                g.drawString("...", textX, y);
-                break;
-            }
             g.drawString(line, textX, y);
+            RenderedWordLayout.addLineBoxes(
+                    narrationWordBoxes, line, bodyMetrics, textX, y, settings.width, settings.height);
             y += lineHeight;
         }
     }
@@ -269,16 +295,19 @@ public class RedditScreenshotGenerator {
         int lineHeight = fontSize + 10;
         int top = COMMENT_BOX_TOP + 230;
         int bottom = boxBottom() - 150;
+        int maxLines = top > bottom ? 0 : ((bottom - top) / lineHeight) + 1;
+        if (lines.size() > maxLines) {
+            throw new IllegalArgumentException(
+                    "Reddit reply does not fit the visible social card; regenerate a shorter reply instead of truncating narration.");
+        }
         int y = top;
         if (settings.centerShortComments) {
             y += Math.max(0, ((bottom - top) - lines.size() * lineHeight) / 2);
         }
         for (String line : lines) {
-            if (y > bottom) {
-                g.drawString("...", textX, y);
-                break;
-            }
             g.drawString(line, textX, y);
+            RenderedWordLayout.addLineBoxes(
+                    narrationWordBoxes, line, metrics, textX, y, settings.width, settings.height);
             y += lineHeight;
         }
     }
@@ -436,7 +465,8 @@ public class RedditScreenshotGenerator {
             String profile = identity.profileImage();
             String current = lines.get(i);
             String narration = i == 0 && settings.postTitle != null && !settings.postTitle.isBlank()
-                    ? settings.postTitle + ". " + current : current;
+                    ? RenderedWordLayout.narrationForReddit(settings.postTitle, current)
+                    : RenderedWordLayout.narrationForVisibleText(current);
             String base = i + settings.outputPrefix;
             Path image = settings.outputDirectory.resolve(base + ".png");
             Path audio = settings.audioDirectory.resolve(base + ".wav");
