@@ -1,7 +1,6 @@
 package redditTxtToImg;
 
 import java.awt.Color;
-import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
@@ -20,13 +19,13 @@ public final class RequiredSmoothRevealRegressionTest {
         Path temp = Files.createTempDirectory("threadgens-required-reveal-");
         try {
             Path source = temp.resolve("reddit.png");
-            createRedditLikeSource(source);
+            createRedditLikeSourceWithoutNarrationGlyphs(source);
 
             boolean failedClosed = false;
             try {
                 TimedVisualStateRenderer.renderStates(
                         source,
-                        "only three visible words plus words that are not actually rendered",
+                        "these narration words deliberately have no matching visible glyphs",
                         ContentFormat.THREAD_STORY,
                         1,
                         2,
@@ -37,7 +36,7 @@ public final class RequiredSmoothRevealRegressionTest {
                 failedClosed = expected.getMessage().contains("Smooth narration reveal is required");
             }
             require(failedClosed,
-                    "recognized social frames with an unprovable narration mapping must fail instead of using legacy states");
+                    "recognized social frames with no provable narration mapping must fail instead of using legacy states");
 
             System.out.println("Required smooth reveal fail-closed regression passed.");
         } finally {
@@ -46,18 +45,19 @@ public final class RequiredSmoothRevealRegressionTest {
         }
     }
 
-    private static void createRedditLikeSource(Path path) throws Exception {
+    private static void createRedditLikeSourceWithoutNarrationGlyphs(Path path) throws Exception {
         BufferedImage image = new BufferedImage(1080, 1920, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
         g.setColor(new Color(15, 16, 18));
         g.fillRect(0, 0, 1080, 1920);
         g.setColor(new Color(31, 31, 33));
         g.fillRoundRect(136, 260, 880, 1330, 34, 34);
+
+        // Large Reddit-orange badge in the same region as the real renderer.
+        // This proves the frame is recognized as Reddit while intentionally
+        // providing zero narration glyphs for the word mapper to consume.
         g.setColor(new Color(230, 70, 10));
         g.fillRoundRect(806, 308, 168, 72, 24, 24);
-        g.setColor(new Color(235, 235, 238));
-        g.setFont(new Font("Arial", Font.PLAIN, 52));
-        g.drawString("only three visible", 178, 560);
         g.dispose();
         ImageIO.write(image, "png", path.toFile());
     }
