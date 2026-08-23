@@ -20,6 +20,9 @@ public final class RenderedWordLayoutRegressionTest {
                     + "We've tried cleaning the mechanism and adjusting the volume, but nothing seems to work. "
                     + "Can anyone explain why this music box is so stubbornly connected to the weather?";
     private static final String FITTING_TITLE = "Why does grandma's music box react to rain?";
+    private static final String FITTING_BODY =
+            "It's been happening for months now - every time it rains, Grandma's old music box starts playing the same childhood song. "
+                    + "We've cleaned it twice, but nothing changes.";
 
     private RenderedWordLayoutRegressionTest() {
     }
@@ -29,7 +32,7 @@ public final class RenderedWordLayoutRegressionTest {
         Path temp = Files.createTempDirectory("threadgens-rendered-word-layout-");
         try {
             verifyOriginalFailureIsRejectedBeforeTruncation(temp);
-            verifyProductionRedditGeometryWithFailureBody(temp);
+            verifyProductionRedditGeometry(temp);
             verifyPunctuationTokenGeometry(temp);
             verifyOversizeRedditFailsBeforeTruncation(temp);
             verifyXNarratesOnlyVisibleText(temp);
@@ -64,7 +67,7 @@ public final class RenderedWordLayoutRegressionTest {
                     && expected.getCause() != null;
         }
         require(failed,
-                "The original 92-word case must be rejected before rendering because its full title cannot fit without truncation.");
+                "The original 92-word case must be rejected before rendering because its full text cannot fit without truncation.");
         Path image = output.resolve("0originalfailure.png");
         require(!Files.exists(image),
                 "The original non-fitting case must not leave a truncated image that could be narrated as if complete.");
@@ -72,10 +75,10 @@ public final class RenderedWordLayoutRegressionTest {
                 "The original non-fitting case must not leave a stale word-layout sidecar.");
     }
 
-    private static void verifyProductionRedditGeometryWithFailureBody(Path temp) throws Exception {
+    private static void verifyProductionRedditGeometry(Path temp) throws Exception {
         Path comments = temp.resolve("fitting-case-comments.txt");
         Path output = temp.resolve("fitting-case-images");
-        Files.writeString(comments, FAILURE_BODY + System.lineSeparator(), StandardCharsets.UTF_8);
+        Files.writeString(comments, FITTING_BODY + System.lineSeparator(), StandardCharsets.UTF_8);
 
         RedditScreenshotGenerator.main(new String[]{
                 comments.toString(), output.toString(),
@@ -88,7 +91,7 @@ public final class RenderedWordLayoutRegressionTest {
 
         Path image = output.resolve("0fitting.png");
         require(Files.isRegularFile(image), "Production Reddit geometry fixture was not generated.");
-        String narration = RenderedWordLayout.narrationForReddit(FITTING_TITLE, FAILURE_BODY);
+        String narration = RenderedWordLayout.narrationForReddit(FITTING_TITLE, FITTING_BODY);
         RenderedWordLayout.Layout sourceLayout = RenderedWordLayout.read(image);
         require(sourceLayout.words().size() == RenderedWordLayout.countWords(narration),
                 "Renderer-owned geometry must produce one exact box per visible/spoken Reddit word.");
