@@ -57,6 +57,12 @@ echo Worker guidance:
 echo   3-4 workers: recommended starting point for a high-core workstation
 echo   5 workers:   aggressive; benchmark before going higher
 echo   6-10:        supported for testing but may oversubscribe CPU/RAM/FFmpeg
+
+echo.
+set "WORKER_CHOICE="
+set /p "WORKER_CHOICE=Parallel video workers [1-10, default %WORKERS%]: "
+if not "%WORKER_CHOICE%"=="" set "WORKERS=%WORKER_CHOICE%"
+
 echo.
 echo Choose platform/thread style:
 echo 1. Reddit thread
