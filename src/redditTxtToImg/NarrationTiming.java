@@ -101,7 +101,7 @@ final class NarrationTiming {
         // Last-resort monotonic mapping. This should only be used when rendered
         // text was intentionally truncated or a non-Kokoro engine has unusual
         // tokenization; it still keeps the reveal smooth and bounded.
-        List<String> visibleWords = splitWords(narration);
+        List<String> visibleWords = RenderedWordLayout.words(narration);
         List<Word> result = new ArrayList<>();
         for (int i = 0; i < expectedCount; i++) {
             double start = durationSeconds * i / expectedCount;
@@ -110,13 +110,5 @@ final class NarrationTiming {
             result.add(new Word(text, start, Math.max(start + 0.005, end)));
         }
         return List.copyOf(result);
-    }
-
-    private static List<String> splitWords(String narration) {
-        String text = narration == null ? "" : narration.trim();
-        if (text.isEmpty()) {
-            return List.of();
-        }
-        return List.of(text.split("\\s+"));
     }
 }

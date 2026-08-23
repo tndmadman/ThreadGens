@@ -16,9 +16,10 @@ import javax.imageio.ImageIO;
 /**
  * Prepares social frames for narration-synced text reveal.
  *
- * Recognized social frames use one full frame, one clean frame with narration
- * glyphs physically removed, and an ordered list of raster word rectangles.
- * DynamicVideoGenerator exposes those original pixels at the TTS timestamps.
+ * Production social renderers emit exact word rectangles beside each source
+ * image. Strict production consumes those deterministic coordinates and never
+ * guesses word boundaries from pixels. Raster detection remains only as a
+ * compatibility fallback for non-strict synthetic/legacy callers.
  */
 final class TimedVisualStateRenderer {
     static final String LAYOUT_HEADER = "threadgens-smooth-reveal-v1";
@@ -117,15 +118,15 @@ final class TimedVisualStateRenderer {
         }
 
         SocialKind socialKind = detectSocialKind(source);
-        List<WordBox> boxes = detectNarrationWordBoxes(source, narration, itemIndex, socialKind);
+        List<WordBox> boxes = resolveNarrationWordBoxes(sourceImage, source, narration, itemIndex, socialKind);
         if (boxes.isEmpty()) {
             if (socialKind != SocialKind.UNKNOWN && requireSmoothReveal()) {
                 throw new IOException(
-                        "Smooth narration reveal is required, but the rendered "
+                        "Smooth narration reveal is required, but no exact renderer word layout matched the rendered "
                                 + socialKind.name().toLowerCase()
-                                + " text could not be mapped exactly to the narration for item "
-                                + (itemIndex + 1) + ". Expected " + countWords(narration)
-                                + " visible narration words. The attempt was stopped instead of silently producing a video without the smooth reveal.");
+                                + " text for item " + (itemIndex + 1)
+                                + ". Expected " + countWords(narration)
+                                + " visible narration words. The attempt was stopped instead of guessing from raster pixels.");
             }
 
             // Compatibility remains available for synthetic/non-social fixtures
@@ -246,6 +247,47 @@ final class TimedVisualStateRenderer {
         Files.write(path, lines, StandardCharsets.UTF_8);
     }
 
+    private static List<WordBox> resolveNarrationWordBoxes(
+            Path sourceImage,
+            BufferedImage image,
+            String narration,
+            int itemIndex,
+            SocialKind socialKind
+    ) throws IOException {
+        Path exactLayoutPath = RenderedWordLayout.sidecarFor(sourceImage);
+        if (Files.isRegularFile(exactLayoutPath)) {
+            RenderedWordLayout.Layout exact = RenderedWordLayout.read(sourceImage);
+            if (exact.width() != image.getWidth() || exact.height() != image.getHeight()) {
+                throw new IOException(
+                        "Rendered word layout dimensions do not match source image: " + exactLayoutPath);
+            }
+            if (!RenderedWordLayout.sameNarration(exact.narration(), narration)) {
+                throw new IOException(
+                        "Rendered word layout narration does not match TTS narration for item " + (itemIndex + 1)
+                                + ". Refusing to reveal text against the wrong timing sequence.");
+            }
+            int expected = countWords(narration);
+            if (exact.words().size() != expected) {
+                throw new IOException(
+                        "Rendered word layout count does not match narration for item " + (itemIndex + 1)
+                                + ": narration=" + expected + ", boxes=" + exact.words().size() + ".");
+            }
+            List<WordBox> result = new ArrayList<>();
+            for (RenderedWordLayout.Box box : exact.words()) {
+                result.add(new WordBox(box.left(), box.top(), box.right(), box.bottom()));
+            }
+            return List.copyOf(result);
+        }
+
+        if (socialKind != SocialKind.UNKNOWN && requireSmoothReveal()) {
+            System.out.println("Exact renderer word layout is missing for strict social frame item "
+                    + (itemIndex + 1) + ": " + exactLayoutPath);
+            return List.of();
+        }
+
+        return detectNarrationWordBoxes(image, narration, itemIndex, socialKind);
+    }
+
     private static List<WordBox> detectNarrationWordBoxes(
             BufferedImage image,
             String narration,
@@ -272,7 +314,7 @@ final class TimedVisualStateRenderer {
         }
 
         if (bestDifference != 0) {
-            System.out.println("Smooth reveal word mapping did not match item " + (itemIndex + 1)
+            System.out.println("Compatibility raster word mapping did not match item " + (itemIndex + 1)
                     + ": narration=" + expectedWords
                     + " words, closest raster detection=" + best.size() + " words.");
             return List.of();
@@ -526,10 +568,7 @@ final class TimedVisualStateRenderer {
     }
 
     private static int countWords(String narration) {
-        if (narration == null || narration.isBlank()) {
-            return 0;
-        }
-        return narration.trim().split("\\s+").length;
+        return RenderedWordLayout.countWords(narration);
     }
 
     private static int clamp(int value, int min, int max) {

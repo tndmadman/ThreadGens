@@ -1,0 +1,49 @@
+name: Renderer Word Layout Regression
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  renderer-layout:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Compile Java sources
+        shell: bash
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p out
+          javac -d out src/redditTxtToImg/*.java
+
+      - name: Compile Java sources on Windows
+        shell: powershell
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          $javaFiles = Get-ChildItem -Path src\redditTxtToImg -Filter '*.java' | ForEach-Object { $_.FullName }
+          & javac -d out $javaFiles
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run renderer word layout regression
+        shell: bash
+        if: runner.os != 'Windows'
+        run: java -Djava.awt.headless=true -cp out redditTxtToImg.RenderedWordLayoutRegressionTest
+
+      - name: Run renderer word layout regression on Windows
+        shell: powershell
+        if: runner.os == 'Windows'
+        run: |
+          & java '-Djava.awt.headless=true' -cp out redditTxtToImg.RenderedWordLayoutRegressionTest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
