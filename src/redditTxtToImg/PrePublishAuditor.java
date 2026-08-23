@@ -68,7 +68,6 @@ final class PrePublishAuditor {
         boolean exactArtifact = false;
         boolean exactScript = false;
         boolean hardContentDuplicate = false;
-        boolean hardPresentationDuplicate = false;
 
         for (PublishAuditHistory.Entry entry : safeHistory) {
             PublishFingerprint prior = entry.fingerprint();
@@ -80,9 +79,6 @@ final class PrePublishAuditor {
                 exactScript = true;
             }
             if (scores.content >= 0.94) hardContentDuplicate = true;
-            if (scores.content >= 0.78 && scores.visual >= 0.97 && scores.pacing >= 0.90) {
-                hardPresentationDuplicate = true;
-            }
             if (scores.overall > highestOverall) {
                 highestOverall = scores.overall;
                 closest = entry;
@@ -101,7 +97,7 @@ final class PrePublishAuditor {
 
         int streakPenalty = streakPenalty(candidate, safeHistory);
         int risk = clamp((int) Math.round(closestScores.overall * 100.0) + streakPenalty, 0, 100);
-        boolean hardBlock = exactArtifact || exactScript || hardContentDuplicate || hardPresentationDuplicate;
+        boolean hardBlock = exactArtifact || exactScript || hardContentDuplicate;
         Status status = hardBlock || risk >= blockThreshold
                 ? Status.BLOCK
                 : risk >= warnThreshold ? Status.WARN : Status.PASS;
@@ -119,12 +115,6 @@ final class PrePublishAuditor {
             findings.add(String.format(Locale.US,
                     "Content similarity %.0f%% crossed the hard duplicate threshold.",
                     closestScores.content * 100.0));
-        }
-        if (hardPresentationDuplicate) {
-            findings.add("Content, visual presentation and pacing jointly resemble a prior approved video too closely.");
-        }
-        if (closestScores.visual >= 0.90) {
-            findings.add(String.format(Locale.US, "Visual-frame similarity is %.0f%%.", closestScores.visual * 100.0));
         }
         if (closestScores.identity >= 0.90) {
             findings.add(String.format(Locale.US,
@@ -182,34 +172,38 @@ final class PrePublishAuditor {
     }
 
     private static Scores withContentScore(Scores scores, double content) {
-        double overall = weighted(content, scores.visual, scores.audio, scores.format,
+        double overall = weighted(content, scores.audio, scores.format,
                 scores.pacing, scores.identity, scores.metadata);
-        return new Scores(content, scores.visual, scores.audio, scores.format, scores.pacing,
+        return new Scores(content, 0.0, scores.audio, scores.format, scores.pacing,
                 scores.identity, scores.metadata, overall);
     }
 
     private static Scores compare(PublishFingerprint a, PublishFingerprint b) {
         double content = contentSimilarity(a.script, b.script);
-        double visual = PublishFingerprint.visualSimilarity(a.visualHashes, b.visualHashes);
+        double visual = 0.0; // Intentionally disabled: ThreadGens uses a shared Reddit/X layout.
         double audio = audioSimilarity(a, b);
         double format = a.format.equalsIgnoreCase(b.format) ? 1.0 : 0.0;
         double pacing = pacingSimilarity(a.segmentDurations, b.segmentDurations);
         double identity = PublishFingerprint.visualSimilarity(a.identityHashes, b.identityHashes);
         double metadata = !a.metadataHash.isBlank() && a.metadataHash.equals(b.metadataHash) ? 1.0 : 0.0;
-        double overall = weighted(content, visual, audio, format, pacing, identity, metadata);
+        double overall = weighted(content, audio, format, pacing, identity, metadata);
         return new Scores(content, visual, audio, format, pacing, identity, metadata, overall);
     }
 
+    /**
+     * Visual similarity is deliberately excluded. The remaining weights are
+     * normalized to 100% so removing the template-layout check does not simply
+     * make every candidate about fifteen points easier to pass.
+     */
     private static double weighted(
-            double content, double visual, double audio, double format,
+            double content, double audio, double format,
             double pacing, double identity, double metadata) {
-        return content * 0.32
-                + visual * 0.15
-                + audio * 0.08
-                + format * 0.08
-                + pacing * 0.15
-                + identity * 0.14
-                + metadata * 0.08;
+        return content * 0.38
+                + audio * 0.09
+                + format * 0.09
+                + pacing * 0.18
+                + identity * 0.17
+                + metadata * 0.09;
     }
 
     private static double contentSimilarity(String a, String b) {
