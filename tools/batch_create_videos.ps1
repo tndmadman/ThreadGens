@@ -191,7 +191,7 @@ function Get-IdeaWordCount($Value) {
     if ([string]::IsNullOrWhiteSpace($text)) {
         return 0
     }
-    return @($text -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+    return @($text -split '\s+').Count
 }
 
 function Get-IdeaShapeProblem($Title, $Body, $IdeaPlatform) {
@@ -423,10 +423,7 @@ function Run-SelfTest {
             throw 'Idea JSON extraction failed.'
         }
 
-        $validProblem = Get-IdeaShapeProblem \
-            'Why did my coworker hide the office toaster?' \
-            'My coworker moved our toaster into a locked cabinet after lunch. Nobody knows why, and now the whole team is arguing about whether to ask management.' \
-            'reddit'
+        $validProblem = Get-IdeaShapeProblem 'Why did my coworker hide the office toaster?' 'My coworker moved our toaster into a locked cabinet after lunch. Nobody knows why, and now the whole team is arguing about whether to ask management.' 'reddit'
         if (-not [string]::IsNullOrWhiteSpace([string]$validProblem)) {
             throw "Render-fit guard rejected a compact Reddit seed: $validProblem"
         }
