@@ -11,6 +11,7 @@ from pathlib import Path
 
 TIMING_HEADER = "threadgens-kokoro-timing-v1"
 SAMPLE_RATE = 24000
+KOKORO_REPO_ID = "hexgrad/Kokoro-82M"
 
 
 def is_verbose(args):
@@ -85,62 +86,133 @@ def audio_chunk_to_numpy(audio, np):
     return array.astype(np.float32, copy=False)
 
 
-def align_model_tokens_to_input_words(text, timed_tokens):
+def _model_token_parts(token):
+    """Normalize old test tuples and the richer production token shape.
+
+    Production tokens are (text, trailing_whitespace, start, end). The legacy
+    three-field shape remains accepted for small unit tests and callers that
+    already provide one timestamped token per word.
+    """
+    if len(token) >= 4:
+        text, whitespace, start, end = token[:4]
+    elif len(token) == 3:
+        text, start, end = token
+        whitespace = " "
+    else:
+        raise ValueError("Malformed Kokoro model token.")
+    return str(text or ""), str(whitespace or ""), start, end
+
+
+def group_model_tokens_into_words(model_tokens):
+    """Collapse Kokoro MTokens into the original whitespace-delimited words.
+
+    Kokoro/Misaki can represent one visible word as several MTokens: contractions,
+    punctuation, quotes, symbols, and similar graphemes are common examples.
+    Some of those punctuation MTokens intentionally have no acoustic timestamp.
+    The token.whitespace field is authoritative for the original word boundary,
+    so preserve every token and group first; only then derive the word's timing
+    from the timestamped acoustic tokens inside that group.
+    """
+    grouped = []
+    text_parts = []
+    starts = []
+    ends = []
+
+    def flush_word():
+        nonlocal text_parts, starts, ends
+        text = "".join(text_parts).strip()
+        if text:
+            start = min(starts) if starts else None
+            end = max(ends) if ends else None
+            grouped.append((text, start, end))
+        text_parts = []
+        starts = []
+        ends = []
+
+    for token in model_tokens:
+        token_text, whitespace, start, end = _model_token_parts(token)
+        text_parts.append(token_text)
+        if start is not None and end is not None:
+            start_value = float(start)
+            end_value = float(end)
+            if end_value > start_value:
+                starts.append(start_value)
+                ends.append(end_value)
+        if whitespace:
+            flush_word()
+
+    flush_word()
+    return grouped
+
+
+def align_model_tokens_to_input_words(text, model_tokens):
+    """Map exact Kokoro acoustic timestamps back to the original visible words.
+
+    This intentionally does not require token spelling to equal source spelling.
+    Kokoro's G2P/tokenizer may split or normalize graphemes while preserving the
+    original whitespace boundaries. Position and whitespace therefore provide a
+    safer mapping than lexical equality, while start/end values still come only
+    from Kokoro's model-predicted token durations.
+    """
     source_words = re.findall(r"\S+", text)
-    tokens = [token for token in timed_tokens if normalized_word(token[0])]
-    if not source_words or not tokens:
+    grouped = group_model_tokens_into_words(model_tokens)
+    if not source_words or len(grouped) != len(source_words):
         return []
 
     aligned = []
-    token_index = 0
-    for source_word in source_words:
-        target = normalized_word(source_word)
-        if not target:
+    for source_word, (_, start, end) in zip(source_words, grouped):
+        if start is None or end is None or end <= start:
+            # Standalone punctuation/emoji can be a visible whitespace token but
+            # has no acoustic duration because nothing is spoken. Keep it in the
+            # reveal word count and anchor it to an adjacent exact spoken word.
+            # A lexical word without acoustic timing is still a hard failure.
+            if normalized_word(source_word):
+                return []
+            aligned.append([source_word, None, None])
+        else:
+            aligned.append([source_word, float(start), float(end)])
+
+    for index, item in enumerate(aligned):
+        if item[1] is not None:
             continue
-
-        match_start = token_index
-        match_end = None
-        combined = ""
-        for j in range(token_index, min(len(tokens), token_index + 8)):
-            combined += normalized_word(tokens[j][0])
-            if combined == target:
-                match_end = j
-                break
-            if target.startswith(combined):
-                continue
-            break
-
-        if match_end is None:
-            for j in range(token_index, min(len(tokens), token_index + 4)):
-                if normalized_word(tokens[j][0]) == target:
-                    match_start = j
-                    match_end = j
-                    break
-
-        if match_end is None:
+        previous = next(
+            (aligned[j] for j in range(index - 1, -1, -1) if aligned[j][1] is not None),
+            None,
+        )
+        following = next(
+            (aligned[j] for j in range(index + 1, len(aligned)) if aligned[j][1] is not None),
+            None,
+        )
+        anchor = previous if previous is not None else following
+        if anchor is None:
             return []
+        item[1] = anchor[1]
+        item[2] = anchor[2]
 
-        start = tokens[match_start][1]
-        end = tokens[match_end][2]
-        if end <= start:
+    previous_start = -1.0
+    result = []
+    for source_word, start, end in aligned:
+        if start + 0.0001 < previous_start or end <= start:
             return []
-        aligned.append((source_word, start, end))
-        token_index = match_end + 1
+        result.append((source_word, start, end))
+        previous_start = start
+    return result
 
-    return aligned if len(aligned) == len(source_words) else []
 
-
-def write_timing_sidecar(output_path, text, timed_tokens, verbose):
+def write_timing_sidecar(output_path, text, model_tokens, verbose):
     timing_path = timing_path_for(output_path)
     delete_if_present(timing_path)
 
-    aligned = align_model_tokens_to_input_words(text, timed_tokens)
+    aligned = align_model_tokens_to_input_words(text, model_tokens)
     if not aligned:
         if require_exact_timing():
             delete_if_present(output_path)
+            grouped_count = len(group_model_tokens_into_words(model_tokens)) if model_tokens else 0
+            source_count = len(re.findall(r"\S+", text))
             raise RuntimeError(
-                "Kokoro did not return an exact model timestamp for every narrated word. "
-                "Production requires exact timing, so this WAV was rejected instead of falling back to estimated timing."
+                "Kokoro token timing could not be mapped safely to every narrated word "
+                f"(source words={source_count}, model word groups={grouped_count}). "
+                "Production requires model-derived timing, so this WAV was rejected instead of falling back to estimated timing."
             )
         log("exact token timing unavailable; Java will use its measured-duration fallback", verbose)
         return False
@@ -150,8 +222,26 @@ def write_timing_sidecar(output_path, text, timed_tokens, verbose):
         encoded = base64.urlsafe_b64encode(word.encode("utf-8")).decode("ascii").rstrip("=")
         lines.append(f"word\t{start:.6f}\t{end:.6f}\t{encoded}")
     timing_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    log(f"wrote exact timing sidecar: {timing_path} ({len(aligned)} words)", verbose)
+    log(f"wrote model-derived timing sidecar: {timing_path} ({len(aligned)} words)", verbose)
     return True
+
+
+def _token_whitespace(token):
+    whitespace = getattr(token, "whitespace", "")
+    if whitespace is True:
+        return " "
+    if not whitespace:
+        return ""
+    return str(whitespace)
+
+
+def _optional_timestamp(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def main():
@@ -198,9 +288,9 @@ def main():
 
     log(f"loading Kokoro pipeline lang={args.lang} voice={args.voice} speed={args.speed}", verbose)
     chunks = []
-    chunk_token_timings = []
+    chunk_model_tokens = []
     with quiet_stderr(verbose):
-        pipeline = KPipeline(lang_code=args.lang)
+        pipeline = KPipeline(lang_code=args.lang, repo_id=KOKORO_REPO_ID)
         generator = pipeline(text, voice=args.voice, speed=args.speed)
         for index, result in enumerate(generator, start=1):
             if hasattr(result, "audio"):
@@ -212,16 +302,25 @@ def main():
             chunks.append(audio_chunk_to_numpy(audio, np))
 
             relative_tokens = []
+            timed_count = 0
             if tokens:
                 for token in tokens:
-                    start_ts = getattr(token, "start_ts", None)
-                    end_ts = getattr(token, "end_ts", None)
-                    token_text = getattr(token, "text", "")
-                    if start_ts is None or end_ts is None or end_ts <= start_ts:
-                        continue
-                    relative_tokens.append((str(token_text), float(start_ts), float(end_ts)))
-            chunk_token_timings.append(relative_tokens)
-            log(f"generated audio chunk {index} with {len(relative_tokens)} timed token(s)", verbose)
+                    token_text = str(getattr(token, "text", "") or "")
+                    whitespace = _token_whitespace(token)
+                    start_ts = _optional_timestamp(getattr(token, "start_ts", None))
+                    end_ts = _optional_timestamp(getattr(token, "end_ts", None))
+                    if start_ts is not None and end_ts is not None and end_ts > start_ts:
+                        timed_count += 1
+                    else:
+                        start_ts = None
+                        end_ts = None
+                    relative_tokens.append((token_text, whitespace, start_ts, end_ts))
+            chunk_model_tokens.append(relative_tokens)
+            log(
+                f"generated audio chunk {index} with {len(relative_tokens)} model token(s), "
+                f"{timed_count} acoustically timed",
+                verbose,
+            )
 
     if not chunks:
         raise SystemExit("Kokoro produced no audio.")
@@ -229,7 +328,7 @@ def main():
     pause_ms = max(0, min(2000, args.sentence_pause_ms))
     silence = np.zeros(int(SAMPLE_RATE * pause_ms / 1000), dtype=np.float32) if pause_ms > 0 else None
     combined = []
-    timed_tokens = []
+    model_tokens = []
     sample_cursor = 0
     for index, chunk in enumerate(chunks):
         if index > 0 and silence is not None:
@@ -237,15 +336,17 @@ def main():
             sample_cursor += len(silence)
         chunk_start = sample_cursor / SAMPLE_RATE
         combined.append(chunk)
-        for token_text, start_ts, end_ts in chunk_token_timings[index]:
-            timed_tokens.append((token_text, chunk_start + start_ts, chunk_start + end_ts))
+        for token_text, whitespace, start_ts, end_ts in chunk_model_tokens[index]:
+            absolute_start = None if start_ts is None else chunk_start + start_ts
+            absolute_end = None if end_ts is None else chunk_start + end_ts
+            model_tokens.append((token_text, whitespace, absolute_start, absolute_end))
         sample_cursor += len(chunk)
 
     audio = np.concatenate(combined).astype(np.float32, copy=False)
     log(f"writing WAV: {output_path}", verbose)
     sf.write(str(output_path), audio, SAMPLE_RATE)
     try:
-        write_timing_sidecar(output_path, text, timed_tokens, verbose)
+        write_timing_sidecar(output_path, text, model_tokens, verbose)
     except Exception:
         delete_if_present(timing_path_for(output_path))
         raise
