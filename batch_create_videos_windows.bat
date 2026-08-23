@@ -6,11 +6,13 @@ set "TARGET_VIDEOS=30"
 set "COUNT=10"
 set "MODEL=llama3.1:8b"
 set "VOICE=af_heart"
-set "VOICE_SERIES=af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george"
+set "VOICE_SERIES=af_heart"
 set "PLATFORM=reddit"
 set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
 set "OP_IMAGE_FLAG="
 set "THREADGENS_KOKORO_VERBOSE=0"
+set "THREADGENS_REQUIRE_EXACT_KOKORO_TIMING=1"
+set "THREADGENS_REQUIRE_SMOOTH_REVEAL=1"
 set "PYTHONWARNINGS=ignore"
 set "HF_HUB_DISABLE_PROGRESS_BARS=1"
 set "TOKENIZERS_PARALLELISM=false"
@@ -72,11 +74,11 @@ echo   platform:               %PLATFORM%
 echo   approved video target:  %TARGET_VIDEOS%
 echo   slides per video:       %COUNT%
 echo   model:                  %MODEL%
-echo   tts:                    kokoro
-echo   voices:                 %VOICE_SERIES% ^(one stable selection per video^)
+echo   tts:                    Kokoro neural TTS only
+echo   voice:                  %VOICE% ^(locked; no Piper/voice-pool switching^)
 echo   ideas:                   generated automatically and persisted to data\batch_idea_history.jsonl
 echo   retry behavior:          rejected ideas are replaced until approved target is reached
-echo   text:                    narration-timed reveal inside the rendered social image
+echo   text:                    exact Kokoro-timed smooth reveal required for every social clip
 echo   captions:                bottom duplicate subtitles disabled
 echo   visible counters:        disabled ^(no conversation 1/10, ranks, or message numbers^)
 echo   final filenames:         title-based with no numeric prefix
@@ -101,7 +103,7 @@ if not "%OP_IMAGE_FLAG%"=="" (
 )
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -VoiceSelection single -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
