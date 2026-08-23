@@ -190,20 +190,16 @@ final class PrePublishAuditor {
         return new Scores(content, visual, audio, format, pacing, identity, metadata, overall);
     }
 
-    /**
-     * Visual similarity is deliberately excluded. The remaining weights are
-     * normalized to 100% so removing the template-layout check does not simply
-     * make every candidate about fifteen points easier to pass.
-     */
+    /** Visual similarity contributes no risk; all pre-existing non-visual weights stay unchanged. */
     private static double weighted(
             double content, double audio, double format,
             double pacing, double identity, double metadata) {
-        return content * 0.38
-                + audio * 0.09
-                + format * 0.09
-                + pacing * 0.18
-                + identity * 0.17
-                + metadata * 0.09;
+        return content * 0.32
+                + audio * 0.08
+                + format * 0.08
+                + pacing * 0.15
+                + identity * 0.14
+                + metadata * 0.08;
     }
 
     private static double contentSimilarity(String a, String b) {
