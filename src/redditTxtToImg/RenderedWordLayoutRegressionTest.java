@@ -19,6 +19,7 @@ public final class RenderedWordLayoutRegressionTest {
                     + "But whenever we try to rewind or fast forward through the song, it seems stuck on this one track. "
                     + "We've tried cleaning the mechanism and adjusting the volume, but nothing seems to work. "
                     + "Can anyone explain why this music box is so stubbornly connected to the weather?";
+    private static final String FITTING_TITLE = "Why does grandma's music box react to rain?";
 
     private RenderedWordLayoutRegressionTest() {
     }
@@ -27,7 +28,8 @@ public final class RenderedWordLayoutRegressionTest {
         System.setProperty("java.awt.headless", "true");
         Path temp = Files.createTempDirectory("threadgens-rendered-word-layout-");
         try {
-            verifyExactNinetyTwoWordRedditCase(temp);
+            verifyOriginalFailureIsRejectedBeforeTruncation(temp);
+            verifyProductionRedditGeometryWithFailureBody(temp);
             verifyPunctuationTokenGeometry(temp);
             verifyOversizeRedditFailsBeforeTruncation(temp);
             verifyXNarratesOnlyVisibleText(temp);
@@ -38,28 +40,58 @@ public final class RenderedWordLayoutRegressionTest {
         }
     }
 
-    private static void verifyExactNinetyTwoWordRedditCase(Path temp) throws Exception {
-        Path comments = temp.resolve("failure-case-comments.txt");
-        Path output = temp.resolve("failure-case-images");
+    private static void verifyOriginalFailureIsRejectedBeforeTruncation(Path temp) throws Exception {
+        String narration = RenderedWordLayout.narrationForReddit(FAILURE_TITLE, FAILURE_BODY);
+        require(RenderedWordLayout.countWords(narration) == 92,
+                "Regression fixture must remain the original 92-word narration case.");
+
+        Path comments = temp.resolve("original-failure-comments.txt");
+        Path output = temp.resolve("original-failure-images");
+        Files.writeString(comments, FAILURE_BODY + System.lineSeparator(), StandardCharsets.UTF_8);
+
+        boolean failed = false;
+        try {
+            RedditScreenshotGenerator.main(new String[]{
+                    comments.toString(), output.toString(),
+                    "--count", "1",
+                    "--prefix", "originalfailure",
+                    "--post-title", FAILURE_TITLE,
+                    "--top",
+                    "--no-identity-history"
+            });
+        } catch (IllegalStateException expected) {
+            failed = expected.getMessage().contains("Reddit rendering failed")
+                    && expected.getCause() != null;
+        }
+        require(failed,
+                "The original 92-word case must be rejected before rendering because its full title cannot fit without truncation.");
+        Path image = output.resolve("0originalfailure.png");
+        require(!Files.exists(image),
+                "The original non-fitting case must not leave a truncated image that could be narrated as if complete.");
+        require(!Files.exists(RenderedWordLayout.sidecarFor(image)),
+                "The original non-fitting case must not leave a stale word-layout sidecar.");
+    }
+
+    private static void verifyProductionRedditGeometryWithFailureBody(Path temp) throws Exception {
+        Path comments = temp.resolve("fitting-case-comments.txt");
+        Path output = temp.resolve("fitting-case-images");
         Files.writeString(comments, FAILURE_BODY + System.lineSeparator(), StandardCharsets.UTF_8);
 
         RedditScreenshotGenerator.main(new String[]{
                 comments.toString(), output.toString(),
                 "--count", "1",
-                "--prefix", "failure",
-                "--post-title", FAILURE_TITLE,
+                "--prefix", "fitting",
+                "--post-title", FITTING_TITLE,
                 "--top",
                 "--no-identity-history"
         });
 
-        Path image = output.resolve("0failure.png");
-        require(Files.isRegularFile(image), "Exact failure-case Reddit image was not generated.");
+        Path image = output.resolve("0fitting.png");
+        require(Files.isRegularFile(image), "Production Reddit geometry fixture was not generated.");
+        String narration = RenderedWordLayout.narrationForReddit(FITTING_TITLE, FAILURE_BODY);
         RenderedWordLayout.Layout sourceLayout = RenderedWordLayout.read(image);
-        String narration = RenderedWordLayout.narrationForReddit(FAILURE_TITLE, FAILURE_BODY);
-        require(RenderedWordLayout.countWords(narration) == 92,
-                "Regression fixture must remain the original 92-word narration case.");
-        require(sourceLayout.words().size() == 92,
-                "Renderer-owned geometry must produce exactly 92 boxes for the original 92-vs-93 failure case.");
+        require(sourceLayout.words().size() == RenderedWordLayout.countWords(narration),
+                "Renderer-owned geometry must produce one exact box per visible/spoken Reddit word.");
         require(RenderedWordLayout.sameNarration(sourceLayout.narration(), narration),
                 "Renderer geometry narration must exactly track the spoken Reddit narration.");
 
@@ -71,16 +103,16 @@ public final class RenderedWordLayoutRegressionTest {
                 0,
                 1,
                 8.0,
-                temp.resolve("failure-case-states"),
-                "failure");
+                temp.resolve("fitting-case-states"),
+                "fitting");
         try {
             require(states.size() == 1,
                     "Strict Reddit production frame should use one smooth-reveal state.");
             require(TimedVisualStateRenderer.hasSmoothRevealAssets(states.get(0).imagePath()),
                     "Strict Reddit production frame must create smooth reveal assets from renderer geometry.");
             TimedVisualStateRenderer.RevealLayout reveal = TimedVisualStateRenderer.readLayout(states.get(0).imagePath());
-            require(reveal.words().size() == 92,
-                    "Final smooth reveal layout must retain all 92 renderer-owned word boxes.");
+            require(reveal.words().size() == RenderedWordLayout.countWords(narration),
+                    "Final smooth reveal layout must retain every renderer-owned word box.");
         } finally {
             TimedVisualStateRenderer.cleanup(states);
             System.clearProperty("threadgens.requireSmoothReveal");
