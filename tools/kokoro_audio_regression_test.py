@@ -47,6 +47,53 @@ def verify_torch_conversion():
     assert mixed.shape == (13,)
 
 
+def verify_token_word_boundary_alignment():
+    # Real Kokoro/Misaki output can split contractions and punctuation into
+    # several MTokens. Punctuation MTokens can also have no acoustic timestamp.
+    # The old lexical matcher dropped those tokens and randomly rejected valid
+    # narration. The whitespace field is the authoritative original-word edge.
+    tokens = [
+        ("Don", "", 0.10, 0.20),
+        ("'", "", None, None),
+        ("t", " ", 0.20, 0.31),
+        ("panic", " ", 0.36, 0.62),
+        ("—", " ", None, None),
+        ("Employee", " ", 0.80, 1.03),
+        ("1", " ", 1.05, 1.16),
+        ("isn", "", 1.22, 1.33),
+        ("'", "", None, None),
+        ("t", " ", 1.33, 1.45),
+        ("late", "", 1.52, 1.72),
+        (".", "", None, None),
+    ]
+    text = "Don't panic — Employee 1 isn't late."
+    aligned = MODULE.align_model_tokens_to_input_words(text, tokens)
+
+    assert [item[0] for item in aligned] == text.split()
+    assert len(aligned) == 7
+    assert aligned[0][1:] == (0.10, 0.31)
+    assert aligned[1][1:] == (0.36, 0.62)
+    # A standalone unspoken dash stays in the visible-word count and reveals
+    # with the preceding exact spoken word rather than invalidating the clip.
+    assert aligned[2][1:] == aligned[1][1:]
+    assert aligned[3][1:] == (0.80, 1.03)
+    assert aligned[5][1:] == (1.22, 1.45)
+    assert aligned[6][1:] == (1.52, 1.72)
+
+
+def verify_positional_mapping_survives_token_normalization():
+    # If G2P normalizes display spelling but preserves the whitespace boundary,
+    # the acoustic timestamp still belongs to the same source word by position.
+    tokens = [
+        ("seventeen", " ", 0.10, 0.44),
+        ("minutes", " ", 0.48, 0.82),
+        ("later", "", 0.86, 1.10),
+    ]
+    aligned = MODULE.align_model_tokens_to_input_words("17 minutes later", tokens)
+    assert [item[0] for item in aligned] == ["17", "minutes", "later"]
+    assert aligned[0][1:] == (0.10, 0.44)
+
+
 def verify_exact_timing_requirement():
     previous = os.environ.get("THREADGENS_REQUIRE_EXACT_KOKORO_TIMING")
     os.environ["THREADGENS_REQUIRE_EXACT_KOKORO_TIMING"] = "1"
@@ -59,8 +106,8 @@ def verify_exact_timing_requirement():
             try:
                 MODULE.write_timing_sidecar(output, "hello world", [], False)
             except RuntimeError as exc:
-                failed = "exact model timestamp" in str(exc)
-            assert failed, "production must reject missing exact Kokoro timings"
+                failed = "model-derived timing" in str(exc)
+            assert failed, "production must reject missing Kokoro model timings"
             assert not output.exists(), "rejected exact-timing WAV must be removed"
 
             output.write_bytes(b"placeholder")
@@ -79,8 +126,10 @@ def verify_exact_timing_requirement():
 
 def main():
     verify_torch_conversion()
+    verify_token_word_boundary_alignment()
+    verify_positional_mapping_survives_token_normalization()
     verify_exact_timing_requirement()
-    print("Kokoro torch-audio and exact-timing regressions passed.")
+    print("Kokoro audio and model-word timing regressions passed.")
 
 
 if __name__ == "__main__":
