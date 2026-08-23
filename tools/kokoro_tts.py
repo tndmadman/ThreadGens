@@ -58,6 +58,34 @@ def delete_if_present(path):
             path.unlink()
 
 
+def audio_chunk_to_numpy(audio, np):
+    """Return one Kokoro chunk as a flat float32 NumPy array.
+
+    Kokoro releases may return either NumPy arrays or PyTorch tensors. NumPy
+    cannot use torch.float32 as the dtype argument to np.zeros(), and mixing a
+    tensor directly with NumPy also makes concatenation backend-dependent. Keep
+    the TTS boundary explicit by converting every chunk before pause insertion.
+    """
+    value = audio
+    detach = getattr(value, "detach", None)
+    if callable(detach):
+        value = detach()
+    cpu = getattr(value, "cpu", None)
+    if callable(cpu):
+        value = cpu()
+    as_numpy = getattr(value, "numpy", None)
+    if callable(as_numpy):
+        value = as_numpy()
+
+    array = np.asarray(value)
+    if array.size == 0:
+        raise ValueError("Kokoro produced an empty audio chunk.")
+    array = np.squeeze(array)
+    if array.ndim != 1:
+        array = array.reshape(-1)
+    return array.astype(np.float32, copy=False)
+
+
 def align_model_tokens_to_input_words(text, timed_tokens):
     source_words = re.findall(r"\S+", text)
     tokens = [token for token in timed_tokens if normalized_word(token[0])]
@@ -176,7 +204,7 @@ def main():
             else:
                 _, _, audio = result
                 tokens = None
-            chunks.append(audio)
+            chunks.append(audio_chunk_to_numpy(audio, np))
 
             relative_tokens = []
             if tokens:
@@ -194,7 +222,7 @@ def main():
         raise SystemExit("Kokoro produced no audio.")
 
     pause_ms = max(0, min(2000, args.sentence_pause_ms))
-    silence = np.zeros(int(SAMPLE_RATE * pause_ms / 1000), dtype=chunks[0].dtype) if pause_ms > 0 else None
+    silence = np.zeros(int(SAMPLE_RATE * pause_ms / 1000), dtype=np.float32) if pause_ms > 0 else None
     combined = []
     timed_tokens = []
     sample_cursor = 0
@@ -208,7 +236,7 @@ def main():
             timed_tokens.append((token_text, chunk_start + start_ts, chunk_start + end_ts))
         sample_cursor += len(chunk)
 
-    audio = np.concatenate(combined)
+    audio = np.concatenate(combined).astype(np.float32, copy=False)
     log(f"writing WAV: {output_path}", verbose)
     sf.write(str(output_path), audio, SAMPLE_RATE)
     write_timing_sidecar(output_path, text, timed_tokens, verbose)
