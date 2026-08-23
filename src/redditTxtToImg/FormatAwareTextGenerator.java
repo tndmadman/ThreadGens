@@ -18,6 +18,8 @@ import java.util.Locale;
  * than being spliced into the visible OP/title fields.
  */
 final class FormatAwareTextGenerator {
+    private static final int MAX_REPLY_WORDS = 32;
+
     private final HttpClient httpClient;
     private final URI endpoint;
     private final String model;
@@ -96,7 +98,8 @@ final class FormatAwareTextGenerator {
         if (lines.size() < count) {
             throw new IOException("Format-aware local LLM returned only " + (lines.size() - 1)
                     + " usable replies out of " + (count - 1)
-                    + ". Try again, lower --count, or use a stronger Ollama model.");
+                    + ". Replies over " + MAX_REPLY_WORDS
+                    + " words are rejected so narration and visible social-card text stay in sync.");
         }
         return new ArrayList<>(lines.subList(0, count));
     }
@@ -171,6 +174,9 @@ final class FormatAwareTextGenerator {
 
         prompt.append("Global rules:\n")
                 .append("- Return exactly ").append(count).append(" lines, one reply per line.\n")
+                .append("- Each reply must be concise: 8-").append(MAX_REPLY_WORDS)
+                .append(" words and never more than ").append(MAX_REPLY_WORDS).append(" words.\n")
+                .append("- The full reply must fit visibly on one ThreadGens social card; do not write long paragraphs.\n")
                 .append("- Do not output the original post, title, prompt instructions, labels, or explanations.\n")
                 .append("- No numbering, bullets, markdown, or quote wrappers.\n")
                 .append("- Make each line materially different from every other line.\n")
@@ -197,7 +203,7 @@ final class FormatAwareTextGenerator {
                     .replaceAll("^\\d+[.)-]\\s*", "")
                     .replaceAll("^(?i)(post|reply|tweet|title|user|comment|answer|side [ab])\\s*[:.-]\\s*", "");
             line = stripMatchingQuotes(line).trim();
-            if (!line.isBlank()) {
+            if (!line.isBlank() && wordCount(line) <= MAX_REPLY_WORDS) {
                 result.add(line);
             }
             if (result.size() >= count) {
@@ -205,6 +211,13 @@ final class FormatAwareTextGenerator {
             }
         }
         return result;
+    }
+
+    private static int wordCount(String value) {
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        return value.trim().split("\\s+").length;
     }
 
     private static boolean containsNormalized(List<String> lines, String candidate) {
