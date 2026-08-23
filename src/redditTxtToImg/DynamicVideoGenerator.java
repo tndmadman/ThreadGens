@@ -123,48 +123,61 @@ final class DynamicVideoGenerator {
         double outputDuration = audioDuration + END_PAUSE_SECONDS;
         Path cleanBase = TimedVisualStateRenderer.basePath(fullFrame);
         Path filterCaptionFile = prepareCaptionAlias(captionFile);
-
-        List<String> command = new ArrayList<>();
-        command.add(ffmpegCommand);
-        command.add("-y");
-        addLoopedImageInput(command, fullFrame, outputDuration);
-        addLoopedImageInput(command, cleanBase, outputDuration);
-        command.add("-i");
-        command.add(audioFile.toString());
-
-        String frameFilter = lockedFrameFilter(safeWidth, safeHeight, "rgba");
-        String maskExpression = buildSmoothRevealMask(layout, timing, safeWidth, safeHeight, fps);
-        StringBuilder filter = new StringBuilder();
-        filter.append("[0:v]").append(frameFilter).append(",setpts=PTS-STARTPTS[full];")
-                .append("[1:v]").append(frameFilter).append(",setpts=PTS-STARTPTS,split=2[base][masksrc];")
-                .append("[masksrc]format=gray,geq=lum='").append(maskExpression).append("'[mask];")
-                .append("[full][mask]alphamerge[revealed];")
-                .append("[base][revealed]overlay=0:0:shortest=1[vbase];");
-        if (filterCaptionFile != null) {
-            filter.append("[vbase]ass=filename='")
-                    .append(escapeFilterPath(filterCaptionFile))
-                    .append("'[vout]");
-        } else {
-            filter.append("[vbase]format=yuv420p[vout]");
-        }
-
-        command.add("-filter_complex");
-        command.add(filter.toString());
-        command.add("-map");
-        command.add("[vout]");
-        command.add("-map");
-        command.add("2:a");
-        command.add("-af");
-        command.add(audioFilter(audioDuration));
-        command.add("-t");
-        command.add(formatSeconds(outputDuration));
-        addEncodingArgs(command);
-        addMetadata(command, metadata);
-        command.add(outputFile.toString());
+        Path timingTexture = Files.createTempFile("threadgens-reveal-timing-", ".png");
 
         try {
+            RevealTimingTexture.Asset timingAsset = RevealTimingTexture.generate(
+                    timingTexture, layout, timing, safeWidth, safeHeight, fps);
+            RevealTimingTexture.Region region = timingAsset.region();
+
+            List<String> command = new ArrayList<>();
+            command.add(ffmpegCommand);
+            command.add("-y");
+            addLoopedImageInput(command, fullFrame, outputDuration);
+            addLoopedImageInput(command, cleanBase, outputDuration);
+            addLoopedImageInput(command, timingAsset.path(), outputDuration);
+            command.add("-i");
+            command.add(audioFile.toString());
+
+            String frameFilter = lockedFrameFilter(safeWidth, safeHeight, "rgba");
+            StringBuilder filter = new StringBuilder();
+            filter.append("[0:v]").append(frameFilter)
+                    .append(",setpts=PTS-STARTPTS,crop=")
+                    .append(region.width()).append(':').append(region.height()).append(':')
+                    .append(region.x()).append(':').append(region.y()).append("[fullcrop];")
+                    .append("[1:v]").append(frameFilter).append(",setpts=PTS-STARTPTS[base];")
+                    .append("[2:v]format=gray16le,geq=lum='")
+                    .append(RevealTimingTexture.ffmpegMaskExpression())
+                    .append("',format=gray,setpts=PTS-STARTPTS[mask];")
+                    .append("[fullcrop][mask]alphamerge[revealed];")
+                    .append("[base][revealed]overlay=")
+                    .append(region.x()).append(':').append(region.y())
+                    .append(":shortest=1[vbase];");
+            if (filterCaptionFile != null) {
+                filter.append("[vbase]ass=filename='")
+                        .append(escapeFilterPath(filterCaptionFile))
+                        .append("'[vout]");
+            } else {
+                filter.append("[vbase]format=yuv420p[vout]");
+            }
+
+            command.add("-filter_complex");
+            command.add(filter.toString());
+            command.add("-map");
+            command.add("[vout]");
+            command.add("-map");
+            command.add("3:a");
+            command.add("-af");
+            command.add(audioFilter(audioDuration));
+            command.add("-t");
+            command.add(formatSeconds(outputDuration));
+            addEncodingArgs(command);
+            addMetadata(command, metadata);
+            command.add(outputFile.toString());
+
             run(command, "smooth narration-synced reveal render");
         } finally {
+            Files.deleteIfExists(timingTexture);
             if (filterCaptionFile != null && !filterCaptionFile.equals(captionFile)) {
                 Files.deleteIfExists(filterCaptionFile);
             }
@@ -174,10 +187,9 @@ final class DynamicVideoGenerator {
     }
 
     /**
-     * Builds a frame-evaluated grayscale mask. Completed words remain visible;
-     * the active word exposes continuously from left to right between its exact
-     * narration start/end timestamps. At progress zero the edge is left-1, so
-     * absolutely no glyph column can leak before the word starts.
+     * Compatibility expression retained for focused layout tests. Production
+     * rendering uses RevealTimingTexture so runtime cost no longer grows with
+     * narration word count.
      */
     static String buildSmoothRevealMask(
             TimedVisualStateRenderer.RevealLayout layout,
