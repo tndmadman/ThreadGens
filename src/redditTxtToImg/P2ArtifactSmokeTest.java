@@ -48,7 +48,7 @@ public final class P2ArtifactSmokeTest {
                     List.of(video), List.of(image), List.of(audio), "configured_but_not_rendered", "kokoro", "", "ffmpeg"));
             require(!first.artifactHash.isBlank(), "artifact hash must exist");
             require(first.visualHashes.size() >= 4,
-                    "visual fingerprint must include source image plus sampled finished-video frames");
+                    "visual fingerprint history data should remain available for schema compatibility");
             require(first.identityHashes.size() >= 2,
                     "identity fingerprint must include rendered avatar and author/header regions");
             require(!first.segmentDurations.isEmpty() && first.segmentDurations.get(0) > 0,
@@ -74,6 +74,8 @@ public final class P2ArtifactSmokeTest {
                     List.of(video), List.of(image), List.of(audio), "other_voice", "kokoro", "", "ffmpeg"));
             PrePublishAuditor.Result result = new PrePublishAuditor(58, 78).assess(duplicate, history.load());
             require(result.status() == PrePublishAuditor.Status.BLOCK, "same finished artifact must block");
+            require(result.scores().visual() == 0.0,
+                    "P2 visual similarity scoring must stay disabled for the shared Reddit/X layout");
             require(result.scores().identity() > 0.99, "same rendered identity must compare as identical");
             require(result.scores().audio() > 0.99, "same actual P1 voice signature must compare as identical");
             System.out.println("P2 artifact smoke test passed.");
