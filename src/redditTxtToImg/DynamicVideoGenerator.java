@@ -17,10 +17,10 @@ import java.util.concurrent.TimeUnit;
  * Renders narration-timed social frames and stitches them into conventional
  * H.264/AAC/yuv420p/+faststart MP4s.
  *
- * The social frame itself stays spatially locked. Narration-timed states may
- * reveal different pixels/text, but the frame no longer pans, zooms, drifts or
- * changes crop position between states. A faint seeded Perlin texture plus
- * subtle temporal grain is applied once to the completed video.
+ * Social frames remain spatially locked. When smooth reveal assets are present,
+ * the original rasterized word pixels are exposed continuously at video frame
+ * rate using the TTS timing sidecar. The final stitched video then receives one
+ * faint seeded Perlin texture plus subtle temporal grain pass.
  */
 final class DynamicVideoGenerator {
     private static final double END_PAUSE_SECONDS = 0.55;
@@ -49,8 +49,7 @@ final class DynamicVideoGenerator {
             ContentFormat format,
             int itemIndex
     ) throws IOException, InterruptedException {
-        return renderClip(
-                states, audioFile, null, outputFile, width, height, format, itemIndex, Map.of());
+        return renderClip(states, audioFile, null, outputFile, width, height, format, itemIndex, Map.of());
     }
 
     Path renderClip(
@@ -84,16 +83,162 @@ final class DynamicVideoGenerator {
         if (audioDuration <= 0.01) {
             throw new IOException("Could not determine positive audio duration for: " + audioFile);
         }
-        double outputDuration = audioDuration + END_PAUSE_SECONDS;
-        List<Double> stateDurations = allocateStateDurations(states, audioDuration, END_PAUSE_SECONDS);
-        Path filterCaptionFile = prepareCaptionAlias(captionFile);
+
+        if (states.size() == 1 && TimedVisualStateRenderer.hasSmoothRevealAssets(states.get(0).imagePath())) {
+            return renderSmoothRevealClip(
+                    states.get(0).imagePath(), audioFile, captionFile, outputFile,
+                    width, height, audioDuration, metadata);
+        }
+
+        return renderLegacyStateClip(
+                states, audioFile, captionFile, outputFile,
+                width, height, audioDuration, metadata);
+    }
+
+    private Path renderSmoothRevealClip(
+            Path fullFrame,
+            Path audioFile,
+            Path captionFile,
+            Path outputFile,
+            int width,
+            int height,
+            double audioDuration,
+            Map<String, String> metadata
+    ) throws IOException, InterruptedException {
+        TimedVisualStateRenderer.RevealLayout layout = TimedVisualStateRenderer.readLayout(fullFrame);
+        if (layout.words().isEmpty()) {
+            throw new IOException("Smooth reveal layout contains no word rectangles: " + fullFrame);
+        }
+
+        List<NarrationTiming.Word> measured = NarrationTiming.load(audioFile);
+        List<NarrationTiming.Word> timing = NarrationTiming.fitToCount(
+                measured, layout.narration(), audioDuration, layout.words().size());
+        boolean exactTiming = !measured.isEmpty() && measured.size() == layout.words().size();
+        System.out.println("Narration reveal timing: "
+                + (exactTiming ? "exact Kokoro model timestamps" : "measured-duration fallback")
+                + " [words=" + layout.words().size() + ", fps=" + fps + "]");
 
         int safeWidth = even(Math.max(64, width));
         int safeHeight = even(Math.max(64, height));
+        double outputDuration = audioDuration + END_PAUSE_SECONDS;
+        Path cleanBase = TimedVisualStateRenderer.basePath(fullFrame);
+        Path filterCaptionFile = prepareCaptionAlias(captionFile);
+
         List<String> command = new ArrayList<>();
         command.add(ffmpegCommand);
         command.add("-y");
+        addLoopedImageInput(command, fullFrame, outputDuration);
+        addLoopedImageInput(command, cleanBase, outputDuration);
+        command.add("-i");
+        command.add(audioFile.toString());
 
+        String frameFilter = lockedFrameFilter(safeWidth, safeHeight, "rgba");
+        String maskExpression = buildSmoothRevealMask(layout, timing, safeWidth, safeHeight, fps);
+        StringBuilder filter = new StringBuilder();
+        filter.append("[0:v]").append(frameFilter).append(",setpts=PTS-STARTPTS[full];")
+                .append("[1:v]").append(frameFilter).append(",setpts=PTS-STARTPTS,split=2[base][masksrc];")
+                .append("[masksrc]format=gray,geq=lum='").append(maskExpression).append("'[mask];")
+                .append("[full][mask]alphamerge[revealed];")
+                .append("[base][revealed]overlay=0:0:shortest=1[vbase];");
+        if (filterCaptionFile != null) {
+            filter.append("[vbase]ass=filename='")
+                    .append(escapeFilterPath(filterCaptionFile))
+                    .append("'[vout]");
+        } else {
+            filter.append("[vbase]format=yuv420p[vout]");
+        }
+
+        command.add("-filter_complex");
+        command.add(filter.toString());
+        command.add("-map");
+        command.add("[vout]");
+        command.add("-map");
+        command.add("2:a");
+        command.add("-af");
+        command.add(audioFilter(audioDuration));
+        command.add("-t");
+        command.add(formatSeconds(outputDuration));
+        addEncodingArgs(command);
+        addMetadata(command, metadata);
+        command.add(outputFile.toString());
+
+        try {
+            run(command, "smooth narration-synced reveal render");
+        } finally {
+            if (filterCaptionFile != null && !filterCaptionFile.equals(captionFile)) {
+                Files.deleteIfExists(filterCaptionFile);
+            }
+        }
+        verifyNonEmpty(outputFile, "Smooth narration-synced reveal render");
+        return outputFile;
+    }
+
+    /**
+     * Builds a frame-evaluated grayscale mask. Completed words remain visible;
+     * the active word exposes continuously from left to right between its exact
+     * narration start/end timestamps. At progress zero the edge is left-1, so
+     * absolutely no glyph column can leak before the word starts.
+     */
+    static String buildSmoothRevealMask(
+            TimedVisualStateRenderer.RevealLayout layout,
+            List<NarrationTiming.Word> timing,
+            int outputWidth,
+            int outputHeight,
+            int fps
+    ) {
+        int count = Math.min(layout.words().size(), timing.size());
+        if (count <= 0) {
+            return "0";
+        }
+        int safeFps = Math.max(1, fps);
+        double scaleX = outputWidth / (double) Math.max(1, layout.sourceWidth());
+        double scaleY = outputHeight / (double) Math.max(1, layout.sourceHeight());
+        String time = "(N/" + safeFps + ".0)";
+        StringBuilder expression = new StringBuilder("clip(");
+        for (int i = 0; i < count; i++) {
+            TimedVisualStateRenderer.WordBox box = layout.words().get(i);
+            NarrationTiming.Word word = timing.get(i);
+            int left = Math.max(0, (int) Math.floor(box.left() * scaleX));
+            int right = Math.min(outputWidth - 1, (int) Math.ceil(box.right() * scaleX));
+            int top = Math.max(0, (int) Math.floor(box.top() * scaleY));
+            int bottom = Math.min(outputHeight - 1, (int) Math.ceil(box.bottom() * scaleY));
+            int pixelWidth = Math.max(1, right - left + 1);
+            double start = Math.max(0.0, word.startSeconds());
+            double duration = Math.max(0.005, word.endSeconds() - word.startSeconds());
+
+            if (i > 0) {
+                expression.append('+');
+            }
+            String progress = "clip((" + time + "-" + formatMask(start) + ")/"
+                    + formatMask(duration) + ",0,1)";
+            String edge = "(" + (left - 1) + "+" + pixelWidth + "*" + progress + ")";
+            expression.append("255*gte(").append(time).append(',').append(formatMask(start)).append(')')
+                    .append("*between(Y,").append(top).append(',').append(bottom).append(')')
+                    .append("*between(X,").append(left).append(',').append(edge).append(')');
+        }
+        expression.append(",0,255)");
+        return expression.toString();
+    }
+
+    private Path renderLegacyStateClip(
+            List<TimedVisualStateRenderer.RenderedState> states,
+            Path audioFile,
+            Path captionFile,
+            Path outputFile,
+            int width,
+            int height,
+            double audioDuration,
+            Map<String, String> metadata
+    ) throws IOException, InterruptedException {
+        double outputDuration = audioDuration + END_PAUSE_SECONDS;
+        List<Double> stateDurations = allocateStateDurations(states, audioDuration, END_PAUSE_SECONDS);
+        Path filterCaptionFile = prepareCaptionAlias(captionFile);
+        int safeWidth = even(Math.max(64, width));
+        int safeHeight = even(Math.max(64, height));
+
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegCommand);
+        command.add("-y");
         for (int i = 0; i < states.size(); i++) {
             command.add("-loop");
             command.add("1");
@@ -127,12 +272,6 @@ final class DynamicVideoGenerator {
             filter.append("[vbase]null[vout]");
         }
 
-        double fadeOutStart = Math.max(0.0, audioDuration - FADE_OUT_SECONDS);
-        String audioFilter = "afade=t=in:st=0:d=" + formatSeconds(FADE_IN_SECONDS)
-                + ",afade=t=out:st=" + formatSeconds(fadeOutStart)
-                + ":d=" + formatSeconds(FADE_OUT_SECONDS)
-                + ",apad=pad_dur=" + formatSeconds(END_PAUSE_SECONDS);
-
         command.add("-filter_complex");
         command.add(filter.toString());
         command.add("-map");
@@ -140,7 +279,7 @@ final class DynamicVideoGenerator {
         command.add("-map");
         command.add(audioInputIndex + ":a");
         command.add("-af");
-        command.add(audioFilter);
+        command.add(audioFilter(audioDuration));
         command.add("-t");
         command.add(formatSeconds(outputDuration));
         addEncodingArgs(command);
@@ -156,6 +295,25 @@ final class DynamicVideoGenerator {
         }
         verifyNonEmpty(outputFile, "Static video render");
         return outputFile;
+    }
+
+    private void addLoopedImageInput(List<String> command, Path image, double duration) {
+        command.add("-loop");
+        command.add("1");
+        command.add("-framerate");
+        command.add(String.valueOf(fps));
+        command.add("-t");
+        command.add(formatSeconds(duration));
+        command.add("-i");
+        command.add(image.toString());
+    }
+
+    private String audioFilter(double audioDuration) {
+        double fadeOutStart = Math.max(0.0, audioDuration - FADE_OUT_SECONDS);
+        return "afade=t=in:st=0:d=" + formatSeconds(FADE_IN_SECONDS)
+                + ",afade=t=out:st=" + formatSeconds(fadeOutStart)
+                + ":d=" + formatSeconds(FADE_OUT_SECONDS)
+                + ",apad=pad_dur=" + formatSeconds(END_PAUSE_SECONDS);
     }
 
     /** Compatibility overload used by focused tests/tools. */
@@ -187,7 +345,6 @@ final class DynamicVideoGenerator {
         if (outputFile.getParent() != null) {
             Files.createDirectories(outputFile.getParent());
         }
-
         Path stitched = outputFile.resolveSibling(outputFile.getFileName() + ".stitched.mp4");
         Files.deleteIfExists(stitched);
         try {
@@ -380,21 +537,18 @@ final class DynamicVideoGenerator {
         verifyNonEmpty(outputFile, "Single static video finalize");
     }
 
-    /** Keep the full social frame locked to the requested canvas. */
     private String staticFrameFilter(int width, int height) {
+        return lockedFrameFilter(width, height, "yuv420p");
+    }
+
+    private String lockedFrameFilter(int width, int height, String pixelFormat) {
         return "scale=" + width + ":" + height
                 + ":force_original_aspect_ratio=decrease"
                 + ",pad=" + width + ":" + height + ":(ow-iw)/2:(oh-ih)/2:black"
                 + ",fps=" + fps
-                + ",format=yuv420p";
+                + ",format=" + pixelFormat;
     }
 
-    /**
-     * Apply one fresh randomly seeded Perlin texture plus faint temporal grain
-     * after the complete video has been stitched. The Perlin layer is generated
-     * in Java so the result works even on FFmpeg builds that do not yet expose
-     * the newer perlin source filter.
-     */
     private void applyFinalTextureAndMetadata(Path input, Path output, Map<String, String> metadata)
             throws IOException, InterruptedException {
         int seed = FINAL_TEXTURE_RANDOM.nextInt(Integer.MAX_VALUE - 1) + 1;
@@ -406,7 +560,6 @@ final class DynamicVideoGenerator {
 
         try {
             PerlinNoiseTexture.generate(texture, textureWidth, textureHeight, seed);
-
             List<String> command = new ArrayList<>();
             command.add(ffmpegCommand);
             command.add("-y");
@@ -625,6 +778,10 @@ final class DynamicVideoGenerator {
 
     private static String formatSeconds(double value) {
         return String.format(Locale.US, "%.3f", value);
+    }
+
+    private static String formatMask(double value) {
+        return String.format(Locale.US, "%.6f", value);
     }
 
     private record TransitionProfile(double durationSeconds) {

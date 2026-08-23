@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 
@@ -35,6 +36,7 @@ public final class P0VideoSmokeTest {
             createTone(audio, 1.25);
 
             verifyBackgroundPaletteChanges(source, temp);
+            verifySmoothRevealVideo(temp);
 
             DynamicVideoGenerator generator = new DynamicVideoGenerator("ffmpeg", 120, 24);
             for (ContentFormat format : ContentFormat.values()) {
@@ -54,7 +56,7 @@ public final class P0VideoSmokeTest {
                             stateDir,
                             "item" + item
                     );
-                    require(states.size() >= 2, "Expected multiple timed visual states for " + format.id());
+                    require(states.size() >= 2, "Expected multiple compatibility states for generic frame " + format.id());
                     Path clip = temp.resolve(format.id() + "_clip_" + item + ".mp4");
                     generator.renderClip(states, audio, clip, 360, 640, format, item);
                     TimedVisualStateRenderer.cleanup(states);
@@ -73,11 +75,59 @@ public final class P0VideoSmokeTest {
             }
 
             verifyFinalTemporalGrain(generator, source, audio, temp);
-            System.out.println("P0 video smoke tests passed for all formats, palette rotation, and final temporal grain.");
+            System.out.println("P0 video smoke tests passed for smooth reveal, all formats, palette rotation, and final temporal grain.");
         } finally {
             System.clearProperty("threadgens.palette");
             deleteRecursively(temp);
         }
+    }
+
+    private static void verifySmoothRevealVideo(Path temp) throws Exception {
+        String narration = "first line moves smoothly second line follows exactly";
+        Path source = temp.resolve("smooth_reddit.png");
+        Path audio = temp.resolve("smooth_reddit.wav");
+        createRedditLikeSource(source, 360, 640);
+        createTone(audio, 2.4);
+        writeExactTiming(audio, narration, 2.0);
+
+        DynamicVideoGenerator generator = new DynamicVideoGenerator("ffmpeg", 120, 30);
+        List<TimedVisualStateRenderer.RenderedState> states = TimedVisualStateRenderer.renderStates(
+                source,
+                narration,
+                ContentFormat.THREAD_STORY,
+                1,
+                2,
+                2.4,
+                temp.resolve("smooth_states"),
+                "smooth");
+        require(states.size() == 1 && TimedVisualStateRenderer.hasSmoothRevealAssets(states.get(0).imagePath()),
+                "Reddit fixture must route through the smooth reveal path.");
+
+        Path clip = temp.resolve("smooth_reveal.mp4");
+        generator.renderClip(states, audio, clip, 360, 640, ContentFormat.THREAD_STORY, 1);
+        require(Files.size(clip) > 1_000, "Smooth reveal clip is unexpectedly small.");
+        require(hasAudioAndVideoStreams(clip), "Smooth reveal clip must keep audio and video streams.");
+
+        String early = frameMd5(clip, 0.10);
+        String middle = frameMd5(clip, 1.10);
+        String late = frameMd5(clip, 2.10);
+        require(!early.equals(middle) && !middle.equals(late) && !early.equals(late),
+                "Decoded smooth-reveal frames must change as narration advances.");
+        TimedVisualStateRenderer.cleanup(states);
+    }
+
+    private static void writeExactTiming(Path audio, String narration, double spokenDuration) throws Exception {
+        String[] words = narration.split("\\s+");
+        List<String> lines = new ArrayList<>();
+        lines.add(NarrationTiming.HEADER);
+        for (int i = 0; i < words.length; i++) {
+            double start = spokenDuration * i / words.length;
+            double end = spokenDuration * (i + 1.0) / words.length;
+            String encoded = Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(words[i].getBytes(StandardCharsets.UTF_8));
+            lines.add(String.format(Locale.US, "word\t%.6f\t%.6f\t%s", start, end, encoded));
+        }
+        Files.write(NarrationTiming.sidecarFor(audio), lines, StandardCharsets.UTF_8);
     }
 
     private static void verifyBackgroundPaletteChanges(Path source, Path temp) throws Exception {
@@ -151,6 +201,23 @@ public final class P0VideoSmokeTest {
         g.drawString("ThreadGens P0", 40, 110);
         g.setFont(new Font("Arial", Font.PLAIN, 20));
         g.drawString("static state smoke frame", 40, 160);
+        g.dispose();
+        ImageIO.write(image, "png", path.toFile());
+    }
+
+    private static void createRedditLikeSource(Path path, int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        g.setColor(new Color(16, 17, 19));
+        g.fillRect(0, 0, width, height);
+        g.setColor(new Color(31, 31, 33));
+        g.fillRoundRect(45, 86, 294, 445, 18, 18);
+        g.setColor(new Color(230, 70, 10));
+        g.fillRoundRect(268, 102, 56, 24, 8, 8);
+        g.setColor(new Color(235, 235, 238));
+        g.setFont(new Font("Arial", Font.PLAIN, 20));
+        g.drawString("first line moves smoothly", 58, 190);
+        g.drawString("second line follows exactly", 58, 218);
         g.dispose();
         ImageIO.write(image, "png", path.toFile());
     }
