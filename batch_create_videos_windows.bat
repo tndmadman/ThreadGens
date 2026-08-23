@@ -24,7 +24,7 @@ if /I "%~1"=="--self-test" (
   if errorlevel 1 exit /b 1
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_color_dashboard.ps1" -SelfTest
   if errorlevel 1 exit /b 1
-  echo Color live dashboard batch launcher self-test passed.
+  echo Shutdown-safe color live dashboard batch launcher self-test passed.
   exit /b 0
 )
 
@@ -109,6 +109,7 @@ echo   platform: %PLATFORM%
 echo.
 echo Detailed engine, Ollama, TTS, FFmpeg, P0/P1/P2, and worker output is saved to debug.log.
 echo The live screen will show color-coded progress, worker stages, slots, events, and system resources.
+echo Press Q or Esc to stop cleanly. Ctrl+C also terminates the entire ThreadGens process tree.
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_color_dashboard.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Workers %WORKERS% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -VoiceSelection single -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
@@ -117,6 +118,8 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 if "%EXITCODE%"=="0" (
   echo Parallel batch approved-video target reached.
+) else if "%EXITCODE%"=="130" (
+  echo Batch stopped by user. All ThreadGens child processes were terminated.
 ) else if "%EXITCODE%"=="2" (
   echo Batch stopped before the approved-video target was reached. See debug.log for full detail.
 ) else (
@@ -132,7 +135,7 @@ set "DASHBOARD_SCRIPT=tools\batch_create_videos_dashboard.ps1"
 set "PARALLEL_SCRIPT=tools\batch_create_videos_parallel.ps1"
 set "WORKER_SCRIPT=tools\batch_parallel_worker.ps1"
 set "PROXY_SCRIPT=tools\ollama_serial_proxy.py"
-set "COLOR_DASHBOARD_MARKER=Get-DashboardLineColor"
+set "COLOR_DASHBOARD_MARKER=ThreadGensKillOnCloseJob"
 set "DASHBOARD_MARKER=ThreadGens LIVE BATCH MONITOR"
 set "PARALLEL_MARKER=Parallel video workers:"
 
@@ -198,7 +201,7 @@ if not exist "%WORKER_SCRIPT%" exit /b 1
 if not exist "%PROXY_SCRIPT%" exit /b 1
 findstr /C:"%COLOR_DASHBOARD_MARKER%" "%COLOR_DASHBOARD_SCRIPT%" >nul 2>&1
 if errorlevel 1 (
-  echo The refreshed color dashboard is still missing its color renderer.
+  echo The refreshed color dashboard is still missing its process-tree shutdown guard.
   exit /b 1
 )
 findstr /C:"%DASHBOARD_MARKER%" "%DASHBOARD_SCRIPT%" >nul 2>&1
