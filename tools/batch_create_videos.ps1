@@ -186,6 +186,58 @@ function ConvertFrom-IdeaResponse($Text) {
     }
 }
 
+function Get-IdeaWordCount($Value) {
+    $text = (([string]$Value) -replace '\s+', ' ').Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return 0
+    }
+    return @($text -split '\s+').Count
+}
+
+function Get-IdeaShapeProblem($Title, $Body, $IdeaPlatform) {
+    $safeTitle = (([string]$Title) -replace '\s+', ' ').Trim()
+    $safeBody = (([string]$Body) -replace '\s+', ' ').Trim()
+    $platformName = (([string]$IdeaPlatform).ToLowerInvariant()).Trim()
+
+    if ([string]::IsNullOrWhiteSpace($safeTitle) -or
+        [string]::IsNullOrWhiteSpace($safeBody) -or
+        $safeTitle.Length -lt 3 -or
+        $safeBody.Length -lt 12) {
+        return 'title/body is empty or too short'
+    }
+
+    $titleWords = Get-IdeaWordCount $safeTitle
+    $bodyWords = Get-IdeaWordCount $safeBody
+
+    if ($platformName -eq 'x') {
+        if ($safeTitle.Length -gt 48 -or $titleWords -gt 8) {
+            return "X hidden reply style is too long ($($safeTitle.Length) chars/$titleWords words; max 48 chars/8 words)"
+        }
+        if ($safeBody.Length -gt 280) {
+            return "X visible post is too long ($($safeBody.Length) chars; max 280)"
+        }
+        return $null
+    }
+
+    # These are intentionally conservative relative to the renderer. The exact
+    # renderer remains the final authority, but the batch controller should not
+    # spend a full video attempt on seeds that are obviously too large for the
+    # fixed 1080x1920 Reddit OP card.
+    if ($safeTitle.Length -gt 64 -or $titleWords -gt 11) {
+        return "Reddit title is too long ($($safeTitle.Length) chars/$titleWords words; max 64 chars/11 words)"
+    }
+    if ($safeBody.Length -gt 300 -or $bodyWords -gt 52) {
+        return "Reddit body is too long ($($safeBody.Length) chars/$bodyWords words; max 300 chars/52 words)"
+    }
+
+    $longestTitleWord = @($safeTitle -split '\s+' | Sort-Object Length -Descending | Select-Object -First 1)[0]
+    if ($null -ne $longestTitleWord -and ([string]$longestTitleWord).Length -gt 24) {
+        return "Reddit title contains a word longer than 24 characters, which is unsafe for fixed-width rendering"
+    }
+
+    return $null
+}
+
 function Get-RecentIdeaBlock($History) {
     if (-not $History -or $History.Count -eq 0) {
         return '(none yet)'
@@ -224,6 +276,7 @@ function Invoke-NewBatchIdea($AttemptNumber, $History, [hashtable]$SeenKeys) {
         'ordinary situation that becomes strange'
     )
 
+    $shapeFeedback = ''
     for ($ideaTry = 1; $ideaTry -le $IdeaRetries; $ideaTry++) {
         $theme = $themes[(($AttemptNumber + $ideaTry - 2) % $themes.Count)]
         $recentBlock = Get-RecentIdeaBlock $History
@@ -234,8 +287,8 @@ Create one NEW ThreadGens X seed.
 Return JSON with exactly these string fields:
 {"title":"hidden reply style","body":"visible X post"}
 
-"title" is a short hidden reply instruction such as normal replies, wrong answers only, give practical advice, finish this story, or another natural reply style.
-"body" is the visible X post: concise, specific, natural, and under about 280 characters.
+"title" is a short hidden reply instruction, at most 8 words and 48 characters.
+"body" is the visible X post: concise, specific, natural, and at most 280 characters.
 "@
         } else {
             $shape = @"
@@ -243,13 +296,22 @@ Create one NEW ThreadGens Reddit seed.
 Return JSON with exactly these string fields:
 {"title":"reddit post title","body":"reddit post body"}
 
-"title" should be a natural Reddit-style question or prompt, usually 6-18 words.
-"body" should be 1-3 concise sentences with a concrete setup that gives generated replies something specific to react to.
+The seed must fit a fixed 1080x1920 Reddit OP card without truncation.
+"title" must be a natural Reddit-style question/prompt, 5-11 words and at most 64 characters total.
+"body" must be 1-2 concise sentences, preferably 30-50 words, and at most 300 characters total.
+Keep both fields compact. Do not pad the setup with extra adjectives, backstory, or repeated explanation.
 "@
+        }
+
+        $correction = if ([string]::IsNullOrWhiteSpace($shapeFeedback)) {
+            ''
+        } else {
+            "`nThe previous candidate was rejected before rendering because: $shapeFeedback`nCorrect that size problem in this retry."
         }
 
         $prompt = @"
 $shape
+$correction
 
 Target idea family for this attempt: $theme
 
@@ -260,6 +322,7 @@ Hard rules:
 - Make the setup easy to narrate aloud.
 - Do not mention ThreadGens, AI, prompts, engagement counts, verification, moderation actions, or platform algorithms.
 - Do not make accusations about identifiable real people.
+- Respect every title/body size limit above. Limits are hard validation rules, not suggestions.
 - No markdown, no code fence, no explanation: output only the JSON object.
 
 RECENT IDEAS THAT MUST NOT BE RECYCLED:
@@ -299,13 +362,13 @@ $recentBlock
         $title = (([string]$idea.title) -replace '\s+', ' ').Trim()
         $body = (([string]$idea.body) -replace '\s+', ' ').Trim()
 
-        if ([string]::IsNullOrWhiteSpace($title) -or
-            [string]::IsNullOrWhiteSpace($body) -or
-            $title.Length -lt 3 -or
-            $body.Length -lt 12) {
-            Write-Host "Idea generation try $ideaTry/$IdeaRetries returned an unusable title/body; regenerating." -ForegroundColor Yellow
+        $shapeProblem = Get-IdeaShapeProblem $title $body $Platform
+        if (-not [string]::IsNullOrWhiteSpace([string]$shapeProblem)) {
+            $shapeFeedback = [string]$shapeProblem
+            Write-Host "Idea generation try $ideaTry/$IdeaRetries failed render-fit guard: $shapeProblem; regenerating before video attempt." -ForegroundColor Yellow
             continue
         }
+        $shapeFeedback = ''
 
         $key = Get-IdeaKey $title $body $Platform
         if ($SeenKeys.ContainsKey($key)) {
@@ -330,7 +393,7 @@ $recentBlock
         return $entry
     }
 
-    throw "Could not generate a unique batch idea after $IdeaRetries tries."
+    throw "Could not generate a unique render-fit batch idea after $IdeaRetries tries. Last size problem: $shapeFeedback"
 }
 
 function Run-SelfTest {
@@ -358,6 +421,23 @@ function Run-SelfTest {
         $parsed = ConvertFrom-IdeaResponse 'prefix {"title":"T","body":"B body text"} suffix'
         if ($parsed.title -ne 'T' -or $parsed.body -ne 'B body text') {
             throw 'Idea JSON extraction failed.'
+        }
+
+        $validProblem = Get-IdeaShapeProblem 'Why did my coworker hide the office toaster?' 'My coworker moved our toaster into a locked cabinet after lunch. Nobody knows why, and now the whole team is arguing about whether to ask management.' 'reddit'
+        if (-not [string]::IsNullOrWhiteSpace([string]$validProblem)) {
+            throw "Render-fit guard rejected a compact Reddit seed: $validProblem"
+        }
+
+        $loggedFailureTitle = "Why do my neighbor's vintage synthesizer always produce a faint melody in perfect harmony with our building's fire alarm?"
+        $loggedFailureProblem = Get-IdeaShapeProblem $loggedFailureTitle 'Short body that otherwise fits.' 'reddit'
+        if ([string]::IsNullOrWhiteSpace([string]$loggedFailureProblem)) {
+            throw 'Render-fit guard failed to reject the oversized Reddit title from the production failure log.'
+        }
+
+        $longBody = ('word ' * 80).Trim()
+        $longBodyProblem = Get-IdeaShapeProblem 'Why did this happen at work?' $longBody 'reddit'
+        if ([string]::IsNullOrWhiteSpace([string]$longBodyProblem)) {
+            throw 'Render-fit guard failed to reject an oversized Reddit body.'
         }
 
         $approved = 0
@@ -414,6 +494,7 @@ Write-Host 'Video style: locked/static social frame, rotating dark background pa
 Write-Host 'Visible format/progress counters: disabled'
 Write-Host 'Final MP4 names: title-based with no numeric prefix'
 Write-Host 'Self-filling mode: generate ideas until approved target is reached' -ForegroundColor Green
+Write-Host 'Idea render-fit guard: reject oversized seeds before Java/TTS/video work' -ForegroundColor Green
 Write-Host 'Kokoro console: quiet'
 if ($MaxAttempts -gt 0) {
     Write-Host "Attempt cap: $MaxAttempts total ideas"
