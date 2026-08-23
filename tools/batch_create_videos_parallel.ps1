@@ -401,7 +401,7 @@ function Merge-GlobalHistoryLine($RawLine) {
 }
 
 function Get-FreeLoopbackPort {
-    $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+    $listener = New-Object System.Net.Sockets.TcpListener -ArgumentList ([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
     try { return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port } finally { $listener.Stop() }
 }
@@ -411,8 +411,8 @@ function Start-OllamaSerialProxy {
     $port = Get-FreeLoopbackPort
     $proxyLog = Join-Path $OutputRoot 'ollama_proxy.log'
     $proxyErr = Join-Path $OutputRoot 'ollama_proxy.error.log'
-    $args = @($ProxyScript, '--listen-port', [string]$port, '--upstream', 'http://127.0.0.1:11434')
-    $script:proxyProcess = Start-Process -FilePath $KokoroPython -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardOutput $proxyLog -RedirectStandardError $proxyErr
+    $proxyCommandLine = "`"$ProxyScript`" --listen-port $port --upstream http://127.0.0.1:11434"
+    $script:proxyProcess = Start-Process -FilePath $KokoroPython -ArgumentList $proxyCommandLine -PassThru -WindowStyle Hidden -RedirectStandardOutput $proxyLog -RedirectStandardError $proxyErr
     $health = "http://127.0.0.1:$port/health"
     $deadline = (Get-Date).AddSeconds(20)
     do {
@@ -458,7 +458,7 @@ function Update-WorkerGenerationState($Job) {
     if ($Job.GenerationSettled) { return }
     if (-not (Test-Path $Job.LogPath) -or -not (Test-Path $Job.ScriptOut)) { return }
     $hasMarker = $false
-    try { $hasMarker = $null -ne (Select-String -Path $Job.LogPath -Pattern '^P0 format:' -Quiet -ErrorAction Stop) } catch { }
+    try { $hasMarker = [bool](Select-String -Path $Job.LogPath -Pattern '^P0 format:' -Quiet -ErrorAction Stop) } catch { }
     if (-not $hasMarker) { return }
     try { $scriptText = (Get-Content -Raw -Path $Job.ScriptOut -Encoding UTF8).Trim() } catch { return }
     if ([string]::IsNullOrWhiteSpace($scriptText)) { return }
@@ -478,7 +478,7 @@ function Try-MergeWorkerGenerationHistory($Job) {
     if ($null -eq $line) { return }
     Merge-GlobalHistoryLine $line
     $Job.HistoryMerged = $true
-    $script:pendingReservations.Remove($Job.AttemptLabel)
+    [void]$script:pendingReservations.Remove($Job.AttemptLabel)
     Write-Host "Worker A$($Job.AttemptLabel) committed its P0 generation history through the master." -ForegroundColor DarkGreen
 }
 
@@ -610,8 +610,8 @@ function Complete-Worker($Job) {
             attempt = [int]$Job.AttemptLabel; approvedSlot = $Job.Slot; palette = $Job.Palette; reason = $reason
         })
         Add-FailureRecord $Job.AttemptLabel $Job.SlotLabel $Job.Title $reason
-        $script:reservedFinalNames.Remove($Job.FinalVideoName.ToLowerInvariant())
-        $script:pendingReservations.Remove($Job.AttemptLabel)
+        [void]$script:reservedFinalNames.Remove($Job.FinalVideoName.ToLowerInvariant())
+        [void]$script:pendingReservations.Remove($Job.AttemptLabel)
         [void]$script:pendingSlots.Insert(0, [int]$Job.Slot)
         Write-Host "Attempt $($Job.AttemptLabel) did not fill slot $($Job.SlotLabel): $reason" -ForegroundColor Red
         if ($StopOnError) {
@@ -620,7 +620,7 @@ function Complete-Worker($Job) {
         }
         Write-Host "Replacement queued; approved progress remains $script:succeededVideos/$TargetVideos." -ForegroundColor Yellow
     }
-    $script:pendingReservations.Remove($Job.AttemptLabel)
+    [void]$script:pendingReservations.Remove($Job.AttemptLabel)
     [void]$script:activeJobs.Remove($Job)
 }
 
@@ -648,6 +648,21 @@ function Run-SelfTest {
         $reserved = @{ 'test.mp4' = $true }
         $name = Get-UniqueFinalVideoName 'test' $temp $reserved
         if ($name -ne 'test_a.mp4') { throw "Reserved final-name collision test failed: $name" }
+
+        $markerLog = Join-Path $temp 'marker.log'
+        $markerScript = Join-Path $temp 'generated.txt'
+        Set-Content -Path $markerScript -Value 'stable generated script' -Encoding UTF8
+        Set-Content -Path $markerLog -Value 'P0 hidden-prompt generation attempt 1/5' -Encoding UTF8
+        $fakeJob = [pscustomobject]@{
+            GenerationSettled = $false; LogPath = $markerLog; ScriptOut = $markerScript; Script = ''
+            AttemptLabel = '9999'; Body = 'marker topic'
+        }
+        Update-WorkerGenerationState $fakeJob
+        if ($fakeJob.GenerationSettled) { throw 'Worker generation-ready marker fired before P0 entered the finalized render path.' }
+        Add-Content -Path $markerLog -Value 'P0 format: debate (Two-sided debate)' -Encoding UTF8
+        Update-WorkerGenerationState $fakeJob
+        if (-not $fakeJob.GenerationSettled -or $fakeJob.Script -ne 'stable generated script') { throw 'Worker generation-ready marker did not recognize the finalized P0 render path.' }
+        [void]$script:pendingReservations.Remove('9999')
     } finally {
         if ($null -ne $oldGlobal) { $script:GlobalGenerationHistoryPath = $oldGlobal }
         if ($null -ne $oldReservations) { $script:pendingReservations = $oldReservations }
@@ -753,8 +768,6 @@ try {
         if (-not $launchedSomething) { Start-Sleep -Milliseconds 300 }
     }
 
-    # If the attempt cap stopped new launches, allow all already-running workers
-    # to finish before producing the final summary.
     while ($script:activeJobs.Count -gt 0) {
         foreach ($job in @($script:activeJobs)) {
             Write-NewWorkerLogLines $job
