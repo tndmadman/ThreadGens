@@ -1,33 +1,97 @@
 package redditTxtToImg;
 
 import java.awt.image.BufferedImage;
+import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Random;
 
 import javax.imageio.ImageIO;
 
-/** Generates a small seeded multi-octave Perlin texture for final video grain. */
+/** Generates seeded multi-octave Perlin textures for the final video pass. */
 final class PerlinNoiseTexture {
+    private static final int MIN_DIMENSION = 32;
+
     private PerlinNoiseTexture() {
     }
 
+    /** Compatibility helper for callers/tests that need one static PNG texture. */
     static Path generate(Path output, int width, int height, long seed) throws IOException {
-        int safeWidth = Math.max(32, width);
-        int safeHeight = Math.max(32, height);
+        int safeWidth = Math.max(MIN_DIMENSION, width);
+        int safeHeight = Math.max(MIN_DIMENSION, height);
         if (output.getParent() != null) {
             Files.createDirectories(output.getParent());
         }
 
-        int[] permutation = buildPermutation(seed);
+        byte[] pixels = renderGrayFrame(safeWidth, safeHeight, seed);
         BufferedImage image = new BufferedImage(safeWidth, safeHeight, BufferedImage.TYPE_BYTE_GRAY);
-        double baseScale = 4.5;
+        image.getRaster().setDataElements(0, 0, safeWidth, safeHeight, pixels);
 
-        for (int y = 0; y < safeHeight; y++) {
-            for (int x = 0; x < safeWidth; x++) {
-                double nx = (x / (double) safeWidth) * baseScale;
-                double ny = (y / (double) safeHeight) * baseScale * (safeHeight / (double) safeWidth);
+        if (!ImageIO.write(image, "png", output.toFile())) {
+            throw new IOException("Could not encode Perlin texture: " + output);
+        }
+        return output;
+    }
+
+    /**
+     * Writes a compact raw gray8 animation. Frame N is generated from
+     * {@code baseSeed + N}, so the Perlin field itself changes on every video
+     * frame while remaining deterministic for a given base seed.
+     */
+    static RawSequence generateRawSequence(
+            Path output,
+            int width,
+            int height,
+            long baseSeed,
+            int frameCount
+    ) throws IOException {
+        int safeWidth = Math.max(MIN_DIMENSION, width);
+        int safeHeight = Math.max(MIN_DIMENSION, height);
+        int safeFrameCount = Math.max(1, frameCount);
+        if (output.getParent() != null) {
+            Files.createDirectories(output.getParent());
+        }
+
+        byte[] frame = new byte[Math.multiplyExact(safeWidth, safeHeight)];
+        try (OutputStream stream = new BufferedOutputStream(Files.newOutputStream(output), 1024 * 1024)) {
+            for (int frameIndex = 0; frameIndex < safeFrameCount; frameIndex++) {
+                fillGrayFrame(frame, safeWidth, safeHeight, frameSeed(baseSeed, frameIndex));
+                stream.write(frame);
+            }
+        }
+        return new RawSequence(output, safeWidth, safeHeight, safeFrameCount, baseSeed);
+    }
+
+    static long frameSeed(long baseSeed, int frameIndex) {
+        if (frameIndex < 0) {
+            throw new IllegalArgumentException("Perlin frame index must be non-negative: " + frameIndex);
+        }
+        return baseSeed + frameIndex;
+    }
+
+    static byte[] renderGrayFrame(int width, int height, long seed) {
+        int safeWidth = Math.max(MIN_DIMENSION, width);
+        int safeHeight = Math.max(MIN_DIMENSION, height);
+        byte[] frame = new byte[Math.multiplyExact(safeWidth, safeHeight)];
+        fillGrayFrame(frame, safeWidth, safeHeight, seed);
+        return frame;
+    }
+
+    private static void fillGrayFrame(byte[] frame, int width, int height, long seed) {
+        if (frame.length != Math.multiplyExact(width, height)) {
+            throw new IllegalArgumentException("Perlin frame buffer does not match requested dimensions.");
+        }
+
+        int[] permutation = buildPermutation(seed);
+        double baseScale = 4.5;
+        int offset = 0;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                double nx = (x / (double) width) * baseScale;
+                double ny = (y / (double) height) * baseScale * (height / (double) width);
                 double amplitude = 1.0;
                 double frequency = 1.0;
                 double sum = 0.0;
@@ -42,15 +106,9 @@ final class PerlinNoiseTexture {
 
                 double value = normalization <= 0.0 ? 0.0 : sum / normalization;
                 int gray = clamp((int) Math.round(128.0 + value * 46.0));
-                int rgb = (gray << 16) | (gray << 8) | gray;
-                image.setRGB(x, y, rgb);
+                frame[offset++] = (byte) gray;
             }
         }
-
-        if (!ImageIO.write(image, "png", output.toFile())) {
-            throw new IOException("Could not encode Perlin texture: " + output);
-        }
-        return output;
     }
 
     private static int[] buildPermutation(long seed) {
@@ -120,5 +178,8 @@ final class PerlinNoiseTexture {
 
     private static int clamp(int value) {
         return Math.max(0, Math.min(255, value));
+    }
+
+    record RawSequence(Path path, int width, int height, int frameCount, long baseSeed) {
     }
 }

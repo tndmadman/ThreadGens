@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
@@ -35,6 +36,7 @@ public final class P0VideoSmokeTest {
             createSourceImage(source, 360, 640);
             createTone(audio, 1.25);
 
+            verifyPerlinSeedProgression(temp);
             verifyBackgroundPaletteChanges(source, temp);
             verifySmoothRevealVideo(temp);
 
@@ -74,12 +76,48 @@ public final class P0VideoSmokeTest {
                         "Final video must contain both audio and video streams for " + format.id());
             }
 
-            verifyFinalTemporalGrain(generator, source, audio, temp);
-            System.out.println("P0 video smoke tests passed for smooth reveal, all formats, palette rotation, and final temporal grain.");
+            verifyFinalTemporalTexture(generator, source, audio, temp);
+            System.out.println("P0 video smoke tests passed for smooth reveal, all formats, palette rotation, per-frame Perlin seeds, and final temporal texture.");
         } finally {
             System.clearProperty("threadgens.palette");
             deleteRecursively(temp);
         }
+    }
+
+    private static void verifyPerlinSeedProgression(Path temp) throws Exception {
+        int width = 48;
+        int height = 40;
+        int frames = 3;
+        long baseSeed = 912_345L;
+        Path firstSequence = temp.resolve("perlin_sequence_a.gray");
+        Path secondSequence = temp.resolve("perlin_sequence_b.gray");
+
+        PerlinNoiseTexture.RawSequence sequence = PerlinNoiseTexture.generateRawSequence(
+                firstSequence, width, height, baseSeed, frames);
+        PerlinNoiseTexture.generateRawSequence(secondSequence, width, height, baseSeed, frames);
+
+        require(sequence.width() == width && sequence.height() == height && sequence.frameCount() == frames,
+                "Perlin raw sequence metadata did not preserve requested dimensions/frame count.");
+        require(PerlinNoiseTexture.frameSeed(baseSeed, 0) == baseSeed,
+                "Perlin frame zero must use the base seed.");
+        require(PerlinNoiseTexture.frameSeed(baseSeed, 1) == baseSeed + 1,
+                "Perlin seed must increment exactly once per frame.");
+        require(PerlinNoiseTexture.frameSeed(baseSeed, 2) == baseSeed + 2,
+                "Perlin seed progression must continue monotonically.");
+
+        byte[] bytes = Files.readAllBytes(firstSequence);
+        byte[] repeat = Files.readAllBytes(secondSequence);
+        int frameSize = width * height;
+        require(bytes.length == frameSize * frames,
+                "Perlin raw sequence byte size does not match gray8 frame dimensions.");
+        require(Arrays.equals(bytes, repeat),
+                "A fixed Perlin base seed must produce a deterministic animation sequence.");
+
+        byte[] frame0 = Arrays.copyOfRange(bytes, 0, frameSize);
+        byte[] frame1 = Arrays.copyOfRange(bytes, frameSize, frameSize * 2);
+        byte[] frame2 = Arrays.copyOfRange(bytes, frameSize * 2, frameSize * 3);
+        require(!Arrays.equals(frame0, frame1) && !Arrays.equals(frame1, frame2),
+                "Consecutive Perlin frames must change when their seeds increment.");
     }
 
     private static void verifySmoothRevealVideo(Path temp) throws Exception {
@@ -150,23 +188,23 @@ public final class P0VideoSmokeTest {
                 "Different per-video palettes must produce different dark-background pixels.");
     }
 
-    private static void verifyFinalTemporalGrain(
+    private static void verifyFinalTemporalTexture(
             DynamicVideoGenerator generator,
             Path source,
             Path audio,
             Path temp
     ) throws Exception {
-        Path staticClip = temp.resolve("grain_static_source.mp4");
-        Path finalVideo = temp.resolve("grain_final.mp4");
+        Path staticClip = temp.resolve("texture_static_source.mp4");
+        Path finalVideo = temp.resolve("texture_final.mp4");
         generator.renderClip(source, audio, staticClip, 360, 640, ContentFormat.THREAD_STORY, 0);
         generator.combineClips(List.of(staticClip), finalVideo, ContentFormat.THREAD_STORY);
 
         String firstFrame = frameMd5(finalVideo, 0.25);
         String laterFrame = frameMd5(finalVideo, 0.85);
         require(!firstFrame.isBlank() && !laterFrame.isBlank(),
-                "Could not hash decoded frames from final grain video.");
+                "Could not hash decoded frames from final textured video.");
         require(!firstFrame.equals(laterFrame),
-                "Final completed video must contain temporal grain; two static-source frames decoded identically.");
+                "Final completed video must contain temporal texture; two static-source frames decoded identically.");
     }
 
     private static String frameMd5(Path media, double seconds) throws Exception {
