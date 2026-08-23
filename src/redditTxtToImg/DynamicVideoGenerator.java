@@ -19,8 +19,8 @@ import java.util.concurrent.TimeUnit;
  *
  * Social frames remain spatially locked. When smooth reveal assets are present,
  * the original rasterized word pixels are exposed continuously at video frame
- * rate using the TTS timing sidecar. The final stitched video then receives one
- * faint seeded Perlin texture plus subtle temporal grain pass.
+ * rate using the TTS timing sidecar. The final stitched video then receives a
+ * faint Perlin field whose seed increments every frame plus subtle temporal grain.
  */
 final class DynamicVideoGenerator {
     private static final double END_PAUSE_SECONDS = 0.55;
@@ -28,6 +28,9 @@ final class DynamicVideoGenerator {
     private static final double FADE_OUT_SECONDS = 0.14;
     private static final int FINAL_GRAIN_STRENGTH = 1;
     private static final double FINAL_PERLIN_OPACITY = 0.025;
+    private static final int FINAL_PERLIN_SCALE_DIVISOR = 12;
+    private static final int FINAL_PERLIN_MIN_DIMENSION = 32;
+    private static final int FINAL_PERLIN_FRAME_PADDING = 2;
     private static final SecureRandom FINAL_TEXTURE_RANDOM = new SecureRandom();
     private static final String VIDEO_ENCODER_ENV = "THREADGENS_VIDEO_ENCODER";
 
@@ -570,29 +573,42 @@ final class DynamicVideoGenerator {
         int seed = FINAL_TEXTURE_RANDOM.nextInt(Integer.MAX_VALUE - 1) + 1;
         int[] dimensions = probeVideoDimensions(input);
         double duration = probeDurationSeconds(input);
-        int textureWidth = even(Math.max(64, dimensions[0] / 6));
-        int textureHeight = even(Math.max(64, dimensions[1] / 6));
-        Path texture = Files.createTempFile("threadgens-perlin-", ".png");
+        int textureWidth = even(Math.max(FINAL_PERLIN_MIN_DIMENSION,
+                dimensions[0] / FINAL_PERLIN_SCALE_DIVISOR));
+        int textureHeight = even(Math.max(FINAL_PERLIN_MIN_DIMENSION,
+                dimensions[1] / FINAL_PERLIN_SCALE_DIVISOR));
+        long requestedFrameCount = (long) Math.ceil(duration * fps) + FINAL_PERLIN_FRAME_PADDING;
+        if (requestedFrameCount > Integer.MAX_VALUE) {
+            throw new IOException("Final video is too long to build the Perlin texture sequence: " + duration + "s");
+        }
+        int textureFrameCount = (int) Math.max(1L, requestedFrameCount);
+        Path texture = Files.createTempFile("threadgens-perlin-", ".gray");
 
         try {
-            PerlinNoiseTexture.generate(texture, textureWidth, textureHeight, seed);
+            PerlinNoiseTexture.RawSequence sequence = PerlinNoiseTexture.generateRawSequence(
+                    texture, textureWidth, textureHeight, seed, textureFrameCount);
             List<String> command = new ArrayList<>();
             command.add(ffmpegCommand);
             command.add("-y");
             command.add("-i");
             command.add(input.toString());
-            command.add("-loop");
-            command.add("1");
+            command.add("-f");
+            command.add("rawvideo");
+            command.add("-pixel_format");
+            command.add("gray");
+            command.add("-video_size");
+            command.add(sequence.width() + "x" + sequence.height());
             command.add("-framerate");
             command.add(String.valueOf(fps));
             command.add("-i");
-            command.add(texture.toString());
+            command.add(sequence.path().toString());
             command.add("-filter_complex");
-            command.add("[1:v]scale=" + dimensions[0] + ":" + dimensions[1]
+            command.add("[1:v]setpts=PTS-STARTPTS,scale=" + dimensions[0] + ":" + dimensions[1]
                     + ":flags=bicubic,format=yuv420p[perlin];"
-                    + "[0:v:0][perlin]blend=all_mode=softlight:all_opacity="
+                    + "[0:v:0]fps=" + fps + ",setpts=PTS-STARTPTS[base];"
+                    + "[base][perlin]blend=all_mode=softlight:all_opacity="
                     + String.format(Locale.US, "%.3f", FINAL_PERLIN_OPACITY)
-                    + ",noise=alls=" + FINAL_GRAIN_STRENGTH
+                    + ":shortest=1,noise=alls=" + FINAL_GRAIN_STRENGTH
                     + ":allf=t+a:all_seed=" + seed + "[vout]");
             command.add("-map");
             command.add("[vout]");
@@ -603,7 +619,7 @@ final class DynamicVideoGenerator {
             addEncodingArgs(command);
             addMetadata(command, metadata);
             command.add(output.toString());
-            run(command, "final seeded Perlin/grain render");
+            run(command, "final per-frame seeded Perlin/grain render");
         } finally {
             Files.deleteIfExists(texture);
         }
