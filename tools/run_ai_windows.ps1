@@ -8,25 +8,25 @@ $Platform = 'reddit'
 $Format = 'auto'
 $Tts = 'kokoro'
 $Voice = 'af_heart'
-$VoiceSeries = 'af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george'
-$VoiceSelection = 'series'
+$VoiceSeries = 'af_heart'
+$VoiceSelection = 'single'
 $TtsDelivery = 'natural'
 $Captions = 'word'
 $VideoFlags = @()
 $ImageFlags = @()
 $KeepOllamaFlags = @('--keep-ollama-loaded')
 $KokoroPython = Join-Path $RepoRoot '.venv-kokoro\Scripts\python.exe'
-$PythonCmd = 'python'
-$TtsCmd = ''
 
 $env:THREADGENS_KOKORO_VERBOSE = '0'
+$env:THREADGENS_REQUIRE_EXACT_KOKORO_TIMING = '1'
+$env:THREADGENS_REQUIRE_SMOOTH_REVEAL = '1'
 $env:PYTHONWARNINGS = 'ignore'
 $env:HF_HUB_DISABLE_PROGRESS_BARS = '1'
 $env:TOKENIZERS_PARALLELISM = 'false'
 
 Write-Host ''
 Write-Host 'ThreadGens local AI runner'
-Write-Host 'Pipeline: P0 content originality + P1 captions, voice variation, identity rotation, and provenance'
+Write-Host 'Pipeline: P0 content originality + Kokoro neural narration + exact narration-timed reveal + provenance'
 Write-Host ''
 
 Write-Host 'Choose platform/thread style:'
@@ -35,35 +35,18 @@ Write-Host '2. X post and replies'
 $platformChoice = Read-Host 'Choice [1/2, default 1]'
 if ($platformChoice -eq '2' -or $platformChoice.ToLowerInvariant() -eq 'x') { $Platform = 'x' }
 
-Write-Host ''
-Write-Host 'Choose TTS engine:'
-Write-Host '1. Kokoro - recommended/default'
-Write-Host '2. Piper  - fallback'
-$ttsChoice = Read-Host 'Choice [1/2, default 1]'
-if ($ttsChoice -eq '2' -or $ttsChoice.ToLowerInvariant() -eq 'piper') { $Tts = 'piper' }
-
-if ($Tts -eq 'piper') {
-    $piperCmd = Join-Path $RepoRoot 'piper\piper.exe'
-    $TtsCmd = if (Test-Path $piperCmd) { $piperCmd } else { 'piper' }
-    $voiceInput = Read-Host 'Voice name or ONNX path [en_US-lessac-medium]'
-    if (-not [string]::IsNullOrWhiteSpace($voiceInput)) { $Voice = $voiceInput } else { $Voice = 'en_US-lessac-medium' }
-    $VoiceSeries = $Voice
-    $VoiceSelection = 'single'
-} else {
-    if (Test-Path $KokoroPython) {
-        $TtsCmd = $KokoroPython
-    } else {
-        Write-Host "Kokoro venv was not found: $KokoroPython" -ForegroundColor Yellow
-        $useSystem = Read-Host 'Use system Python anyway? y/N'
-        if ($useSystem.ToLowerInvariant() -ne 'y') { exit 1 }
-        $TtsCmd = $PythonCmd
-    }
-    Write-Host 'Common Kokoro voices: af_heart af_bella af_nicole am_adam am_michael bf_emma bm_george'
-    $voiceInput = Read-Host 'Kokoro voice [af_heart]'
-    if (-not [string]::IsNullOrWhiteSpace($voiceInput)) { $Voice = $voiceInput }
-    $voiceSeriesInput = Read-Host "Voice pool [$VoiceSeries]"
-    if (-not [string]::IsNullOrWhiteSpace($voiceSeriesInput)) { $VoiceSeries = $voiceSeriesInput }
+if (-not (Test-Path $KokoroPython)) {
+    throw "Kokoro Python was not found: $KokoroPython. Run setup_windows.bat first. ThreadGens production no longer falls back to Piper."
 }
+$TtsCmd = $KokoroPython
+
+Write-Host ''
+Write-Host 'Narration engine: Kokoro neural TTS only (Piper fallback disabled).'
+Write-Host 'Common Kokoro voices: af_heart af_bella af_nicole am_adam am_michael bf_emma bm_george'
+$voiceInput = Read-Host 'Kokoro voice [af_heart]'
+if (-not [string]::IsNullOrWhiteSpace($voiceInput)) { $Voice = $voiceInput }
+$VoiceSeries = $Voice
+$VoiceSelection = 'single'
 
 Write-Host ''
 Write-Host 'Choose narration delivery:'
@@ -152,13 +135,12 @@ Write-Host "Format:       $Format"
 Write-Host "Reply style:  $postTitle"
 Write-Host "Original:     $topic"
 Write-Host "Count:        $Count"
-Write-Host "TTS:          $Tts"
-Write-Host "Voice:        $Voice"
-Write-Host "Voice pool:   $VoiceSeries"
-Write-Host "Selection:    $VoiceSelection"
+Write-Host "TTS:          Kokoro only"
+Write-Host "Voice:        $Voice (single/locked)"
 Write-Host "Delivery:     $TtsDelivery"
 Write-Host "Captions:     $Captions"
 Write-Host "Cmd:          $TtsCmd"
+Write-Host "Reveal:       exact Kokoro timing required"
 Write-Host "OP image:     $($ImageFlags -join ' ')"
 Write-Host "Video:        $($VideoFlags -join ' ')"
 Write-Host "Ollama:       $(if ($KeepOllamaFlags.Count -gt 0) { 'keep loaded' } else { 'unload after text' })"
