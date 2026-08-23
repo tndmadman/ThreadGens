@@ -11,6 +11,7 @@ set "VOICE_SERIES=af_heart"
 set "PLATFORM=reddit"
 set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
 set "OP_IMAGE_FLAG="
+set "THREADGENS_VIDEO_ENCODER=auto"
 set "THREADGENS_KOKORO_VERBOSE=0"
 set "THREADGENS_REQUIRE_EXACT_KOKORO_TIMING=1"
 set "THREADGENS_REQUIRE_SMOOTH_REVEAL=1"
@@ -64,6 +65,22 @@ set /p "WORKER_CHOICE=Parallel video workers [1-10, default %WORKERS%]: "
 if not "%WORKER_CHOICE%"=="" set "WORKERS=%WORKER_CHOICE%"
 
 echo.
+echo Choose video encoder:
+echo 1. Auto - use NVIDIA NVENC when a real GPU encode test succeeds, otherwise CPU x264
+echo 2. NVIDIA GPU - require h264_nvenc; fail instead of falling back
+echo 3. CPU - force libx264
+echo.
+set "VIDEO_ENCODER_CHOICE="
+set /p "VIDEO_ENCODER_CHOICE=Choice [1/2/3, default 1]: "
+if "%VIDEO_ENCODER_CHOICE%"=="2" set "THREADGENS_VIDEO_ENCODER=nvenc"
+if "%VIDEO_ENCODER_CHOICE%"=="3" set "THREADGENS_VIDEO_ENCODER=x264"
+if /I "%VIDEO_ENCODER_CHOICE%"=="nvenc" set "THREADGENS_VIDEO_ENCODER=nvenc"
+if /I "%VIDEO_ENCODER_CHOICE%"=="gpu" set "THREADGENS_VIDEO_ENCODER=nvenc"
+if /I "%VIDEO_ENCODER_CHOICE%"=="x264" set "THREADGENS_VIDEO_ENCODER=x264"
+if /I "%VIDEO_ENCODER_CHOICE%"=="cpu" set "THREADGENS_VIDEO_ENCODER=x264"
+if /I "%VIDEO_ENCODER_CHOICE%"=="auto" set "THREADGENS_VIDEO_ENCODER=auto"
+
+echo.
 echo Choose platform/thread style:
 echo 1. Reddit thread
 echo 2. X post and replies
@@ -89,6 +106,7 @@ echo   platform:               %PLATFORM%
 echo   approved video target:  %TARGET_VIDEOS%
 echo   slides per video:       %COUNT%
 echo   parallel workers:       %WORKERS%
+echo   video encoder:          %THREADGENS_VIDEO_ENCODER%
 echo   Ollama concurrency:     1 serialized request at a time
 echo   model:                  %MODEL%
 echo   tts:                    Kokoro neural TTS only
