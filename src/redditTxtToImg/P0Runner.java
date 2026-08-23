@@ -206,6 +206,10 @@ public final class P0Runner {
                 captionFile = frameDirectory.resolve(config.baseName(i) + ".ass");
                 timeline.writeAss(captionFile, config.width, config.height);
             }
+            java.util.Map<String, String> segmentMetadata = config.provenanceEnabled
+                    ? ProvenanceManifest.videoMetadata(config, format, "segment " + (i + 1))
+                    : java.util.Map.of();
+            Path standaloneFinalizedClip = null;
             try {
                 Files.deleteIfExists(clip);
                 dynamicVideo.renderClip(
@@ -217,11 +221,26 @@ public final class P0Runner {
                         config.height,
                         format,
                         i,
-                        config.provenanceEnabled
-                                ? ProvenanceManifest.videoMetadata(config, format, "segment " + (i + 1))
-                                : java.util.Map.of()
+                        segmentMetadata
                 );
+                if (!config.concatVideo) {
+                    standaloneFinalizedClip = clip.resolveSibling(
+                            clip.getFileName() + ".threadgens-final.mp4");
+                    Files.deleteIfExists(standaloneFinalizedClip);
+                    dynamicVideo.combineClips(
+                            List.of(clip),
+                            standaloneFinalizedClip,
+                            format,
+                            segmentMetadata);
+                    Files.move(
+                            standaloneFinalizedClip,
+                            clip,
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
             } finally {
+                if (standaloneFinalizedClip != null) {
+                    Files.deleteIfExists(standaloneFinalizedClip);
+                }
                 TimedVisualStateRenderer.cleanup(states);
                 if (captionFile != null) {
                     Files.deleteIfExists(captionFile);
@@ -230,7 +249,8 @@ public final class P0Runner {
             clips.add(clip);
             System.out.println("Generated timed-state clip: " + clip
                     + " [states=" + scenes.size()
-                    + ", captions=" + timeline.mode().name().toLowerCase(Locale.ROOT) + "]");
+                    + ", captions=" + timeline.mode().name().toLowerCase(Locale.ROOT)
+                    + ", finalTexture=" + (!config.concatVideo) + "]");
         }
 
         if (config.concatVideo && !clips.isEmpty()) {
