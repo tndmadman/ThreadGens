@@ -396,6 +396,30 @@ $recentBlock
     throw "Could not generate a unique render-fit batch idea after $IdeaRetries tries. Last size problem: $shapeFeedback"
 }
 
+function Invoke-NewBatchIdeaSafe($AttemptNumber, $History, [hashtable]$SeenKeys, [scriptblock]$GeneratorOverride = $null) {
+    try {
+        $idea = if ($null -ne $GeneratorOverride) {
+            & $GeneratorOverride
+        } else {
+            Invoke-NewBatchIdea $AttemptNumber $History $SeenKeys
+        }
+        if ($null -eq $idea) {
+            throw 'Idea generator returned no idea.'
+        }
+        return [pscustomobject]@{
+            succeeded = $true
+            idea = $idea
+            reason = ''
+        }
+    } catch {
+        return [pscustomobject]@{
+            succeeded = $false
+            idea = $null
+            reason = $_.Exception.Message
+        }
+    }
+}
+
 function Run-SelfTest {
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('threadgens-batch-selftest-' + [Guid]::NewGuid().ToString('N'))
     $tempHistory = Join-Path $tempRoot 'ideas.jsonl'
@@ -438,6 +462,20 @@ function Run-SelfTest {
         $longBodyProblem = Get-IdeaShapeProblem 'Why did this happen at work?' $longBody 'reddit'
         if ([string]::IsNullOrWhiteSpace([string]$longBodyProblem)) {
             throw 'Render-fit guard failed to reject an oversized Reddit body.'
+        }
+
+        $retryExhaustion = Invoke-NewBatchIdeaSafe 1 @() @{} {
+            throw 'simulated eight-retry exhaustion'
+        }
+        if ($retryExhaustion.succeeded -or $retryExhaustion.reason -ne 'simulated eight-retry exhaustion') {
+            throw 'Exhausted idea retries escaped the recoverable generation wrapper.'
+        }
+
+        $successfulGeneration = Invoke-NewBatchIdeaSafe 1 @() @{} {
+            return $idea
+        }
+        if (-not $successfulGeneration.succeeded -or $successfulGeneration.idea.id -ne 'selftest') {
+            throw 'Recoverable idea-generation wrapper did not return a successful idea.'
         }
 
         $approved = 0
@@ -495,6 +533,7 @@ Write-Host 'Visible format/progress counters: disabled'
 Write-Host 'Final MP4 names: title-based with no numeric prefix'
 Write-Host 'Self-filling mode: generate ideas until approved target is reached' -ForegroundColor Green
 Write-Host 'Idea render-fit guard: reject oversized seeds before Java/TTS/video work' -ForegroundColor Green
+Write-Host "Idea retry exhaustion: recover after $IdeaRetries failed generation tries and start a fresh cycle" -ForegroundColor Green
 Write-Host 'Kokoro console: quiet'
 if ($MaxAttempts -gt 0) {
     Write-Host "Attempt cap: $MaxAttempts total ideas"
@@ -515,7 +554,7 @@ if ($KeepOllamaLoaded) {
 if ($StopOnError) {
     Write-Host 'Batch error mode: stop on first rejected/failed video' -ForegroundColor Yellow
 } else {
-    Write-Host 'Batch error mode: rejected ideas are replaced automatically' -ForegroundColor Green
+    Write-Host 'Batch error mode: rejected ideas and exhausted idea-generation cycles are replaced automatically' -ForegroundColor Green
 }
 
 Write-Step 'Building Java files'
@@ -558,7 +597,36 @@ while ($succeededVideos -lt $TargetVideos) {
     $slotLabel = '{0:D3}' -f $approvedSlot
     $attemptLabel = '{0:D4}' -f $totalAttempts
 
-    $idea = Invoke-NewBatchIdea $totalAttempts $ideaHistory $seenIdeaKeys
+    $ideaResult = Invoke-NewBatchIdeaSafe $totalAttempts $ideaHistory $seenIdeaKeys
+    if (-not $ideaResult.succeeded) {
+        $reason = [string]$ideaResult.reason
+        Add-IdeaHistoryEvent ([pscustomobject]@{
+            event = 'generation_failure'
+            id = ''
+            created = (Get-Date).ToUniversalTime().ToString('o')
+            status = 'rejected'
+            attempt = $totalAttempts
+            approvedSlot = $approvedSlot
+            retries = $IdeaRetries
+            reason = $reason
+        })
+        $failedAttempts += [pscustomobject]@{
+            Attempt = $attemptLabel
+            Slot = $slotLabel
+            Title = '<idea generation>'
+            Reason = $reason
+        }
+
+        Write-Host "Attempt $attemptLabel exhausted all $IdeaRetries idea-generation retries for approved slot ${slotLabel}: $reason" -ForegroundColor Red
+        if ($StopOnError) {
+            throw "Idea generation failed after $IdeaRetries retries: $reason"
+        }
+        Write-Host 'Continuing to a fresh idea-generation cycle instead of ending the batch.' -ForegroundColor Yellow
+        Write-Host "Approved progress remains $succeededVideos/$TargetVideos." -ForegroundColor Yellow
+        continue
+    }
+
+    $idea = $ideaResult.idea
     $ideaHistory = @($ideaHistory + $idea)
     $title = [string]$idea.title
     $body = [string]$idea.body
