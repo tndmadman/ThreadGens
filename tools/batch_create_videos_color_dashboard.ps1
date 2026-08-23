@@ -142,6 +142,8 @@ function Write-DashboardColorLine($Text, $Color, [int]$Width) {
 '@
 
     $patched = $Source.Replace($marker, $colorHelpers + $marker)
+    $repoLiteral = $RepoRoot.Replace("'", "''")
+    $patched = $patched.Replace('$RepoRoot = Split-Path -Parent $PSScriptRoot', ('$RepoRoot = ''' + $repoLiteral + ''''))
 
     $oldLoop = @'
     for ($i = 0; $i -lt $renderCount; $i++) {
@@ -179,6 +181,9 @@ try {
     if ($SelfTest) {
         if ($patched -notmatch 'Get-DashboardLineColor' -or $patched -notmatch 'Write-DashboardColorLine') {
             throw 'Dashboard color self-test failed to inject color helpers.'
+        }
+        if ($patched -match '\$RepoRoot = Split-Path -Parent \$PSScriptRoot') {
+            throw 'Dashboard color self-test failed to preserve the real repository root.'
         }
     }
 
