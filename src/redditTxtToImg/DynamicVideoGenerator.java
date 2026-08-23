@@ -29,15 +29,19 @@ final class DynamicVideoGenerator {
     private static final int FINAL_GRAIN_STRENGTH = 1;
     private static final double FINAL_PERLIN_OPACITY = 0.025;
     private static final SecureRandom FINAL_TEXTURE_RANDOM = new SecureRandom();
+    private static final String VIDEO_ENCODER_ENV = "THREADGENS_VIDEO_ENCODER";
 
     private final String ffmpegCommand;
     private final int timeoutSeconds;
     private final int fps;
+    private final String requestedVideoEncoder;
+    private String resolvedVideoEncoder;
 
     DynamicVideoGenerator(String ffmpegCommand, int timeoutSeconds, int fps) {
         this.ffmpegCommand = ffmpegCommand == null || ffmpegCommand.isBlank() ? "ffmpeg" : ffmpegCommand;
         this.timeoutSeconds = timeoutSeconds <= 0 ? 180 : timeoutSeconds;
         this.fps = fps <= 0 ? 30 : fps;
+        this.requestedVideoEncoder = normalizeVideoEncoder(System.getenv(VIDEO_ENCODER_ENV));
     }
 
     Path renderClip(
@@ -695,13 +699,13 @@ final class DynamicVideoGenerator {
         };
     }
 
-    private void addEncodingArgs(List<String> command) {
-        command.add("-c:v");
-        command.add("libx264");
-        command.add("-preset");
-        command.add("medium");
-        command.add("-crf");
-        command.add("19");
+    private void addEncodingArgs(List<String> command) throws IOException, InterruptedException {
+        String encoder = resolveVideoEncoder();
+        if ("nvenc".equals(encoder)) {
+            addNvencCodecArgs(command);
+        } else {
+            addX264CodecArgs(command);
+        }
         command.add("-c:a");
         command.add("aac");
         command.add("-b:a");
@@ -710,6 +714,132 @@ final class DynamicVideoGenerator {
         command.add("yuv420p");
         command.add("-movflags");
         command.add("+faststart");
+    }
+
+    private static void addX264CodecArgs(List<String> command) {
+        command.add("-c:v");
+        command.add("libx264");
+        command.add("-preset");
+        command.add("medium");
+        command.add("-crf");
+        command.add("19");
+    }
+
+    private static void addNvencCodecArgs(List<String> command) {
+        command.add("-c:v");
+        command.add("h264_nvenc");
+        command.add("-preset");
+        command.add("p6");
+        command.add("-tune");
+        command.add("hq");
+        command.add("-rc");
+        command.add("vbr");
+        command.add("-cq");
+        command.add("19");
+        command.add("-b:v");
+        command.add("0");
+    }
+
+    private String resolveVideoEncoder() throws IOException, InterruptedException {
+        if (resolvedVideoEncoder != null) {
+            return resolvedVideoEncoder;
+        }
+        if ("x264".equals(requestedVideoEncoder)) {
+            resolvedVideoEncoder = "x264";
+            System.out.println("P0/P1 video encoder: CPU x264 (libx264) [requested=x264]");
+            return resolvedVideoEncoder;
+        }
+
+        EncoderProbe probe = probeNvenc();
+        if (probe.available()) {
+            resolvedVideoEncoder = "nvenc";
+            System.out.println("P0/P1 video encoder: NVIDIA NVENC (h264_nvenc GPU hardware encoder)"
+                    + " [requested=" + requestedVideoEncoder + "]");
+            return resolvedVideoEncoder;
+        }
+
+        if ("nvenc".equals(requestedVideoEncoder)) {
+            throw new IOException("NVIDIA NVENC was explicitly requested but is unavailable: "
+                    + probe.reason()
+                    + ". Choose Auto or CPU/x264, or verify the NVIDIA driver and FFmpeg NVENC support.");
+        }
+
+        resolvedVideoEncoder = "x264";
+        System.out.println("P0/P1 video encoder: CPU x264 fallback (libx264); NVENC auto-probe unavailable: "
+                + probe.reason());
+        return resolvedVideoEncoder;
+    }
+
+    private EncoderProbe probeNvenc() throws InterruptedException {
+        try {
+            String encoders = runAndCollect(
+                    List.of(ffmpegCommand, "-hide_banner", "-encoders"),
+                    "FFmpeg encoder capability probe",
+                    Math.min(timeoutSeconds, 30));
+            if (!encoders.toLowerCase(Locale.ROOT).contains("h264_nvenc")) {
+                return new EncoderProbe(false, "this FFmpeg build does not list h264_nvenc");
+            }
+        } catch (IOException e) {
+            return new EncoderProbe(false, compactProbeReason(e.getMessage()));
+        }
+
+        Path probeOutput = null;
+        try {
+            probeOutput = Files.createTempFile("threadgens-nvenc-probe-", ".mp4");
+            List<String> command = new ArrayList<>();
+            command.add(ffmpegCommand);
+            command.add("-y");
+            command.add("-hide_banner");
+            command.add("-loglevel");
+            command.add("error");
+            command.add("-f");
+            command.add("lavfi");
+            command.add("-i");
+            command.add("color=c=black:s=64x64:r=1:d=0.20");
+            command.add("-frames:v");
+            command.add("1");
+            command.add("-an");
+            addNvencCodecArgs(command);
+            command.add("-pix_fmt");
+            command.add("yuv420p");
+            command.add(probeOutput.toString());
+            runAndCollect(command, "NVIDIA NVENC hardware probe", Math.min(timeoutSeconds, 30));
+            verifyNonEmpty(probeOutput, "NVIDIA NVENC hardware probe");
+            return new EncoderProbe(true, "available");
+        } catch (IOException e) {
+            return new EncoderProbe(false, compactProbeReason(e.getMessage()));
+        } finally {
+            if (probeOutput != null) {
+                try {
+                    Files.deleteIfExists(probeOutput);
+                } catch (IOException ignored) {
+                }
+            }
+        }
+    }
+
+    private static String normalizeVideoEncoder(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isBlank() || "auto".equals(normalized)) {
+            return "auto";
+        }
+        if ("nvenc".equals(normalized) || "nvidia".equals(normalized) || "gpu".equals(normalized)) {
+            return "nvenc";
+        }
+        if ("x264".equals(normalized) || "cpu".equals(normalized) || "libx264".equals(normalized)) {
+            return "x264";
+        }
+        throw new IllegalArgumentException(VIDEO_ENCODER_ENV
+                + " must be auto, nvenc, or x264; got: " + value);
+    }
+
+    private static String compactProbeReason(String message) {
+        String text = message == null ? "unknown probe failure" : message.replaceAll("\\s+", " ").trim();
+        if (text.isBlank()) {
+            return "unknown probe failure";
+        }
+        int max = 420;
+        return text.length() <= max ? text : text.substring(0, max - 3) + "...";
     }
 
     private String resolveFfprobeCommand() {
@@ -794,6 +924,9 @@ final class DynamicVideoGenerator {
 
     private static String formatMask(double value) {
         return String.format(Locale.US, "%.6f", value);
+    }
+
+    private record EncoderProbe(boolean available, String reason) {
     }
 
     private record TransitionProfile(double durationSeconds) {
