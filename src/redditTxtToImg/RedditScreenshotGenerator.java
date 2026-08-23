@@ -321,7 +321,6 @@ public class RedditScreenshotGenerator {
         drawClockIcon(g, x, y - 25, 26);
         g.setFont(new Font(settings.fontName, Font.PLAIN, 22));
         g.drawString(ageText(), x + 38, y);
-        g.drawString("Fictional thread", x + 190, y);
     }
 
     private void drawClockIcon(Graphics2D g, int x, int y, int size) {
