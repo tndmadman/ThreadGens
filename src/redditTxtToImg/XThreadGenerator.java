@@ -230,7 +230,7 @@ public class XThreadGenerator {
         g.drawLine(left, y + 50, right, y + 50);
         g.setFont(new Font(settings.fontName, Font.PLAIN, 25));
         g.setColor(new Color(113, 118, 123));
-        g.drawString(ageText() + " · Fictional thread", left + 8, y + 16);
+        g.drawString(ageText(), left + 8, y + 16);
         drawReplyIcon(g, right - 150, y - 10, 28);
         drawLikeIcon(g, right - 86, y - 11, 28);
     }
