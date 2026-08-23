@@ -45,6 +45,7 @@ public class XThreadGenerator {
     private final int itemIndex;
     private final int totalItems;
     private final Path outputDirectory;
+    private final List<RenderedWordLayout.Box> narrationWordBoxes = new ArrayList<>();
 
     public XThreadGenerator(String fileName, String displayName, String handle, String profileImageName,
                             String text, int itemIndex, int totalItems, int ignoredReplies, int ignoredReposts,
@@ -82,15 +83,30 @@ public class XThreadGenerator {
 
     public void generateImage() throws IOException {
         Files.createDirectories(outputDirectory);
+        Path imagePath = outputDirectory.resolve(fileName + ".png");
+        Files.deleteIfExists(RenderedWordLayout.sidecarFor(imagePath));
+        narrationWordBoxes.clear();
+
         BufferedImage image = new BufferedImage(settings.width, settings.height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
-        configure(g);
-        drawBackground(g);
-        drawPhoneFrame(g);
-        drawTopBar(g);
-        drawPost(g);
-        g.dispose();
-        ImageIO.write(image, "png", outputDirectory.resolve(fileName + ".png").toFile());
+        try {
+            configure(g);
+            drawBackground(g);
+            drawPhoneFrame(g);
+            drawTopBar(g);
+            drawPost(g);
+        } finally {
+            g.dispose();
+        }
+
+        ImageIO.write(image, "png", imagePath.toFile());
+        String narration = RenderedWordLayout.narrationForVisibleText(text);
+        try {
+            RenderedWordLayout.write(imagePath, narration, settings.width, settings.height, narrationWordBoxes);
+        } catch (IOException e) {
+            Files.deleteIfExists(imagePath);
+            throw e;
+        }
     }
 
     private boolean isOriginalPost() {
@@ -193,13 +209,16 @@ public class XThreadGenerator {
         FontMetrics metrics = g.getFontMetrics(font);
         List<String> lines = CommentWrapper.wrapComment(text, metrics, maxWidth);
         int lineHeight = fontSize + 14;
+        int maxLines = y > maxBottom ? 0 : ((maxBottom - y) / lineHeight) + 1;
+        if (lines.size() > maxLines) {
+            throw new IllegalArgumentException(
+                    "X post/reply does not fit the visible social card; regenerate shorter visible text instead of truncating narration.");
+        }
         int currentY = y;
         for (String line : lines) {
-            if (currentY > maxBottom) {
-                g.drawString("...", x, currentY);
-                break;
-            }
             g.drawString(line, x, currentY);
+            RenderedWordLayout.addLineBoxes(
+                    narrationWordBoxes, line, metrics, x, currentY, settings.width, settings.height);
             currentY += lineHeight;
         }
     }
@@ -340,8 +359,9 @@ public class XThreadGenerator {
             String author = i == 0 ? originalAuthor : normalizeDisplayName(identity.name());
             String handle = i == 0 ? settings.originalHandle : toHandle(author, rand);
             String current = lines.get(i);
-            String narration = i == 0 && settings.postTitle != null && !settings.postTitle.isBlank()
-                    ? settings.postTitle + ". " + current : current;
+            // The batch title is a hidden reply-style instruction for X. Only
+            // the visible post/reply text belongs in narration and word timing.
+            String narration = RenderedWordLayout.narrationForVisibleText(current);
             String base = i + settings.outputPrefix;
             Path image = settings.outputDirectory.resolve(base + ".png");
             Path audio = settings.audioDirectory.resolve(base + ".wav");
