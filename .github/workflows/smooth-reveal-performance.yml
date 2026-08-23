@@ -1,0 +1,29 @@
+name: Smooth Reveal Performance Regression
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Compile Java sources
+        run: javac -d out src/redditTxtToImg/*.java
+
+      - name: Verify production-size smooth reveal stays fast
+        run: java -Djava.awt.headless=true -cp out redditTxtToImg.SmoothRevealPerformanceRegressionTest
