@@ -18,6 +18,11 @@ def is_verbose(args):
     return args.verbose or env_value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def require_exact_timing():
+    value = os.environ.get("THREADGENS_REQUIRE_EXACT_KOKORO_TIMING", "0")
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def configure_quiet_mode(verbose):
     if verbose:
         return
@@ -59,13 +64,7 @@ def delete_if_present(path):
 
 
 def audio_chunk_to_numpy(audio, np):
-    """Return one Kokoro chunk as a flat float32 NumPy array.
-
-    Kokoro releases may return either NumPy arrays or PyTorch tensors. NumPy
-    cannot use torch.float32 as the dtype argument to np.zeros(), and mixing a
-    tensor directly with NumPy also makes concatenation backend-dependent. Keep
-    the TTS boundary explicit by converting every chunk before pause insertion.
-    """
+    """Return one Kokoro chunk as a flat float32 NumPy array."""
     value = audio
     detach = getattr(value, "detach", None)
     if callable(detach):
@@ -137,8 +136,14 @@ def write_timing_sidecar(output_path, text, timed_tokens, verbose):
 
     aligned = align_model_tokens_to_input_words(text, timed_tokens)
     if not aligned:
+        if require_exact_timing():
+            delete_if_present(output_path)
+            raise RuntimeError(
+                "Kokoro did not return an exact model timestamp for every narrated word. "
+                "Production requires exact timing, so this WAV was rejected instead of falling back to estimated timing."
+            )
         log("exact token timing unavailable; Java will use its measured-duration fallback", verbose)
-        return
+        return False
 
     lines = [TIMING_HEADER]
     for word, start, end in aligned:
@@ -146,6 +151,7 @@ def write_timing_sidecar(output_path, text, timed_tokens, verbose):
         lines.append(f"word\t{start:.6f}\t{end:.6f}\t{encoded}")
     timing_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log(f"wrote exact timing sidecar: {timing_path} ({len(aligned)} words)", verbose)
+    return True
 
 
 def main():
@@ -171,7 +177,6 @@ def main():
     text_path = Path(args.text_file)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    # A failed/aborted retry must never leave timing from an older WAV behind.
     delete_if_present(timing_path_for(output_path))
 
     log(f"reading text: {text_path}", verbose)
@@ -239,7 +244,11 @@ def main():
     audio = np.concatenate(combined).astype(np.float32, copy=False)
     log(f"writing WAV: {output_path}", verbose)
     sf.write(str(output_path), audio, SAMPLE_RATE)
-    write_timing_sidecar(output_path, text, timed_tokens, verbose)
+    try:
+        write_timing_sidecar(output_path, text, timed_tokens, verbose)
+    except Exception:
+        delete_if_present(timing_path_for(output_path))
+        raise
     log(f"done in {time.time() - started:.1f}s", verbose)
 
 

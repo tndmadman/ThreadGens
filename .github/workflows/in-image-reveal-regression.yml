@@ -23,6 +23,9 @@ jobs:
       - name: Run in-image reveal regression
         run: java -Djava.awt.headless=true -cp out redditTxtToImg.InImageRevealRegressionTest
 
+      - name: Verify production reveal fails closed
+        run: java -Djava.awt.headless=true -cp out redditTxtToImg.RequiredSmoothRevealRegressionTest
+
   windows:
     runs-on: windows-latest
     steps:
@@ -47,4 +50,10 @@ jobs:
         shell: powershell
         run: |
           & java '-Djava.awt.headless=true' -cp out redditTxtToImg.InImageRevealRegressionTest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify production reveal fails closed
+        shell: powershell
+        run: |
+          & java '-Djava.awt.headless=true' -cp out redditTxtToImg.RequiredSmoothRevealRegressionTest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
