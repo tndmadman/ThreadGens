@@ -8,8 +8,9 @@ $Platform = 'reddit'
 $Format = 'auto'
 $Tts = 'kokoro'
 $Voice = 'af_heart'
-$VoiceSeries = 'af_heart'
-$VoiceSelection = 'single'
+$VoiceSeries = 'af_heart,af_bella,af_nicole,bf_emma'
+$VoiceSelection = 'series'
+$SeriesId = ''
 $TtsDelivery = 'natural'
 $Captions = 'word'
 $VideoFlags = @()
@@ -34,6 +35,11 @@ Write-Host '1. Reddit thread'
 Write-Host '2. X post and replies'
 $platformChoice = Read-Host 'Choice [1/2, default 1]'
 if ($platformChoice -eq '2' -or $platformChoice.ToLowerInvariant() -eq 'x') { $Platform = 'x' }
+$publishHistoryPath = Join-Path $RepoRoot 'data\publish_history.jsonl'
+$manualRunNumber = if (Test-Path $publishHistoryPath) {
+    @(Get-Content -LiteralPath $publishHistoryPath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count + 1
+} else { 1 }
+$SeriesId = 'threadgens-{0}-manual-{1:D4}' -f $Platform, $manualRunNumber
 
 if (-not (Test-Path $KokoroPython)) {
     throw "Kokoro Python was not found: $KokoroPython. Run setup_windows.bat first. ThreadGens production no longer falls back to Piper."
@@ -42,11 +48,13 @@ $TtsCmd = $KokoroPython
 
 Write-Host ''
 Write-Host 'Narration engine: Kokoro neural TTS only (Piper fallback disabled).'
-Write-Host 'Common Kokoro voices: af_heart af_bella af_nicole am_adam am_michael bf_emma bm_george'
-$voiceInput = Read-Host 'Kokoro voice [af_heart]'
-if (-not [string]::IsNullOrWhiteSpace($voiceInput)) { $Voice = $voiceInput }
-$VoiceSeries = $Voice
-$VoiceSelection = 'single'
+Write-Host 'High-end Kokoro voices: af_heart af_bella af_nicole bf_emma'
+$voiceInput = Read-Host 'Press Enter to rotate all four, or type one voice to use only that voice'
+if (-not [string]::IsNullOrWhiteSpace($voiceInput)) {
+    $Voice = $voiceInput.Trim()
+    $VoiceSeries = $Voice
+    $VoiceSelection = 'single'
+}
 
 Write-Host ''
 Write-Host 'Choose narration delivery:'
@@ -136,7 +144,7 @@ Write-Host "Reply style:  $postTitle"
 Write-Host "Original:     $topic"
 Write-Host "Count:        $Count"
 Write-Host "TTS:          Kokoro only"
-Write-Host "Voice:        $Voice (single/locked)"
+Write-Host "Voice plan:   $VoiceSelection from [$VoiceSeries]"
 Write-Host "Delivery:     $TtsDelivery"
 Write-Host "Captions:     $Captions"
 Write-Host "Cmd:          $TtsCmd"
@@ -153,12 +161,14 @@ $javaArgs = @(
     '--topic', $topic,
     '--count', $Count,
     '--format', $Format,
+    '--format-variant', 'auto',
     '--llm-model', $Model,
     '--tts', $Tts,
     '--tts-command', $TtsCmd,
     '--voice', $Voice,
     '--voice-series', $VoiceSeries,
     '--voice-selection', $VoiceSelection,
+    '--series-id', $SeriesId,
     '--tts-delivery', $TtsDelivery,
     '--captions', $Captions,
     '--no-watermark',

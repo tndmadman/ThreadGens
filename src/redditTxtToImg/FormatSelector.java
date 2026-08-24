@@ -40,8 +40,9 @@ final class FormatSelector {
             }
         }
 
-        ContentFormat best = candidates.get(0);
-        for (ContentFormat candidate : candidates) {
+        List<ContentFormat> eligible = cooldownEligible(candidates, recent);
+        ContentFormat best = eligible.get(0);
+        for (ContentFormat candidate : eligible) {
             if (counts.get(candidate) < counts.get(best)) {
                 best = candidate;
             } else if (counts.get(candidate).equals(counts.get(best))
@@ -59,50 +60,68 @@ final class FormatSelector {
                 .replaceAll("\\s+", " ")
                 .trim();
 
-        List<ContentFormat> candidates = new ArrayList<>();
         if (containsAny(text,
                 "am i wrong", "aita", "who is right", "who's right", "debate", "agree or disagree",
                 "change my mind", "unpopular opinion", "tell me i'm wrong", "tell me im wrong")) {
-            candidates.add(ContentFormat.DEBATE);
-            candidates.add(ContentFormat.ESCALATING_CONVERSATION);
-            return candidates;
+            return preferred(ContentFormat.DEBATE, ContentFormat.ESCALATING_CONVERSATION,
+                    ContentFormat.CONFESSION, ContentFormat.THREAD_STORY, ContentFormat.BEST_ANSWERS);
         }
         if (containsAny(text,
                 "finish this story", "continue this story", "finish the story", "continue the story",
                 "what happened next", "story in the comments", "story in the replies")) {
-            candidates.add(ContentFormat.THREAD_STORY);
-            candidates.add(ContentFormat.ESCALATING_CONVERSATION);
-            candidates.add(ContentFormat.CONFESSION);
-            return candidates;
+            return preferred(ContentFormat.THREAD_STORY, ContentFormat.ESCALATING_CONVERSATION,
+                    ContentFormat.CONFESSION, ContentFormat.DEBATE, ContentFormat.BEST_ANSWERS);
         }
         if (containsAny(text,
                 "wrong answers only", "wrong answer only", "best answer", "best answers", "give advice",
                 "any advice", "need advice", "what should i do", "what would you do", "tips", "recommend")) {
-            candidates.add(ContentFormat.BEST_ANSWERS);
-            candidates.add(ContentFormat.DEBATE);
-            return candidates;
+            return preferred(ContentFormat.BEST_ANSWERS, ContentFormat.DEBATE,
+                    ContentFormat.ESCALATING_CONVERSATION, ContentFormat.CONFESSION, ContentFormat.THREAD_STORY);
         }
         if (containsAny(text,
                 "confession", "i need to admit", "i have to admit", "i never told", "i'm ashamed",
                 "im ashamed", "i screwed up", "i messed up", "off my chest")) {
-            candidates.add(ContentFormat.CONFESSION);
-            candidates.add(ContentFormat.THREAD_STORY);
-            return candidates;
+            return preferred(ContentFormat.CONFESSION, ContentFormat.THREAD_STORY,
+                    ContentFormat.ESCALATING_CONVERSATION, ContentFormat.DEBATE, ContentFormat.BEST_ANSWERS);
         }
         if (text.endsWith("?") || containsAny(text,
                 "what is", "what are", "why do", "why does", "how do", "how did", "which one")) {
-            candidates.add(ContentFormat.BEST_ANSWERS);
-            candidates.add(ContentFormat.DEBATE);
-            candidates.add(ContentFormat.ESCALATING_CONVERSATION);
-            return candidates;
+            return preferred(ContentFormat.BEST_ANSWERS, ContentFormat.DEBATE,
+                    ContentFormat.ESCALATING_CONVERSATION, ContentFormat.CONFESSION, ContentFormat.THREAD_STORY);
         }
 
-        candidates.add(ContentFormat.THREAD_STORY);
-        candidates.add(ContentFormat.CONFESSION);
-        candidates.add(ContentFormat.DEBATE);
-        candidates.add(ContentFormat.BEST_ANSWERS);
-        candidates.add(ContentFormat.ESCALATING_CONVERSATION);
-        return candidates;
+        return preferred(ContentFormat.THREAD_STORY, ContentFormat.CONFESSION, ContentFormat.DEBATE,
+                ContentFormat.BEST_ANSWERS, ContentFormat.ESCALATING_CONVERSATION);
+    }
+
+    private static List<ContentFormat> cooldownEligible(
+            List<ContentFormat> candidates,
+            List<String> recent
+    ) {
+        ContentFormat immediatelyPrevious = recent.isEmpty() ? null : ContentFormat.fromIdOrNull(recent.get(0));
+        Map<ContentFormat, Integer> lastEight = new EnumMap<>(ContentFormat.class);
+        for (ContentFormat format : ContentFormat.values()) lastEight.put(format, 0);
+        for (int i = 0; i < recent.size() && i < 8; i++) {
+            ContentFormat parsed = ContentFormat.fromIdOrNull(recent.get(i));
+            if (parsed != null) lastEight.put(parsed, lastEight.get(parsed) + 1);
+        }
+
+        List<ContentFormat> eligible = new ArrayList<>();
+        for (ContentFormat candidate : candidates) {
+            if (candidate != immediatelyPrevious && lastEight.get(candidate) < 2) eligible.add(candidate);
+        }
+        return eligible.isEmpty() ? candidates : eligible;
+    }
+
+    private static List<ContentFormat> preferred(ContentFormat... formats) {
+        List<ContentFormat> result = new ArrayList<>();
+        for (ContentFormat format : formats) {
+            if (format != null && !result.contains(format)) result.add(format);
+        }
+        for (ContentFormat format : ContentFormat.values()) {
+            if (!result.contains(format)) result.add(format);
+        }
+        return List.copyOf(result);
     }
 
     private static boolean containsAny(String text, String... needles) {

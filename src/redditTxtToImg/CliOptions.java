@@ -16,7 +16,7 @@ final class CliOptions {
             "--image-mode", "--op-image", "--image-dir", "--image-cache-dir", "--comfy-url",
             "--image-checkpoint", "--image-width", "--image-height", "--image-steps", "--image-cfg",
             "--image-sampler", "--image-scheduler", "--image-negative", "--image-timeout",
-            "--format", "--history-file", "--history-limit", "--novelty-threshold", "--novelty-retries",
+            "--format", "--format-variant", "--history-file", "--history-limit", "--novelty-threshold", "--novelty-retries",
             "--embedding-model", "--semantic-threshold", "--semantic-history-limit"
     );
 

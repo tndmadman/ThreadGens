@@ -3,7 +3,7 @@ param(
     [int]$Count = 10,
     [string]$Model = 'llama3.1:8b',
     [string]$Voice = 'af_heart',
-    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george',
+    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,bf_emma',
     [ValidateSet('single', 'series', 'per-slide')]
     [string]$VoiceSelection = 'series',
     [string]$SeriesId = '',
@@ -14,7 +14,12 @@ param(
     [string]$Platform = 'reddit',
     [ValidateSet('auto', 'thread_story', 'confession', 'debate', 'best_answers', 'escalating_conversation')]
     [string]$Format = 'auto',
+    [ValidateSet('auto', 'single', 'series', 'per-slot')]
+    [string]$FormatSelection = 'per-slot',
+    [string]$FormatSeries = 'thread_story,confession,debate,best_answers,escalating_conversation',
+    [string]$FormatVariant = 'auto',
     [string]$IdeaHistoryFile = 'data\batch_idea_history.jsonl',
+    [string]$PublishHistoryFile = 'data\publish_history.jsonl',
     [int]$IdeaHistoryLimit = 80,
     [int]$IdeaRetries = 8,
     [int]$MaxAttempts = 0,
@@ -27,6 +32,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
+. (Join-Path $PSScriptRoot 'batch_format_rotation.ps1')
 
 if (-not $PSBoundParameters.ContainsKey('KeepOllamaLoaded')) {
     $KeepOllamaLoaded = $true
@@ -63,6 +69,13 @@ $IdeaHistoryPath = if ([System.IO.Path]::IsPathRooted($IdeaHistoryFile)) {
 } else {
     Join-Path $RepoRoot $IdeaHistoryFile
 }
+$PublishHistoryPath = if ([System.IO.Path]::IsPathRooted($PublishHistoryFile)) {
+    $PublishHistoryFile
+} else {
+    Join-Path $RepoRoot $PublishHistoryFile
+}
+$FormatPool = @(Resolve-BatchFormatPool $FormatSeries)
+$FormatOffset = Get-BatchFormatOffset $FormatPool $PublishHistoryPath
 $OllamaGenerateUrl = 'http://127.0.0.1:11434/api/generate'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $Palettes = @('ember', 'ocean', 'forest', 'violet', 'teal', 'rose', 'amber', 'slate')
@@ -421,6 +434,7 @@ function Invoke-NewBatchIdeaSafe($AttemptNumber, $History, [hashtable]$SeenKeys,
 }
 
 function Run-SelfTest {
+    Test-BatchFormatRotation
     $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('threadgens-batch-selftest-' + [Guid]::NewGuid().ToString('N'))
     $tempHistory = Join-Path $tempRoot 'ideas.jsonl'
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
@@ -526,7 +540,8 @@ Write-Host "Target approved videos: $TargetVideos"
 Write-Host "Slides/replies per video: $Count"
 Write-Host "Idea history: $IdeaHistoryPath"
 Write-Host "Output root: $OutputRoot"
-Write-Host "Defaults: platform=$Platform, format=$Format, model=$Model, tts=$TtsEngine"
+Write-Host "Defaults: platform=$Platform, formatSelection=$FormatSelection, formatSeries=[$($FormatPool -join ',')], substyle=$FormatVariant, model=$Model, tts=$TtsEngine"
+Write-Host "Format cooldown history: $PublishHistoryPath (rotation offset $FormatOffset)"
 Write-Host "P1 voice selection: $VoiceSelection from [$VoiceSeries], delivery=$TtsDelivery, captions=$Captions"
 Write-Host 'Video style: locked/static social frame, rotating dark background palette, seeded Perlin texture plus subtle final temporal grain'
 Write-Host 'Visible format/progress counters: disabled'
@@ -596,6 +611,8 @@ while ($succeededVideos -lt $TargetVideos) {
     $approvedSlot = $succeededVideos + 1
     $slotLabel = '{0:D3}' -f $approvedSlot
     $attemptLabel = '{0:D4}' -f $totalAttempts
+    $selectedFormat = Select-BatchFormat $FormatSelection $Format $FormatPool $approvedSlot $totalAttempts $FormatOffset
+    $effectiveSeriesId = Get-BatchSeriesId $VoiceSelection $SeriesId $Platform $approvedSlot
 
     $ideaResult = Invoke-NewBatchIdeaSafe $totalAttempts $ideaHistory $seenIdeaKeys
     if (-not $ideaResult.succeeded) {
@@ -660,7 +677,8 @@ while ($succeededVideos -lt $TargetVideos) {
     }
     Write-Host "Idea family: $($idea.theme)"
     Write-Host "Background palette: $palette"
-    Write-Host "P0 format: $Format"
+    Write-Host "P0 format: $selectedFormat / substyle $FormatVariant"
+    if (-not [string]::IsNullOrWhiteSpace($effectiveSeriesId)) { Write-Host "Voice series key: $effectiveSeriesId" }
     Write-Host "Final MP4 if approved: $finalVideoName"
 
     $javaArgs = @(
@@ -671,7 +689,8 @@ while ($succeededVideos -lt $TargetVideos) {
         '--post-title', $title,
         '--topic', $body,
         '--count', $Count,
-        '--format', $Format,
+        '--format', $selectedFormat,
+        '--format-variant', $FormatVariant,
         '--llm-model', $Model,
         '--tts', $TtsEngine,
         '--tts-command', $KokoroPython,
@@ -687,6 +706,7 @@ while ($succeededVideos -lt $TargetVideos) {
         '--final-video', $finalVideoName,
         '--captions', $Captions,
         '--metadata-dir', $metadataDir,
+        '--publish-history', $PublishHistoryPath,
         '--no-watermark',
         '--top'
     )
@@ -701,8 +721,8 @@ while ($succeededVideos -lt $TargetVideos) {
     if ($KeepOllamaLoaded) {
         $javaArgs += '--keep-ollama-loaded'
     }
-    if (-not [string]::IsNullOrWhiteSpace($SeriesId)) {
-        $javaArgs += @('--series-id', $SeriesId)
+    if (-not [string]::IsNullOrWhiteSpace($effectiveSeriesId)) {
+        $javaArgs += @('--series-id', $effectiveSeriesId)
     }
 
     try {
@@ -735,6 +755,7 @@ while ($succeededVideos -lt $TargetVideos) {
             attempt = $totalAttempts
             approvedSlot = $succeededVideos
             palette = $palette
+            format = $selectedFormat
             output = $copyTo
         })
         Write-Host "Approved $succeededVideos/$TargetVideos. Saved final copy: $copyTo" -ForegroundColor Green
@@ -748,6 +769,7 @@ while ($succeededVideos -lt $TargetVideos) {
             attempt = $totalAttempts
             approvedSlot = $approvedSlot
             palette = $palette
+            format = $selectedFormat
             reason = $reason
         })
         $failedAttempts += [pscustomobject]@{

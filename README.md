@@ -61,6 +61,8 @@ Batch generation:
 batch_create_videos_windows.bat
 ```
 
+The batch launcher rotates all five content formats by target slot, rotates the four high-end Kokoro voices (`af_heart`, `af_bella`, `af_nicole`, `bf_emma`) by video, and offsets the next format from recent approved publish history.
+
 ## Build
 
 ```bash
@@ -158,6 +160,15 @@ debate
 best_answers
 escalating_conversation
 ```
+
+Each format also has four narrative substyles. Use `--format-variant auto` (recommended) to rotate them from generation history, or pass a concrete substyle such as `witness_chain`, `private_note`, `skeptical_qa`, `editor_picks`, or `calm_to_weird`.
+
+Long batch controls:
+
+- `-FormatSelection per-slot` keeps replacement attempts on the target slot's format.
+- `-FormatSeries thread_story,confession,debate,best_answers,escalating_conversation` controls the rotation pool.
+- `-FormatVariant auto` rotates substyles within each format.
+- `-PublishHistoryFile data\publish_history.jsonl` seeds the cooldown from approved output.
 
 Accepted generated scripts are stored in:
 
@@ -389,7 +400,7 @@ RealVisXL_V5.0_fp32.safetensors
 
 ## Batch behavior
 
-Batch jobs execute sequentially through `OpImageVideoSafeRunner`, which routes through P2.
+Batch jobs execute through `OpImageVideoSafeRunner`, which routes through P2. The default Windows launcher serializes Ollama generation while completed generations render in parallel.
 
 Each successful video enters approved publish history before the next job, so later videos in the same batch are compared against earlier approved videos.
 

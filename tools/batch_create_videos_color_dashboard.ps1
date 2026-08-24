@@ -5,7 +5,7 @@ param(
     [int]$Workers = 4,
     [string]$Model = 'llama3.1:8b',
     [string]$Voice = 'af_heart',
-    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george',
+    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,bf_emma',
     [ValidateSet('single', 'series', 'per-slide')]
     [string]$VoiceSelection = 'series',
     [string]$SeriesId = '',
@@ -16,8 +16,13 @@ param(
     [string]$Platform = 'reddit',
     [ValidateSet('auto', 'thread_story', 'confession', 'debate', 'best_answers', 'escalating_conversation')]
     [string]$Format = 'auto',
+    [ValidateSet('auto', 'single', 'series', 'per-slot')]
+    [string]$FormatSelection = 'per-slot',
+    [string]$FormatSeries = 'thread_story,confession,debate,best_answers,escalating_conversation',
+    [string]$FormatVariant = 'auto',
     [string]$IdeaHistoryFile = 'data\batch_idea_history.jsonl',
     [string]$GenerationHistoryFile = 'data\generation_history.jsonl',
+    [string]$PublishHistoryFile = 'data\publish_history.jsonl',
     [int]$IdeaHistoryLimit = 80,
     [int]$IdeaRetries = 8,
     [int]$MaxAttempts = 0,
@@ -39,6 +44,25 @@ function Quote-NativeArgument($Value) {
     $text = [string]$Value
     if ($text -notmatch '[\s"]') { return $text }
     return '"' + ($text -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+}
+
+function Normalize-ProcessPathEnvironment {
+    $variables = [Environment]::GetEnvironmentVariables([EnvironmentVariableTarget]::Process)
+    $pathKeys = @($variables.Keys | Where-Object { ([string]$_).Equals('PATH', [StringComparison]::OrdinalIgnoreCase) })
+    if ($pathKeys.Count -le 1) { return }
+
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $segments = New-Object System.Collections.ArrayList
+    foreach ($key in $pathKeys) {
+        foreach ($segment in @(([string]$variables[$key]) -split ';')) {
+            $value = $segment.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($value) -and $seen.Add($value)) { [void]$segments.Add($value) }
+        }
+    }
+    foreach ($key in $pathKeys) {
+        [Environment]::SetEnvironmentVariable([string]$key, $null, [EnvironmentVariableTarget]::Process)
+    }
+    [Environment]::SetEnvironmentVariable('Path', ($segments -join ';'), [EnvironmentVariableTarget]::Process)
 }
 
 function Stop-ProcessTree($Process) {
@@ -199,8 +223,12 @@ function Build-ForwardArgumentLine {
         '-Captions', $Captions,
         '-Platform', $Platform,
         '-Format', $Format,
+        '-FormatSelection', $FormatSelection,
+        '-FormatSeries', $FormatSeries,
+        '-FormatVariant', $FormatVariant,
         '-IdeaHistoryFile', $IdeaHistoryFile,
         '-GenerationHistoryFile', $GenerationHistoryFile,
+        '-PublishHistoryFile', $PublishHistoryFile,
         '-IdeaHistoryLimit', [string]$IdeaHistoryLimit,
         '-IdeaRetries', [string]$IdeaRetries,
         '-MaxAttempts', [string]$MaxAttempts
@@ -360,6 +388,7 @@ $exitCode = 1
 $stoppedByUser = $false
 
 try {
+    Normalize-ProcessPathEnvironment
     $source = Get-Content -Raw -Path $DashboardCore -Encoding UTF8
     $patched = New-ColoredDashboardSource $source
     [System.IO.File]::WriteAllText($script:patchedDashboard, $patched, $Utf8NoBom)

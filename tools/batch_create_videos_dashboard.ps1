@@ -5,7 +5,7 @@ param(
     [int]$Workers = 4,
     [string]$Model = 'llama3.1:8b',
     [string]$Voice = 'af_heart',
-    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george',
+    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,bf_emma',
     [ValidateSet('single', 'series', 'per-slide')]
     [string]$VoiceSelection = 'series',
     [string]$SeriesId = '',
@@ -16,8 +16,13 @@ param(
     [string]$Platform = 'reddit',
     [ValidateSet('auto', 'thread_story', 'confession', 'debate', 'best_answers', 'escalating_conversation')]
     [string]$Format = 'auto',
+    [ValidateSet('auto', 'single', 'series', 'per-slot')]
+    [string]$FormatSelection = 'per-slot',
+    [string]$FormatSeries = 'thread_story,confession,debate,best_answers,escalating_conversation',
+    [string]$FormatVariant = 'auto',
     [string]$IdeaHistoryFile = 'data\batch_idea_history.jsonl',
     [string]$GenerationHistoryFile = 'data\generation_history.jsonl',
+    [string]$PublishHistoryFile = 'data\publish_history.jsonl',
     [int]$IdeaHistoryLimit = 80,
     [int]$IdeaRetries = 8,
     [int]$MaxAttempts = 0,
@@ -594,8 +599,12 @@ function Build-EngineArgumentLine {
         '-Captions', $Captions,
         '-Platform', $Platform,
         '-Format', $Format,
+        '-FormatSelection', $FormatSelection,
+        '-FormatSeries', $FormatSeries,
+        '-FormatVariant', $FormatVariant,
         '-IdeaHistoryFile', $IdeaHistoryFile,
         '-GenerationHistoryFile', $GenerationHistoryFile,
+        '-PublishHistoryFile', $PublishHistoryFile,
         '-IdeaHistoryLimit', [string]$IdeaHistoryLimit,
         '-IdeaRetries', [string]$IdeaRetries,
         '-MaxAttempts', [string]$MaxAttempts)) { [void]$tokens.Add($token) }
@@ -649,7 +658,7 @@ $argumentLine = Build-EngineArgumentLine
 
 Append-DebugLine 'ThreadGens live dashboard wrapper'
 Append-DebugLine ("Started: " + $script:runStarted.ToString('o'))
-Append-DebugLine ("Dashboard settings: target=$TargetVideos count=$Count workers=$Workers platform=$Platform format=$Format model=$Model voice=$Voice voiceSelection=$VoiceSelection captions=$Captions encoder=$env:THREADGENS_VIDEO_ENCODER")
+Append-DebugLine ("Dashboard settings: target=$TargetVideos count=$Count workers=$Workers platform=$Platform format=$Format formatSelection=$FormatSelection formatSeries=$FormatSeries formatVariant=$FormatVariant model=$Model voice=$Voice voiceSelection=$VoiceSelection captions=$Captions encoder=$env:THREADGENS_VIDEO_ENCODER")
 Append-DebugLine ("Engine: $EngineScript")
 
 $process = $null

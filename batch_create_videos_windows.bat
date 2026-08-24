@@ -7,7 +7,7 @@ set "COUNT=10"
 set "WORKERS=4"
 set "MODEL=llama3.1:8b"
 set "VOICE=af_heart"
-set "VOICE_SERIES=af_heart"
+set "VOICE_SERIES=af_heart,af_bella,af_nicole,bf_emma"
 set "PLATFORM=reddit"
 set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
 set "OP_IMAGE_FLAG="
@@ -106,13 +106,14 @@ echo   slides:   %COUNT% per video
 echo   workers:  %WORKERS%
 echo   encoder:  %THREADGENS_VIDEO_ENCODER%
 echo   platform: %PLATFORM%
+echo   voices:   %VOICE_SERIES% (one high-end voice per video)
 echo.
 echo Detailed engine, Ollama, TTS, FFmpeg, P0/P1/P2, and worker output is saved to debug.log.
 echo The live screen will show color-coded progress, worker stages, slots, events, and system resources.
 echo Press Q or Esc to stop cleanly. Ctrl+C also terminates the entire ThreadGens process tree.
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_color_dashboard.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Workers %WORKERS% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -VoiceSelection single -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_color_dashboard.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Workers %WORKERS% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -VoiceSelection series -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
@@ -133,6 +134,7 @@ exit /b %EXITCODE%
 set "COLOR_DASHBOARD_SCRIPT=tools\batch_create_videos_color_dashboard.ps1"
 set "DASHBOARD_SCRIPT=tools\batch_create_videos_dashboard.ps1"
 set "PARALLEL_SCRIPT=tools\batch_create_videos_parallel.ps1"
+set "FORMAT_ROTATION_SCRIPT=tools\batch_format_rotation.ps1"
 set "WORKER_SCRIPT=tools\batch_parallel_worker.ps1"
 set "PROXY_SCRIPT=tools\ollama_serial_proxy.py"
 set "COLOR_DASHBOARD_MARKER=ThreadGensKillOnCloseJob"
@@ -143,6 +145,7 @@ set "NEEDS_REFRESH=0"
 if not exist "%COLOR_DASHBOARD_SCRIPT%" set "NEEDS_REFRESH=1"
 if not exist "%DASHBOARD_SCRIPT%" set "NEEDS_REFRESH=1"
 if not exist "%PARALLEL_SCRIPT%" set "NEEDS_REFRESH=1"
+if not exist "%FORMAT_ROTATION_SCRIPT%" set "NEEDS_REFRESH=1"
 if not exist "%WORKER_SCRIPT%" set "NEEDS_REFRESH=1"
 if not exist "%PROXY_SCRIPT%" set "NEEDS_REFRESH=1"
 if exist "%COLOR_DASHBOARD_SCRIPT%" (
@@ -173,7 +176,7 @@ if not exist ".git" (
   exit /b 1
 )
 
-for %%F in ("%COLOR_DASHBOARD_SCRIPT%" "%DASHBOARD_SCRIPT%" "%PARALLEL_SCRIPT%" "%WORKER_SCRIPT%" "%PROXY_SCRIPT%") do (
+for %%F in ("%COLOR_DASHBOARD_SCRIPT%" "%DASHBOARD_SCRIPT%" "%PARALLEL_SCRIPT%" "%FORMAT_ROTATION_SCRIPT%" "%WORKER_SCRIPT%" "%PROXY_SCRIPT%") do (
   git diff --quiet -- "%%~F"
   if errorlevel 1 (
     echo Local edits exist in %%~F.
@@ -188,7 +191,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-git restore --source origin/main --worktree -- "%COLOR_DASHBOARD_SCRIPT%" "%DASHBOARD_SCRIPT%" "%PARALLEL_SCRIPT%" "%WORKER_SCRIPT%" "%PROXY_SCRIPT%"
+git restore --source origin/main --worktree -- "%COLOR_DASHBOARD_SCRIPT%" "%DASHBOARD_SCRIPT%" "%PARALLEL_SCRIPT%" "%FORMAT_ROTATION_SCRIPT%" "%WORKER_SCRIPT%" "%PROXY_SCRIPT%"
 if errorlevel 1 (
   echo Failed to refresh the color dashboard / parallel runner files from origin/main.
   exit /b 1
@@ -197,6 +200,7 @@ if errorlevel 1 (
 if not exist "%COLOR_DASHBOARD_SCRIPT%" exit /b 1
 if not exist "%DASHBOARD_SCRIPT%" exit /b 1
 if not exist "%PARALLEL_SCRIPT%" exit /b 1
+if not exist "%FORMAT_ROTATION_SCRIPT%" exit /b 1
 if not exist "%WORKER_SCRIPT%" exit /b 1
 if not exist "%PROXY_SCRIPT%" exit /b 1
 findstr /C:"%COLOR_DASHBOARD_MARKER%" "%COLOR_DASHBOARD_SCRIPT%" >nul 2>&1

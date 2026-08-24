@@ -4,7 +4,7 @@
 
 ## Production flow
 
-1. Resolve a content-appropriate format and avoid recently overused formats.
+1. Resolve a content-appropriate format and narrative substyle while avoiding recent cooldowns.
 2. For `--auto`, generate with hidden format/originality instructions while preserving the visible title/body exactly.
 3. Validate persistent generation history. Existing malformed history fails closed instead of behaving like a clean slate.
 4. Run deterministic novelty checks: normalized hashes, shingles, hook overlap, term-frequency similarity, structural fingerprints, and repeated-line penalties.
@@ -16,7 +16,7 @@
 10. Split each narration into duration-weighted visual states targeting roughly one visible content/focus change every 2.5 seconds.
 11. Render those states with continuous motion and concatenate them into the narrated clip.
 12. Stitch clips with a transition profile specific to the selected content format.
-13. After successful production output, append the accepted script/format/topic fingerprint to history.
+13. After successful production output, append the accepted script/format/substyle/topic fingerprint to history.
 
 Requested segment/final MP4s are deleted before regeneration so stale files cannot make a failed run appear successful.
 
@@ -31,6 +31,8 @@ Requested segment/final MP4s are deleted before regeneration so stale files cann
 - `escalating_conversation` — short responsive turns and message-style presentation.
 
 The formats differ in generation guidance, layout, motion behavior, timed-state labeling/focus, and final transitions. They are not cosmetic skins.
+
+Each format has four structural substyles selected with `--format-variant`. The recommended `auto` mode balances them from generation history so repeated top-level formats still vary their narrative progression and pacing family.
 
 Format-specific final transitions are intentionally deterministic rather than random:
 

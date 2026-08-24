@@ -59,7 +59,9 @@ public final class P0Runner {
         NoveltyGuard noveltyGuard = new NoveltyGuard(
                 config.historyFile, config.noveltyThreshold, config.historyLimit);
         ContentFormat format = ContentFormat.resolve(config.requestedFormat, noveltyGuard);
+        ContentVariant variant = ContentVariant.resolve(config.requestedFormatVariant, format, noveltyGuard);
         System.out.println("P0 format: " + format.id() + " (" + format.label() + ")");
+        System.out.println("P0 format variant: " + variant.id() + " (" + variant.pacingFamily() + " pacing)");
         System.out.println("P0 novelty history: " + noveltyGuard.historyFile());
 
         int artifactCount = config.expectedCount();
@@ -96,12 +98,12 @@ public final class P0Runner {
         if (config.noveltyEnabled
                 && !currentScript.isBlank()
                 && (noveltyResult == null || noveltyResult.accepted())) {
-            noveltyGuard.record(currentScript, config.topic, format);
+            noveltyGuard.record(currentScript, config.topic, format, variant);
             System.out.println("P0 novelty: accepted script recorded in history.");
         }
 
         if (config.provenanceEnabled) {
-            Path manifest = ProvenanceManifest.write(config, format, artifactCount, noveltyResult);
+            Path manifest = ProvenanceManifest.write(config, format, variant, artifactCount, noveltyResult);
             System.out.println("P1 provenance manifest: " + manifest);
         }
 
@@ -283,6 +285,7 @@ public final class P0Runner {
 
     private static boolean isP0ValueOption(String arg) {
         return "--format".equals(arg)
+                || "--format-variant".equals(arg)
                 || "--history-file".equals(arg)
                 || "--history-limit".equals(arg)
                 || "--novelty-threshold".equals(arg)
@@ -340,6 +343,7 @@ public final class P0Runner {
         String postTitle = "Finish this story in the comments";
         String topic = "weird everyday stories";
         String requestedFormat = "auto";
+        String requestedFormatVariant = "auto";
         String llmModel = "llama3.1:8b";
         String imageMode = "none";
         String imageCheckpoint = "";
@@ -470,6 +474,9 @@ public final class P0Runner {
                         }
                         case "--format" -> {
                             if (i + 1 < args.length) config.requestedFormat = args[++i];
+                        }
+                        case "--format-variant" -> {
+                            if (i + 1 < args.length) config.requestedFormatVariant = args[++i];
                         }
                         case "--history-file" -> {
                             if (i + 1 < args.length) config.historyFile = Path.of(args[++i]);
@@ -612,6 +619,8 @@ public final class P0Runner {
             config.videoCommand = properties.getProperty("videoCommand", config.videoCommand);
             config.finalVideoName = properties.getProperty("finalVideoName", config.finalVideoName);
             config.requestedFormat = properties.getProperty("format", config.requestedFormat);
+            config.requestedFormatVariant = properties.getProperty(
+                    "formatVariant", config.requestedFormatVariant);
             config.historyFile = Path.of(properties.getProperty("historyFile", config.historyFile.toString()));
             config.historyLimit = parseInt(properties.getProperty("historyLimit"), config.historyLimit);
             config.noveltyThreshold = parseInt(

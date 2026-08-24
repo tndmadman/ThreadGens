@@ -123,7 +123,14 @@ final class PrePublishAuditor {
         if (closestScores.audio >= 0.95 && isKnownVoice(candidate.voice)) {
             findings.add("The same known voice/TTS combination is being reused.");
         }
-        if (closestScores.format >= 0.99) findings.add("The closest approved video uses the same content format.");
+        if (closestScores.format >= 0.99) {
+            findings.add("The closest approved video uses the same content format and substyle.");
+        } else if (closestScores.format >= 0.60
+                && candidate.format.equalsIgnoreCase(closest.fingerprint().format)) {
+            findings.add("The closest approved video uses the same top-level format but a different substyle.");
+        } else if (closestScores.format >= 0.20) {
+            findings.add("The closest approved video has a related pacing family but a different format.");
+        }
         if (closestScores.pacing >= 0.90) {
             findings.add(String.format(Locale.US, "Segment pacing similarity is %.0f%%.", closestScores.pacing * 100.0));
         }
@@ -154,6 +161,8 @@ final class PrePublishAuditor {
                 + "  \"status\": \"" + result.status + "\",\n"
                 + "  \"mode\": \"" + escape(mode == null ? "block" : mode) + "\",\n"
                 + "  \"risk\": " + result.risk + ",\n"
+                + "  \"candidate_format\": \"" + escape(candidate.format) + "\",\n"
+                + "  \"candidate_format_variant\": \"" + escape(candidate.formatVariant) + "\",\n"
                 + "  \"candidate_artifact_hash\": \"" + escape(candidate.artifactHash) + "\",\n"
                 + "  \"closest_created\": \"" + escape(closestCreated) + "\",\n"
                 + "  \"scores\": {\n"
@@ -182,12 +191,27 @@ final class PrePublishAuditor {
         double content = contentSimilarity(a.script, b.script);
         double visual = 0.0; // Intentionally disabled: ThreadGens uses a shared Reddit/X layout.
         double audio = audioSimilarity(a, b);
-        double format = a.format.equalsIgnoreCase(b.format) ? 1.0 : 0.0;
+        double format = formatSimilarity(a, b);
         double pacing = pacingSimilarity(a.segmentDurations, b.segmentDurations);
         double identity = PublishFingerprint.visualSimilarity(a.identityHashes, b.identityHashes);
         double metadata = !a.metadataHash.isBlank() && a.metadataHash.equals(b.metadataHash) ? 1.0 : 0.0;
         double overall = weighted(content, audio, format, pacing, identity, metadata);
         return new Scores(content, visual, audio, format, pacing, identity, metadata, overall);
+    }
+
+    static double formatSimilarity(PublishFingerprint a, PublishFingerprint b) {
+        if (a == null || b == null) return 0.0;
+        boolean sameFormat = a.format.equalsIgnoreCase(b.format);
+        boolean aVariantKnown = isKnownValue(a.formatVariant);
+        boolean bVariantKnown = isKnownValue(b.formatVariant);
+        if (sameFormat) {
+            if (!aVariantKnown && !bVariantKnown) return 1.0;
+            if (!aVariantKnown || !bVariantKnown) return 0.65;
+            return a.formatVariant.equalsIgnoreCase(b.formatVariant) ? 1.0 : 0.65;
+        }
+        String aFamily = ContentVariant.pacingFamilyFor(a.format, a.formatVariant);
+        String bFamily = ContentVariant.pacingFamilyFor(b.format, b.formatVariant);
+        return isKnownValue(aFamily) && aFamily.equalsIgnoreCase(bFamily) ? 0.25 : 0.0;
     }
 
     /** Visual similarity contributes no risk; all pre-existing non-visual weights stay unchanged. */
@@ -257,19 +281,28 @@ final class PrePublishAuditor {
 
     private static int streakPenalty(PublishFingerprint candidate, List<PublishAuditHistory.Entry> history) {
         int sameFormat = 0;
+        int sameVariant = 0;
         int sameVoice = 0;
         int sameIdentity = 0;
+        boolean immediateFormatRepeat = false;
         boolean candidateVoiceKnown = isKnownVoice(candidate.voice);
         for (int i = history.size() - 1; i >= 0 && history.size() - i <= 8; i--) {
             PublishFingerprint fp = history.get(i).fingerprint();
-            if (candidate.format.equalsIgnoreCase(fp.format)) sameFormat++;
+            if (candidate.format.equalsIgnoreCase(fp.format)) {
+                sameFormat++;
+                if (i == history.size() - 1) immediateFormatRepeat = true;
+            }
+            if (isKnownValue(candidate.formatVariant) && isKnownValue(fp.formatVariant)
+                    && candidate.formatVariant.equalsIgnoreCase(fp.formatVariant)) sameVariant++;
             if (candidateVoiceKnown && isKnownVoice(fp.voice) && candidate.voice.equalsIgnoreCase(fp.voice)) sameVoice++;
             if (!candidate.identityHashes.isEmpty() && !fp.identityHashes.isEmpty()
                     && PublishFingerprint.visualSimilarity(candidate.identityHashes, fp.identityHashes) >= 0.95) {
                 sameIdentity++;
             }
         }
-        int penalty = Math.max(0, sameFormat - 2) * 2
+        int penalty = (immediateFormatRepeat ? 2 : 0)
+                + Math.max(0, sameFormat - 2) * 2
+                + Math.max(0, sameVariant - 1) * 2
                 + Math.max(0, sameVoice - 3)
                 + Math.max(0, sameIdentity - 1) * 2;
         return Math.min(12, penalty);

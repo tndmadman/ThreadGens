@@ -19,12 +19,13 @@ import javax.imageio.ImageIO;
 
 /** Canonical viewer-facing fingerprint used by the P2 pre-publish audit. */
 final class PublishFingerprint {
-    static final int SCHEMA_VERSION = 2;
+    static final int SCHEMA_VERSION = 3;
     private static final double[] VIDEO_SAMPLE_POSITIONS = {0.18, 0.50, 0.82};
 
     record CaptureInput(
             String platform,
             String format,
+            String formatVariant,
             String script,
             List<Path> artifactPaths,
             List<Path> imagePaths,
@@ -34,11 +35,27 @@ final class PublishFingerprint {
             String metadataSignature,
             String videoCommand
     ) {
+        CaptureInput(
+                String platform,
+                String format,
+                String script,
+                List<Path> artifactPaths,
+                List<Path> imagePaths,
+                List<Path> audioPaths,
+                String voice,
+                String ttsEngine,
+                String metadataSignature,
+                String videoCommand
+        ) {
+            this(platform, format, "unknown", script, artifactPaths, imagePaths, audioPaths,
+                    voice, ttsEngine, metadataSignature, videoCommand);
+        }
     }
 
     final String created;
     final String platform;
     final String format;
+    final String formatVariant;
     final String script;
     final String scriptHash;
     final String artifactHash;
@@ -54,6 +71,7 @@ final class PublishFingerprint {
             String created,
             String platform,
             String format,
+            String formatVariant,
             String script,
             String scriptHash,
             String artifactHash,
@@ -68,6 +86,7 @@ final class PublishFingerprint {
         this.created = clean(created, Instant.now().toString());
         this.platform = clean(platform, "unknown");
         this.format = clean(format, "unknown");
+        this.formatVariant = clean(formatVariant, "unknown");
         this.script = script == null ? "" : script.trim();
         this.scriptHash = clean(scriptHash, sha256(this.script.getBytes(StandardCharsets.UTF_8)));
         this.artifactHash = clean(artifactHash, "");
@@ -78,6 +97,26 @@ final class PublishFingerprint {
         this.segmentDurations = segmentDurations == null ? List.of() : List.copyOf(segmentDurations);
         this.totalDuration = Math.max(0.0, totalDuration);
         this.metadataHash = clean(metadataHash, "");
+    }
+
+    /** Backward-compatible constructor for fingerprints without a substyle. */
+    PublishFingerprint(
+            String created,
+            String platform,
+            String format,
+            String script,
+            String scriptHash,
+            String artifactHash,
+            List<Long> visualHashes,
+            List<Long> identityHashes,
+            String voice,
+            String ttsEngine,
+            List<Double> segmentDurations,
+            double totalDuration,
+            String metadataHash
+    ) {
+        this(created, platform, format, "unknown", script, scriptHash, artifactHash, visualHashes,
+                identityHashes, voice, ttsEngine, segmentDurations, totalDuration, metadataHash);
     }
 
     /** Backward-compatible constructor for schema-1 records/tests. */
@@ -95,7 +134,7 @@ final class PublishFingerprint {
             double totalDuration,
             String metadataHash
     ) {
-        this(created, platform, format, script, scriptHash, artifactHash, visualHashes, List.of(),
+        this(created, platform, format, "unknown", script, scriptHash, artifactHash, visualHashes, List.of(),
                 voice, ttsEngine, segmentDurations, totalDuration, metadataHash);
     }
 
@@ -147,6 +186,7 @@ final class PublishFingerprint {
                 Instant.now().toString(),
                 input.platform(),
                 input.format(),
+                input.formatVariant(),
                 script,
                 sha256(script.getBytes(StandardCharsets.UTF_8)),
                 combinedFileHash(artifacts),
@@ -176,6 +216,42 @@ final class PublishFingerprint {
             String script,
             String artifactHash,
             long visualHash,
+            String format,
+            String formatVariant,
+            String voice,
+            List<Double> durations,
+            String metadataHash
+    ) {
+        double total = durations == null ? 0.0 : durations.stream().mapToDouble(Double::doubleValue).sum();
+        return new PublishFingerprint(
+                Instant.now().toString(), "reddit", format, formatVariant, script,
+                sha256((script == null ? "" : script).getBytes(StandardCharsets.UTF_8)),
+                artifactHash, List.of(visualHash), List.of(), voice, "kokoro", durations, total, metadataHash);
+    }
+
+    static PublishFingerprint forTest(
+            String script,
+            String artifactHash,
+            long visualHash,
+            long identityHash,
+            String format,
+            String formatVariant,
+            String voice,
+            List<Double> durations,
+            String metadataHash
+    ) {
+        double total = durations == null ? 0.0 : durations.stream().mapToDouble(Double::doubleValue).sum();
+        List<Long> identities = identityHash == Long.MIN_VALUE ? List.of() : List.of(identityHash);
+        return new PublishFingerprint(
+                Instant.now().toString(), "reddit", format, formatVariant, script,
+                sha256((script == null ? "" : script).getBytes(StandardCharsets.UTF_8)),
+                artifactHash, List.of(visualHash), identities, voice, "kokoro", durations, total, metadataHash);
+    }
+
+    static PublishFingerprint forTest(
+            String script,
+            String artifactHash,
+            long visualHash,
             long identityHash,
             String format,
             String voice,
@@ -185,7 +261,7 @@ final class PublishFingerprint {
         double total = durations == null ? 0.0 : durations.stream().mapToDouble(Double::doubleValue).sum();
         List<Long> identities = identityHash == Long.MIN_VALUE ? List.of() : List.of(identityHash);
         return new PublishFingerprint(
-                Instant.now().toString(), "reddit", format, script,
+                Instant.now().toString(), "reddit", format, "unknown", script,
                 sha256((script == null ? "" : script).getBytes(StandardCharsets.UTF_8)),
                 artifactHash, List.of(visualHash), identities, voice, "kokoro", durations, total, metadataHash);
     }

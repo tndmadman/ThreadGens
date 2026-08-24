@@ -41,7 +41,7 @@ The P2 fingerprint includes:
 - perceptual dHashes from rendered social frames;
 - avatar plus author/header perceptual hashes;
 - three perceptual samples from each completed MP4;
-- actual selected content format;
+- actual selected content format, narrative substyle, and pacing family;
 - actual rendered P1 voice-set signature plus TTS engine;
 - real per-segment narration durations;
 - completed-artifact duration;

@@ -5,7 +5,7 @@ param(
     [int]$Workers = 4,
     [string]$Model = 'llama3.1:8b',
     [string]$Voice = 'af_heart',
-    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,am_adam,am_michael,bf_emma,bm_george',
+    [string]$VoiceSeries = 'af_heart,af_bella,af_nicole,bf_emma',
     [ValidateSet('single', 'series', 'per-slide')]
     [string]$VoiceSelection = 'series',
     [string]$SeriesId = '',
@@ -16,8 +16,13 @@ param(
     [string]$Platform = 'reddit',
     [ValidateSet('auto', 'thread_story', 'confession', 'debate', 'best_answers', 'escalating_conversation')]
     [string]$Format = 'auto',
+    [ValidateSet('auto', 'single', 'series', 'per-slot')]
+    [string]$FormatSelection = 'per-slot',
+    [string]$FormatSeries = 'thread_story,confession,debate,best_answers,escalating_conversation',
+    [string]$FormatVariant = 'auto',
     [string]$IdeaHistoryFile = 'data\batch_idea_history.jsonl',
     [string]$GenerationHistoryFile = 'data\generation_history.jsonl',
+    [string]$PublishHistoryFile = 'data\publish_history.jsonl',
     [int]$IdeaHistoryLimit = 80,
     [int]$IdeaRetries = 8,
     [int]$MaxAttempts = 0,
@@ -30,6 +35,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
+. (Join-Path $PSScriptRoot 'batch_format_rotation.ps1')
 
 if (-not $PSBoundParameters.ContainsKey('KeepOllamaLoaded')) {
     $KeepOllamaLoaded = $true
@@ -69,6 +75,9 @@ $OutputRoot = Join-Path $RepoRoot ('output\batch_videos\' + $Platform + '_' + (G
 $FinalDir = Join-Path $OutputRoot 'final_videos'
 $IdeaHistoryPath = if ([System.IO.Path]::IsPathRooted($IdeaHistoryFile)) { $IdeaHistoryFile } else { Join-Path $RepoRoot $IdeaHistoryFile }
 $GlobalGenerationHistoryPath = if ([System.IO.Path]::IsPathRooted($GenerationHistoryFile)) { $GenerationHistoryFile } else { Join-Path $RepoRoot $GenerationHistoryFile }
+$PublishHistoryPath = if ([System.IO.Path]::IsPathRooted($PublishHistoryFile)) { $PublishHistoryFile } else { Join-Path $RepoRoot $PublishHistoryFile }
+$FormatPool = @(Resolve-BatchFormatPool $FormatSeries)
+$FormatOffset = Get-BatchFormatOffset $FormatPool $PublishHistoryPath
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $Palettes = @('ember', 'ocean', 'forest', 'violet', 'teal', 'rose', 'amber', 'slate')
 $script:OllamaGenerateUrl = ''
@@ -342,7 +351,8 @@ function ConvertFrom-Base64Url($Value) {
 function New-PendingHistoryLine($Reservation) {
     return ([ordered]@{
         created = (Get-Date).ToUniversalTime().ToString('o')
-        format = 'unknown'
+        format = if ([string]::IsNullOrWhiteSpace([string]$Reservation.Format)) { 'unknown' } else { [string]$Reservation.Format }
+        variant = if ([string]::IsNullOrWhiteSpace([string]$Reservation.Variant)) { 'unknown' } else { [string]$Reservation.Variant }
         hash = 'pending'
         topic_b64 = ConvertTo-Base64Url $Reservation.Topic
         script_b64 = ConvertTo-Base64Url $Reservation.Script
@@ -457,17 +467,25 @@ function Write-NewWorkerLogLines($Job) {
 function Update-WorkerGenerationState($Job) {
     if ($Job.GenerationSettled) { return }
     if (-not (Test-Path $Job.LogPath) -or -not (Test-Path $Job.ScriptOut)) { return }
-    $hasMarker = $false
-    try { $hasMarker = [bool](Select-String -Path $Job.LogPath -Pattern '^P0 format:' -Quiet -ErrorAction Stop) } catch { }
-    if (-not $hasMarker) { return }
+    $formatMarker = $null
+    $variantMarker = $null
+    try {
+        $formatMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format:\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
+        $variantMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format variant:\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
+    } catch { }
+    if ($null -eq $formatMarker -or $null -eq $variantMarker) { return }
     try { $scriptText = (Get-Content -Raw -Path $Job.ScriptOut -Encoding UTF8).Trim() } catch { return }
     if ([string]::IsNullOrWhiteSpace($scriptText)) { return }
     $Job.Script = $scriptText
+    $Job.Format = $formatMarker.Matches[0].Groups[1].Value
+    $Job.Variant = $variantMarker.Matches[0].Groups[1].Value
     $Job.GenerationSettled = $true
     $script:pendingReservations[$Job.AttemptLabel] = [pscustomobject]@{
         Attempt = $Job.AttemptLabel
         Script = $scriptText
         Topic = [string]$Job.Body
+        Format = $Job.Format
+        Variant = $Job.Variant
     }
     Write-Host "Worker A$($Job.AttemptLabel) finished its serialized Ollama generation and is now free to render in parallel." -ForegroundColor DarkCyan
 }
@@ -514,6 +532,8 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
     $logPath = Join-Path $jobRoot 'worker.log'
     $jobFile = Join-Path $jobRoot 'worker_job.json'
     $palette = $Palettes[(($Slot - 1) % $Palettes.Count)]
+    $selectedFormat = Select-BatchFormat $FormatSelection $Format $FormatPool $Slot ([int]$AttemptLabel) $FormatOffset
+    $effectiveSeriesId = Get-BatchSeriesId $VoiceSelection $SeriesId $Platform $Slot
     New-Item -ItemType Directory -Force -Path $imageDir, $audioDir, $videoDir, $scriptDir, $historyDir | Out-Null
     if ($GenerateOpImage) { New-Item -ItemType Directory -Force -Path $opImageDir, $opImageCacheDir | Out-Null }
     New-JobHistorySnapshot $jobHistoryPath
@@ -526,7 +546,8 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
         '--post-title', $title,
         '--topic', $body,
         '--count', [string]$Count,
-        '--format', $Format,
+        '--format', $selectedFormat,
+        '--format-variant', $FormatVariant,
         '--llm-model', $Model,
         '--llm-url', $script:OllamaGenerateUrl,
         '--history-file', $jobHistoryPath,
@@ -544,12 +565,13 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
         '--final-video', $finalVideoName,
         '--captions', $Captions,
         '--metadata-dir', $metadataDir,
+        '--publish-history', $PublishHistoryPath,
         '--no-watermark',
         '--top'
     )
     if ($GenerateOpImage) { $javaArgs += @('--image-mode', 'comfyui', '--image-dir', $opImageDir, '--image-cache-dir', $opImageCacheDir) }
     if ($KeepOllamaLoaded) { $javaArgs += '--keep-ollama-loaded' }
-    if (-not [string]::IsNullOrWhiteSpace($SeriesId)) { $javaArgs += @('--series-id', $SeriesId) }
+    if (-not [string]::IsNullOrWhiteSpace($effectiveSeriesId)) { $javaArgs += @('--series-id', $effectiveSeriesId) }
 
     $jobConfig = [ordered]@{ repoRoot = $RepoRoot; logPath = $logPath; palette = $palette; javaArgs = $javaArgs }
     [System.IO.File]::WriteAllText($jobFile, ($jobConfig | ConvertTo-Json -Depth 8), $Utf8NoBom)
@@ -559,9 +581,9 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
     $process = Start-Process -FilePath $powerShellExe -ArgumentList $workerCommandLine -PassThru -WindowStyle Hidden
     $job = [pscustomobject]@{
         Process = $process; Slot = $Slot; SlotLabel = $slotLabel; AttemptLabel = $AttemptLabel; Idea = $Idea
-        Title = $title; Body = $body; Palette = $palette; FinalVideoName = $finalVideoName; VideoDir = $videoDir
+        Title = $title; Body = $body; Palette = $palette; Format = $selectedFormat; FinalVideoName = $finalVideoName; VideoDir = $videoDir
         ScriptOut = $scriptOut; JobHistoryPath = $jobHistoryPath; LogPath = $logPath; LogLineCount = 0
-        GenerationSettled = $false; HistoryMerged = $false; Script = ''; Started = Get-Date
+        GenerationSettled = $false; HistoryMerged = $false; Script = ''; Variant = ''; Started = Get-Date
     }
     [void]$script:activeJobs.Add($job)
 
@@ -569,6 +591,8 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
     if ($Platform -eq 'x') { Write-Host "X style: $title"; Write-Host "Visible X post: $body" } else { Write-Host "Reddit title: $title"; Write-Host "Reddit body: $body" }
     Write-Host "Idea family: $($Idea.theme)"
     Write-Host "Background palette: $palette"
+    Write-Host "P0 format: $selectedFormat / substyle $FormatVariant"
+    if (-not [string]::IsNullOrWhiteSpace($effectiveSeriesId)) { Write-Host "Voice series key: $effectiveSeriesId" }
     Write-Host "Worker log: $logPath"
     Write-Host "Final MP4 if approved: $finalVideoName"
     return $job
@@ -581,7 +605,10 @@ function Complete-Worker($Job) {
     }
     if (-not $Job.GenerationSettled -and -not [string]::IsNullOrWhiteSpace([string]$Job.Script)) {
         $Job.GenerationSettled = $true
-        $script:pendingReservations[$Job.AttemptLabel] = [pscustomobject]@{ Attempt = $Job.AttemptLabel; Script = $Job.Script; Topic = [string]$Job.Body }
+        $script:pendingReservations[$Job.AttemptLabel] = [pscustomobject]@{
+            Attempt = $Job.AttemptLabel; Script = $Job.Script; Topic = [string]$Job.Body
+            Format = $Job.Format; Variant = $Job.Variant
+        }
     }
     Try-MergeWorkerGenerationHistory $Job
 
@@ -602,12 +629,14 @@ function Complete-Worker($Job) {
         Add-IdeaHistoryEvent ([pscustomobject]@{
             event = 'outcome'; id = $Job.Idea.id; created = (Get-Date).ToUniversalTime().ToString('o'); status = 'approved'
             attempt = [int]$Job.AttemptLabel; approvedSlot = $Job.Slot; palette = $Job.Palette; output = $copyTo
+            format = $Job.Format
         })
         Write-Host "Approved slot $($Job.SlotLabel). Progress $script:succeededVideos/$TargetVideos. Saved: $copyTo" -ForegroundColor Green
     } else {
         Add-IdeaHistoryEvent ([pscustomobject]@{
             event = 'outcome'; id = $Job.Idea.id; created = (Get-Date).ToUniversalTime().ToString('o'); status = 'rejected'
             attempt = [int]$Job.AttemptLabel; approvedSlot = $Job.Slot; palette = $Job.Palette; reason = $reason
+            format = $Job.Format
         })
         Add-FailureRecord $Job.AttemptLabel $Job.SlotLabel $Job.Title $reason
         [void]$script:reservedFinalNames.Remove($Job.FinalVideoName.ToLowerInvariant())
@@ -625,6 +654,7 @@ function Complete-Worker($Job) {
 }
 
 function Run-SelfTest {
+    Test-BatchFormatRotation
     $compact = Get-IdeaShapeProblem 'Why does my cat steal socks?' 'Every morning my cat moves one clean sock from the basket to the hallway, then waits beside it like this is a job.' 'reddit'
     if ($null -ne $compact) { throw "Compact Reddit seed unexpectedly failed: $compact" }
     $oversized = Get-IdeaShapeProblem "Why do my neighbor's vintage synthesizer always produce a faint melody in perfect harmony with our building's fire alarm?" 'This body is intentionally short enough that only the title guard should fail.' 'reddit'
@@ -639,12 +669,18 @@ function Run-SelfTest {
         $oldReservations = $script:pendingReservations
         $script:GlobalGenerationHistoryPath = Join-Path $temp 'global.jsonl'
         $script:pendingReservations = @{
-            '0001' = [pscustomobject]@{ Attempt = '0001'; Script = 'pending script one'; Topic = 'topic one' }
+            '0001' = [pscustomobject]@{
+                Attempt = '0001'; Script = 'pending script one'; Topic = 'topic one'
+                Format = 'thread_story'; Variant = 'witness_chain'
+            }
         }
         $snapshot = Join-Path $temp 'job\history.jsonl'
         New-JobHistorySnapshot $snapshot
         $rows = @(Get-Content $snapshot -Encoding UTF8)
         if ($rows.Count -ne 1 -or $rows[0] -notmatch '"hash":"pending"') { throw 'Pending novelty reservation was not written to the worker history snapshot.' }
+        if ($rows[0] -notmatch '"format":"thread_story"' -or $rows[0] -notmatch '"variant":"witness_chain"') {
+            throw 'Pending novelty reservation did not preserve format and substyle.'
+        }
         $reserved = @{ 'test.mp4' = $true }
         $name = Get-UniqueFinalVideoName 'test' $temp $reserved
         if ($name -ne 'test_a.mp4') { throw "Reserved final-name collision test failed: $name" }
@@ -655,13 +691,17 @@ function Run-SelfTest {
         Set-Content -Path $markerLog -Value 'P0 hidden-prompt generation attempt 1/5' -Encoding UTF8
         $fakeJob = [pscustomobject]@{
             GenerationSettled = $false; LogPath = $markerLog; ScriptOut = $markerScript; Script = ''
-            AttemptLabel = '9999'; Body = 'marker topic'
+            AttemptLabel = '9999'; Body = 'marker topic'; Format = ''; Variant = ''
         }
         Update-WorkerGenerationState $fakeJob
         if ($fakeJob.GenerationSettled) { throw 'Worker generation-ready marker fired before P0 entered the finalized render path.' }
         Add-Content -Path $markerLog -Value 'P0 format: debate (Two-sided debate)' -Encoding UTF8
+        Add-Content -Path $markerLog -Value 'P0 format variant: skeptical_qa (qa pacing)' -Encoding UTF8
         Update-WorkerGenerationState $fakeJob
-        if (-not $fakeJob.GenerationSettled -or $fakeJob.Script -ne 'stable generated script') { throw 'Worker generation-ready marker did not recognize the finalized P0 render path.' }
+        if (-not $fakeJob.GenerationSettled -or $fakeJob.Script -ne 'stable generated script' -or
+            $fakeJob.Format -ne 'debate' -or $fakeJob.Variant -ne 'skeptical_qa') {
+            throw 'Worker generation-ready marker did not preserve the finalized format and substyle.'
+        }
         [void]$script:pendingReservations.Remove('9999')
     } finally {
         if ($null -ne $oldGlobal) { $script:GlobalGenerationHistoryPath = $oldGlobal }
@@ -689,7 +729,8 @@ Write-Host 'Worker generation staging: next worker launches only after prior act
 Write-Host "Idea history: $IdeaHistoryPath"
 Write-Host "Global generation history: $GlobalGenerationHistoryPath"
 Write-Host "Output root: $OutputRoot"
-Write-Host "Defaults: platform=$Platform, format=$Format, model=$Model, tts=$TtsEngine"
+Write-Host "Defaults: platform=$Platform, formatSelection=$FormatSelection, formatSeries=[$($FormatPool -join ',')], substyle=$FormatVariant, model=$Model, tts=$TtsEngine"
+Write-Host "Format cooldown history: $PublishHistoryPath (rotation offset $FormatOffset)"
 Write-Host "P1 voice selection: $VoiceSelection from [$VoiceSeries], delivery=$TtsDelivery, captions=$Captions"
 Write-Host 'Final MP4 names: title-based with no numeric prefix'
 Write-Host 'Rejected workers are replaced until every target slot is filled' -ForegroundColor Green

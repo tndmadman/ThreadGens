@@ -107,6 +107,17 @@ public final class P1SmokeTest {
         require(series.voiceFor(0).equals(series.voiceFor(7)),
                 "Series voice selection must remain stable within one series.");
 
+        HashSet<Path> batchVoices = new HashSet<>();
+        for (int slot = 1; slot <= 4; slot++) {
+            VoicePlan batchSeries = new VoicePlan(
+                    "kokoro", "python", Path.of("af_heart"),
+                    "af_heart,af_bella,af_nicole,bf_emma", Path.of("voices"), "series",
+                    String.format("threadgens-reddit-slot-%04d", slot), calm, 120);
+            batchVoices.add(batchSeries.voiceFor(0));
+        }
+        require(batchVoices.size() == 4,
+                "Automatic batch series IDs should cycle through all four high-end voices.");
+
         VoicePlan rotating = new VoicePlan(
                 "kokoro", "python", Path.of("af_heart"), "af_bella,am_adam",
                 Path.of("voices"), "per-slide", "show-42", calm, 120);

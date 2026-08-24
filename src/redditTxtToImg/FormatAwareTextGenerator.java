@@ -41,8 +41,22 @@ final class FormatAwareTextGenerator {
             String noveltyFeedback,
             Path outputFile
     ) throws IOException, InterruptedException {
+        return generateToFile(platform, visibleTitle, visibleOriginalPost, count,
+                format, null, noveltyFeedback, outputFile);
+    }
+
+    Path generateToFile(
+            String platform,
+            String visibleTitle,
+            String visibleOriginalPost,
+            int count,
+            ContentFormat format,
+            ContentVariant variant,
+            String noveltyFeedback,
+            Path outputFile
+    ) throws IOException, InterruptedException {
         List<String> lines = generateLines(
-                platform, visibleTitle, visibleOriginalPost, count, format, noveltyFeedback);
+                platform, visibleTitle, visibleOriginalPost, count, format, variant, noveltyFeedback);
         if (outputFile.getParent() != null) {
             Files.createDirectories(outputFile.getParent());
         }
@@ -58,6 +72,19 @@ final class FormatAwareTextGenerator {
             ContentFormat format,
             String noveltyFeedback
     ) throws IOException, InterruptedException {
+        return generateLines(platform, visibleTitle, visibleOriginalPost, count,
+                format, null, noveltyFeedback);
+    }
+
+    List<String> generateLines(
+            String platform,
+            String visibleTitle,
+            String visibleOriginalPost,
+            int count,
+            ContentFormat format,
+            ContentVariant variant,
+            String noveltyFeedback
+    ) throws IOException, InterruptedException {
         if (count <= 0) {
             return List.of();
         }
@@ -66,6 +93,8 @@ final class FormatAwareTextGenerator {
         String title = visibleTitle == null ? "" : visibleTitle.trim();
         String original = cleanOriginalPost(visibleOriginalPost, normalizedPlatform);
         ContentFormat selectedFormat = format == null ? ContentFormat.THREAD_STORY : format;
+        ContentVariant selectedVariant = variant == null
+                ? ContentVariant.forFormat(selectedFormat).get(0) : variant;
 
         List<String> lines = new ArrayList<>();
         lines.add(original);
@@ -80,6 +109,7 @@ final class FormatAwareTextGenerator {
                     title,
                     original,
                     selectedFormat,
+                    selectedVariant,
                     noveltyFeedback,
                     remaining,
                     lines
@@ -151,6 +181,7 @@ final class FormatAwareTextGenerator {
             String visibleTitle,
             String originalPost,
             ContentFormat format,
+            ContentVariant variant,
             String noveltyFeedback,
             int count,
             List<String> existingLines
@@ -165,7 +196,9 @@ final class FormatAwareTextGenerator {
                 .append("VISIBLE ORIGINAL POST (do not rewrite or repeat it):\n")
                 .append(originalPost).append("\n\n")
                 .append("HIDDEN CONTENT FORMAT INSTRUCTION:\n")
-                .append(format.promptGuide()).append("\n\n");
+                .append(format.promptGuide()).append("\n\n")
+                .append("HIDDEN FORMAT SUBSTYLE INSTRUCTION (apply this structure and cadence):\n")
+                .append(variant.promptGuide()).append("\n\n");
 
         if (noveltyFeedback != null && !noveltyFeedback.isBlank()) {
             prompt.append("HIDDEN ORIGINALITY CORRECTION FROM THE NOVELTY CHECK:\n")

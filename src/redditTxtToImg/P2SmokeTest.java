@@ -29,8 +29,10 @@ public final class P2SmokeTest {
         testSameVoiceAloneDoesNotBlock();
         testUnknownVoiceDoesNotCreateReusePenalty();
         testRenderedIdentityReuseIsScored();
+        testFormatVariantScoring();
         testHistoryRoundTripAndCorruptionFailsClosed();
         testSchemaOneHistoryRemainsReadable();
+        testSchemaTwoHistoryRemainsReadable();
         testConcurrentHistoryTransactionSerializes();
         testLongGenerationHistoryFormatResolutionIsStackSafe();
         testReportWriting();
@@ -147,6 +149,38 @@ public final class P2SmokeTest {
                 "same rendered identity alone must not hard-block unrelated content");
     }
 
+    private static void testFormatVariantScoring() {
+        PublishFingerprint base = PublishFingerprint.forTest(
+                "Base format scoring script.", "format-a", 1L,
+                "thread_story", "witness_chain", "voice-a", List.of(2.0), "meta-a");
+        PublishFingerprint exact = PublishFingerprint.forTest(
+                "Exact substyle comparison.", "format-b", 2L,
+                "thread_story", "witness_chain", "voice-b", List.of(3.0), "meta-b");
+        PublishFingerprint sameFormat = PublishFingerprint.forTest(
+                "Different substyle comparison.", "format-c", 3L,
+                "thread_story", "timeline_updates", "voice-c", List.of(4.0), "meta-c");
+        PublishFingerprint sameFamily = PublishFingerprint.forTest(
+                "Related pacing family comparison.", "format-d", 4L,
+                "escalating_conversation", "multiple_witnesses", "voice-d", List.of(5.0), "meta-d");
+        PublishFingerprint distinct = PublishFingerprint.forTest(
+                "Distinct format comparison.", "format-e", 5L,
+                "best_answers", "ranked_answers", "voice-e", List.of(6.0), "meta-e");
+        PublishFingerprint legacy = fp(
+                "Legacy history comparison.", "format-f", 6L,
+                "thread_story", "voice-f", List.of(7.0), "meta-f");
+
+        require(Math.abs(PrePublishAuditor.formatSimilarity(base, exact) - 1.0) < 0.001,
+                "same format and substyle should score 1.0");
+        require(Math.abs(PrePublishAuditor.formatSimilarity(base, sameFormat) - 0.65) < 0.001,
+                "same format with a different substyle should score 0.65");
+        require(Math.abs(PrePublishAuditor.formatSimilarity(base, legacy) - 0.65) < 0.001,
+                "legacy history without a substyle should not claim an exact substyle match");
+        require(Math.abs(PrePublishAuditor.formatSimilarity(base, sameFamily) - 0.25) < 0.001,
+                "different formats in the same pacing family should score 0.25");
+        require(PrePublishAuditor.formatSimilarity(base, distinct) == 0.0,
+                "different formats and pacing families should score 0.0");
+    }
+
     private static void testHistoryRoundTripAndCorruptionFailsClosed() throws Exception {
         Path dir = Files.createTempDirectory("threadgens-p2-history-");
         Path historyFile = dir.resolve("publish.jsonl");
@@ -154,13 +188,15 @@ public final class P2SmokeTest {
             PublishAuditHistory history = new PublishAuditHistory(historyFile, 5);
             PublishFingerprint original = PublishFingerprint.forTest(
                     "History round trip script.", "artifact-x", 0xabcdefL, 0x12345678L,
-                    "best_answers", "voice-x", List.of(1.2, 2.3), "meta-x");
+                    "best_answers", "editor_picks", "voice-x", List.of(1.2, 2.3), "meta-x");
             history.record(original, "PASS", 17);
             List<PublishAuditHistory.Entry> loaded = history.load();
             require(loaded.size() == 1, "history should round-trip one record");
             require(loaded.get(0).fingerprint().script.equals(original.script), "history script mismatch");
             require(loaded.get(0).fingerprint().identityHashes.equals(original.identityHashes),
                     "identity fingerprint history mismatch");
+            require("editor_picks".equals(loaded.get(0).fingerprint().formatVariant),
+                    "format variant history mismatch");
 
             Files.writeString(historyFile, "{bad history}\n", StandardCharsets.UTF_8);
             boolean failed = false;
@@ -191,6 +227,29 @@ public final class P2SmokeTest {
             require(loaded.size() == 1, "schema-1 publish history should remain readable");
             require(loaded.get(0).fingerprint().identityHashes.isEmpty(),
                     "schema-1 rows should load with no identity fingerprint");
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
+    private static void testSchemaTwoHistoryRemainsReadable() throws Exception {
+        Path dir = Files.createTempDirectory("threadgens-p2-schema2-");
+        Path historyFile = dir.resolve("publish.jsonl");
+        try {
+            String old = "{\"schema\":\"2\",\"created\":\"2026-08-22T00:00:00Z\","
+                    + "\"platform\":\"reddit\",\"format\":\"debate\","
+                    + "\"script_b64\":\"b2xkIHNjcmlwdA\",\"script_hash\":\"hash\","
+                    + "\"artifact_hash\":\"artifact\",\"visuals\":\"1\",\"identities\":\"2\","
+                    + "\"voice_b64\":\"dm9pY2U\",\"tts\":\"kokoro\","
+                    + "\"pacing\":\"2.000\",\"total_duration\":\"2.0\","
+                    + "\"metadata_hash\":\"\",\"status\":\"PASS\",\"risk\":\"1\"}\n";
+            Files.writeString(historyFile, old, StandardCharsets.UTF_8);
+            List<PublishAuditHistory.Entry> loaded = new PublishAuditHistory(historyFile, 5).load();
+            require(loaded.size() == 1, "schema-2 publish history should remain readable");
+            require("unknown".equals(loaded.get(0).fingerprint().formatVariant),
+                    "schema-2 rows should load with an unknown substyle");
+            require(loaded.get(0).fingerprint().identityHashes.size() == 1,
+                    "schema-2 identity fingerprints should remain intact");
         } finally {
             deleteTree(dir);
         }
@@ -248,7 +307,7 @@ public final class P2SmokeTest {
             String encoded = Base64.getUrlEncoder().withoutPadding()
                     .encodeToString(script.getBytes(StandardCharsets.UTF_8));
             String row = "{\"created\":\"2026-08-22T00:00:00Z\","
-                    + "\"format\":\"confession\",\"hash\":\"test\","
+                    + "\"format\":\"confession\",\"variant\":\"regret_reveal\",\"hash\":\"test\","
                     + "\"topic_b64\":\"dG9waWM\",\"script_b64\":\"" + encoded + "\"}\n";
             Files.writeString(historyFile, row, StandardCharsets.UTF_8);
 
@@ -265,6 +324,13 @@ public final class P2SmokeTest {
             String format = (String) method.invoke(null, config, script);
             require("confession".equals(format),
                     "P2 should resolve a long generation-history row without exhausting the JVM stack");
+
+            Method variantMethod = P2Entrypoint.class.getDeclaredMethod(
+                    "resolveActualVariant", P2Entrypoint.AuditConfig.class, String.class, String.class);
+            variantMethod.setAccessible(true);
+            String variant = (String) variantMethod.invoke(null, config, script, format);
+            require("regret_reveal".equals(variant),
+                    "P2 should recover the exact generated substyle from long history rows");
         } finally {
             deleteTree(dir);
         }
@@ -281,6 +347,7 @@ public final class P2SmokeTest {
             String json = Files.readString(report, StandardCharsets.UTF_8);
             require(json.contains("\"status\": \"PASS\""), "report should contain status");
             require(json.contains("\"identity\""), "report should contain identity score");
+            require(json.contains("\"candidate_format_variant\""), "report should contain format substyle");
             require(json.contains("\"risk\""), "report should contain risk");
         } finally {
             deleteTree(dir);

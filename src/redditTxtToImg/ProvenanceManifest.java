@@ -41,6 +41,16 @@ final class ProvenanceManifest {
             int artifactCount,
             NoveltyGuard.Result noveltyResult
     ) throws IOException {
+        return write(config, format, null, artifactCount, noveltyResult);
+    }
+
+    static Path write(
+            P0Runner.RunConfig config,
+            ContentFormat format,
+            ContentVariant variant,
+            int artifactCount,
+            NoveltyGuard.Result noveltyResult
+    ) throws IOException {
         Files.createDirectories(config.metadataDirectory);
         Path manifest = config.metadataDirectory.resolve(config.outputPrefix + "-provenance.json");
         String timestamp = Instant.now().toString();
@@ -58,6 +68,10 @@ final class ProvenanceManifest {
                 .append("    \"origin\": ").append(JsonText.quote(config.contentOrigin)).append(",\n")
                 .append("    \"platform\": ").append(JsonText.quote(config.platform)).append(",\n")
                 .append("    \"format\": ").append(JsonText.quote(format.id())).append(",\n")
+                .append("    \"formatVariant\": ").append(JsonText.quote(
+                        variant == null ? "unknown" : variant.id())).append(",\n")
+                .append("    \"pacingFamily\": ").append(JsonText.quote(
+                        variant == null ? "unknown" : variant.pacingFamily())).append(",\n")
                 .append("    \"title\": ").append(JsonText.quote(config.postTitle)).append(",\n")
                 .append("    \"topic\": ").append(JsonText.quote(config.topic)).append(",\n")
                 .append("    \"scriptSha256\": ").append(JsonText.quote(

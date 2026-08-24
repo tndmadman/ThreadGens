@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 import javax.imageio.ImageIO;
 
@@ -26,6 +28,7 @@ public final class P0SmokeTest {
             testIntegrityAndVisuals(temp);
             testEntrypointArgumentIsolation(temp);
             testContentAwareFormatSelection(temp);
+            testFormatCooldownAndVariantRotation(temp);
             testHiddenPromptDoesNotBecomeVisible();
             testStaleVideoCleanup(temp);
             System.out.println("P0 smoke tests passed.");
@@ -164,7 +167,8 @@ public final class P0SmokeTest {
                         "--embedding-model", "nomic-embed-text"
                 },
                 generated,
-                ContentFormat.CONFESSION
+                ContentFormat.CONFESSION,
+                ContentVariant.PRIVATE_NOTE
         );
         String joined = String.join("|", transformed);
         require(!joined.contains("--auto"),
@@ -175,6 +179,8 @@ public final class P0SmokeTest {
                 "Visible topic must stay unchanged for rendering.");
         require(joined.contains("--format|confession"),
                 "Resolved format must be explicit during rendering.");
+        require(joined.contains("--format-variant|private_note"),
+                "Resolved format substyle must be explicit during rendering.");
         require(joined.contains("--embedding-model|nomic-embed-text"),
                 "Semantic novelty options must preserve option/value pairing until P0 consumes them.");
 
@@ -201,6 +207,31 @@ public final class P0SmokeTest {
                 "Story-continuation prompts should select a story-compatible format.");
     }
 
+    private static void testFormatCooldownAndVariantRotation(Path temp) throws Exception {
+        NoveltyGuard formatGuard = new NoveltyGuard(temp.resolve("format_cooldown_history.jsonl"));
+        Set<ContentFormat> selectedFormats = new HashSet<>();
+        for (int i = 0; i < ContentFormat.values().length; i++) {
+            ContentFormat selected = FormatSelector.resolve(
+                    "auto", formatGuard, "Why does this happen?", "A broad question with many valid structures");
+            selectedFormats.add(selected);
+            formatGuard.record("Unique format rotation script " + i, "rotation", selected);
+        }
+        require(selectedFormats.size() == ContentFormat.values().length,
+                "Question prompts must keep all five formats reachable before repeating one.");
+
+        NoveltyGuard variantGuard = new NoveltyGuard(temp.resolve("variant_rotation_history.jsonl"));
+        Set<ContentVariant> variants = new HashSet<>();
+        int expected = ContentVariant.forFormat(ContentFormat.THREAD_STORY).size();
+        for (int i = 0; i < expected; i++) {
+            ContentVariant variant = ContentVariant.resolve("auto", ContentFormat.THREAD_STORY, variantGuard);
+            variants.add(variant);
+            variantGuard.record("Unique substyle rotation script " + i, "rotation",
+                    ContentFormat.THREAD_STORY, variant);
+        }
+        require(variants.size() == expected,
+                "Automatic substyles must rotate through every variant before reuse.");
+    }
+
     private static void testHiddenPromptDoesNotBecomeVisible() throws Exception {
         FormatAwareTextGenerator generator = new FormatAwareTextGenerator(
                 "http://127.0.0.1:9/api/generate", "not-used");
@@ -211,6 +242,7 @@ public final class P0SmokeTest {
                 visible,
                 1,
                 ContentFormat.DEBATE,
+                ContentVariant.EXPERT_PANEL,
                 "hidden retry instruction");
         require(lines.size() == 1 && visible.equals(lines.get(0)),
                 "Hidden format/novelty guidance must never replace the visible OP.");

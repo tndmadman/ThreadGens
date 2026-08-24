@@ -26,6 +26,7 @@ public final class P2Entrypoint {
      * through the full encoded script and exhausts the JVM stack after render.
      */
     private static final Pattern HISTORY_FORMAT = Pattern.compile("\\\"format\\\"\\s*:\\s*\\\"([^\\\"]++)\\\"");
+    private static final Pattern HISTORY_VARIANT = Pattern.compile("\\\"variant\\\"\\s*:\\s*\\\"([^\\\"]++)\\\"");
     private static final Pattern HISTORY_SCRIPT = Pattern.compile("\\\"script_b64\\\"\\s*:\\s*\\\"([^\\\"]++)\\\"");
 
     private P2Entrypoint() {
@@ -64,6 +65,7 @@ public final class P2Entrypoint {
 
         int count = countNonBlankLines(scriptPath, config.count);
         String actualFormat = resolveActualFormat(config, script);
+        String actualVariant = resolveActualVariant(config, script, actualFormat);
         List<Path> images = numbered(config.outputDirectory, config.outputPrefix, ".png", count);
         List<Path> audio = numbered(config.audioDirectory, config.outputPrefix, ".wav", count);
         List<Path> artifacts = new ArrayList<>();
@@ -81,6 +83,7 @@ public final class P2Entrypoint {
         PublishFingerprint fingerprint = PublishFingerprint.capture(new PublishFingerprint.CaptureInput(
                 config.platform,
                 actualFormat,
+                actualVariant,
                 script,
                 artifacts,
                 images,
@@ -165,6 +168,35 @@ public final class P2Entrypoint {
                 "auto", formatHistory, config.postTitle, selectionTopic).id();
     }
 
+    private static String resolveActualVariant(
+            AuditConfig config,
+            String script,
+            String actualFormat
+    ) throws IOException {
+        ContentFormat format = ContentFormat.resolve(actualFormat, null);
+        if (!"auto".equalsIgnoreCase(config.requestedFormatVariant)) {
+            return ContentVariant.resolve(config.requestedFormatVariant, format, null).id();
+        }
+        if (Files.exists(config.generationHistory)) {
+            List<String> lines = Files.readAllLines(config.generationHistory, StandardCharsets.UTF_8);
+            for (int i = lines.size() - 1; i >= 0; i--) {
+                String line = lines.get(i);
+                Matcher scriptMatcher = HISTORY_SCRIPT.matcher(line);
+                Matcher variantMatcher = HISTORY_VARIANT.matcher(line);
+                if (!scriptMatcher.find() || !variantMatcher.find()) continue;
+                try {
+                    String decoded = new String(
+                            Base64.getUrlDecoder().decode(scriptMatcher.group(1)), StandardCharsets.UTF_8).trim();
+                    if (decoded.equals(script.trim())) return variantMatcher.group(1);
+                } catch (IllegalArgumentException ignored) {
+                    // P0 owns strict generation-history validation when novelty is enabled.
+                }
+            }
+        }
+        NoveltyGuard history = new NoveltyGuard(config.generationHistory);
+        return ContentVariant.resolve("auto", format, history).id();
+    }
+
     private static int countNonBlankLines(Path file, int requested) throws IOException {
         try (var lines = Files.lines(file, StandardCharsets.UTF_8)) {
             int available = (int) lines.map(String::trim).filter(v -> !v.isBlank()).count();
@@ -195,6 +227,7 @@ public final class P2Entrypoint {
 
         String platform = "reddit";
         String requestedFormat = "auto";
+        String requestedFormatVariant = "auto";
         String outputPrefix = "aithread";
         String finalVideoName = "final.mp4";
         String videoCommand = "ffmpeg";
@@ -235,6 +268,7 @@ public final class P2Entrypoint {
                         case "--no-semantic-novelty" -> config.semanticNoveltyEnabled = false;
                         case "--platform" -> { if (i + 1 < args.length) config.platform = normalizePlatform(args[++i]); }
                         case "--format" -> { if (i + 1 < args.length) config.requestedFormat = args[++i]; }
+                        case "--format-variant" -> { if (i + 1 < args.length) config.requestedFormatVariant = args[++i]; }
                         case "--count" -> { if (i + 1 < args.length) config.count = parseInt(args[++i], config.count); }
                         case "--prefix" -> { if (i + 1 < args.length) config.outputPrefix = args[++i]; }
                         case "--post-title" -> {
@@ -296,6 +330,7 @@ public final class P2Entrypoint {
             config.finalVideoName = p.getProperty("finalVideoName", config.finalVideoName);
             config.ttsEngine = p.getProperty("ttsEngine", config.ttsEngine);
             config.requestedFormat = p.getProperty("format", config.requestedFormat);
+            config.requestedFormatVariant = p.getProperty("formatVariant", config.requestedFormatVariant);
             config.generationHistory = Path.of(p.getProperty("historyFile", config.generationHistory.toString()));
             config.ollamaUrl = p.getProperty("ollamaUrl", config.ollamaUrl);
             config.embeddingModel = p.getProperty("embeddingModel", config.embeddingModel);

@@ -142,6 +142,10 @@ final class NoveltyGuard {
     }
 
     void record(String script, String topic, ContentFormat format) throws IOException {
+        record(script, topic, format, null);
+    }
+
+    void record(String script, String topic, ContentFormat format, ContentVariant variant) throws IOException {
         if (script == null || script.isBlank()) {
             return;
         }
@@ -152,6 +156,7 @@ final class NoveltyGuard {
         String line = "{"
                 + "\"created\":\"" + jsonEscape(Instant.now().toString()) + "\","
                 + "\"format\":\"" + jsonEscape(format == null ? "unknown" : format.id()) + "\","
+                + "\"variant\":\"" + jsonEscape(variant == null ? "unknown" : variant.id()) + "\","
                 + "\"hash\":\"" + fingerprint.hash + "\","
                 + "\"topic_b64\":\"" + encode(topic == null ? "" : topic) + "\","
                 + "\"script_b64\":\"" + encode(script) + "\""
@@ -171,6 +176,19 @@ final class NoveltyGuard {
             String format = entries.get(i).format;
             if (format != null && !format.isBlank() && !"unknown".equals(format)) {
                 result.add(format);
+            }
+        }
+        return result;
+    }
+
+    List<String> recentVariants(int limit) {
+        List<Entry> entries = readEntries();
+        if (entries.isEmpty()) return List.of();
+        List<String> result = new ArrayList<>();
+        for (int i = entries.size() - 1; i >= 0 && result.size() < Math.max(1, limit); i--) {
+            String variant = entries.get(i).variant;
+            if (variant != null && !variant.isBlank() && !"unknown".equals(variant)) {
+                result.add(variant);
             }
         }
         return result;
@@ -230,6 +248,7 @@ final class NoveltyGuard {
         return new Entry(
                 fields.getOrDefault("created", ""),
                 fields.getOrDefault("format", "unknown"),
+                fields.getOrDefault("variant", "unknown"),
                 decode(fields.getOrDefault("topic_b64", "")),
                 script
         );
@@ -507,7 +526,7 @@ final class NoveltyGuard {
         }
     }
 
-    private record Entry(String created, String format, String topic, String script) {
+    private record Entry(String created, String format, String variant, String topic, String script) {
     }
 
     private record Similarity(

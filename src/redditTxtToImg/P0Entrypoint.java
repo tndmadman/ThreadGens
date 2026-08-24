@@ -49,8 +49,10 @@ public final class P0Entrypoint {
                     manualHistory,
                     manualConfig.postTitle,
                     manualConfig.topic + " " + manualConfig.readCurrentScript());
+            ContentVariant manualVariant = ContentVariant.resolve(
+                    manualConfig.requestedFormatVariant, manualFormat, manualHistory);
             P0Runner.runOrThrow(applyResolvedFormat(
-                    protectManualScriptInput(safeArgs), manualFormat));
+                    protectManualScriptInput(safeArgs), manualFormat, manualVariant));
             return;
         }
 
@@ -60,6 +62,7 @@ public final class P0Entrypoint {
                 config.historyFile, config.noveltyThreshold, config.historyLimit);
         ContentFormat format = FormatSelector.resolve(
                 config.requestedFormat, guard, config.postTitle, config.topic);
+        ContentVariant variant = ContentVariant.resolve(config.requestedFormatVariant, format, guard);
         FormatAwareTextGenerator generator = new FormatAwareTextGenerator(auto.ollamaUrl, auto.llmModel);
 
         // A new auto run owns this prefix and script path. Remove stale visible
@@ -91,13 +94,14 @@ public final class P0Entrypoint {
         try {
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 System.out.println("P0 hidden-prompt generation attempt " + attempt + "/" + maxAttempts
-                        + " using format " + format.id());
+                        + " using format " + format.id() + " / " + variant.id());
                 generator.generateToFile(
                         config.platform,
                         config.postTitle,
                         config.topic,
                         requestedCount,
                         format,
+                        variant,
                         feedback,
                         config.scriptOut
                 );
@@ -142,13 +146,18 @@ public final class P0Entrypoint {
             }
         }
 
-        String[] renderedArgs = prepareGeneratedScriptArgs(safeArgs, config.scriptOut, format);
+        String[] renderedArgs = prepareGeneratedScriptArgs(safeArgs, config.scriptOut, format, variant);
         P0Runner.runOrThrow(renderedArgs);
     }
 
     static String[] applyResolvedFormat(String[] args, ContentFormat format) {
+        return applyResolvedFormat(args, format, null);
+    }
+
+    static String[] applyResolvedFormat(String[] args, ContentFormat format, ContentVariant variant) {
         List<String> result = new ArrayList<>();
-        boolean written = false;
+        boolean formatWritten = false;
+        boolean variantWritten = false;
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
             if ("--format".equals(arg)) {
@@ -157,22 +166,45 @@ public final class P0Entrypoint {
                 }
                 result.add("--format");
                 result.add(format.id());
-                written = true;
+                formatWritten = true;
+                continue;
+            }
+            if ("--format-variant".equals(arg)) {
+                if (i + 1 < args.length) i++;
+                if (variant != null) {
+                    result.add("--format-variant");
+                    result.add(variant.id());
+                    variantWritten = true;
+                }
                 continue;
             }
             result.add(arg);
         }
-        if (!written) {
+        if (!formatWritten) {
             result.add("--format");
             result.add(format.id());
+        }
+        if (variant != null && !variantWritten) {
+            result.add("--format-variant");
+            result.add(variant.id());
         }
         return result.toArray(new String[0]);
     }
 
     static String[] prepareGeneratedScriptArgs(String[] args, Path generatedScript, ContentFormat format) {
+        return prepareGeneratedScriptArgs(args, generatedScript, format, null);
+    }
+
+    static String[] prepareGeneratedScriptArgs(
+            String[] args,
+            Path generatedScript,
+            ContentFormat format,
+            ContentVariant variant
+    ) {
         List<String> result = new ArrayList<>();
         boolean replacedFirstPositional = false;
         boolean formatWritten = false;
+        boolean variantWritten = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -192,6 +224,15 @@ public final class P0Entrypoint {
                 result.add("--format");
                 result.add(format.id());
                 formatWritten = true;
+                continue;
+            }
+            if ("--format-variant".equals(arg)) {
+                if (i + 1 < args.length) i++;
+                if (variant != null) {
+                    result.add("--format-variant");
+                    result.add(variant.id());
+                    variantWritten = true;
+                }
                 continue;
             }
             if (arg != null && arg.startsWith("--")) {
@@ -217,6 +258,10 @@ public final class P0Entrypoint {
         if (!formatWritten) {
             result.add("--format");
             result.add(format.id());
+        }
+        if (variant != null && !variantWritten) {
+            result.add("--format-variant");
+            result.add(variant.id());
         }
         result.add("--content-origin");
         result.add("ai");
@@ -281,6 +326,7 @@ public final class P0Entrypoint {
 
     private static boolean isP0ValueOption(String arg) {
         return "--format".equals(arg)
+                || "--format-variant".equals(arg)
                 || "--history-file".equals(arg)
                 || "--history-limit".equals(arg)
                 || "--novelty-threshold".equals(arg)

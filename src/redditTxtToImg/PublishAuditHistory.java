@@ -126,6 +126,7 @@ final class PublishAuditHistory {
                 + q("created", fp.created) + ","
                 + q("platform", fp.platform) + ","
                 + q("format", fp.format) + ","
+                + q("format_variant", fp.formatVariant) + ","
                 + q("script_b64", enc(fp.script)) + ","
                 + q("script_hash", fp.scriptHash) + ","
                 + q("artifact_hash", fp.artifactHash) + ","
@@ -151,6 +152,10 @@ final class PublishAuditHistory {
         if (schema >= 2 && identitiesValue == null) {
             throw new IllegalArgumentException("missing field: identities");
         }
+        String variantValue = JsonText.extractString(line, "format_variant");
+        if (schema >= 3 && variantValue == null) {
+            throw new IllegalArgumentException("missing field: format_variant");
+        }
 
         String script = dec(required(line, "script_b64"));
         String voice = dec(required(line, "voice_b64"));
@@ -158,7 +163,8 @@ final class PublishAuditHistory {
         List<Long> identities = schema >= 2 ? parseHashes(identitiesValue) : List.of();
         List<Double> pacing = parseDoubles(required(line, "pacing"));
         PublishFingerprint fp = new PublishFingerprint(
-                required(line, "created"), required(line, "platform"), required(line, "format"), script,
+                required(line, "created"), required(line, "platform"), required(line, "format"),
+                schema >= 3 ? variantValue : "unknown", script,
                 required(line, "script_hash"), required(line, "artifact_hash"), visuals, identities, voice,
                 required(line, "tts"), pacing, Double.parseDouble(required(line, "total_duration")),
                 required(line, "metadata_hash"));
