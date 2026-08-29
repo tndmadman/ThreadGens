@@ -1,6 +1,6 @@
 # P0 content-originality pipeline
 
-`P0Entrypoint` is the production ThreadGens entry point. `CheckedRunner`, `OpImageVideoSafeRunner`, `Runner`, Gradle application runs, the runnable JAR, the GUI, and the Windows launchers all route normal work through the same P0 pipeline. `RawCheckedRunner` is the explicit compatibility/debug path when raw platform rendering is intentionally required.
+`P0Entrypoint` owns the P0 generation/originality stage. The final publish-ready production entrypoint is `P2Entrypoint`, which runs P0/P1 first and then applies the P2 completed-artifact audit. `CheckedRunner`, `OpImageVideoSafeRunner`, `Runner`, Gradle application runs, the runnable JAR, the GUI, and the Windows launchers route normal production work through the integrated path. `P0Entrypoint` remains available for deliberate P0-only development/debug runs, and `RawCheckedRunner` is the explicit compatibility/debug path when raw platform rendering is intentionally required.
 
 ## Production flow
 
@@ -113,9 +113,9 @@ No codec/metadata randomization or classifier-evasion noise is used.
 
 ## Entry points and compatibility
 
-Production-safe entry points:
+Integrated publish-ready entrypoints:
 
-- `redditTxtToImg.P0Entrypoint`
+- `redditTxtToImg.P2Entrypoint`
 - `redditTxtToImg.CheckedRunner`
 - `redditTxtToImg.OpImageVideoSafeRunner`
 - `redditTxtToImg.Runner`
@@ -124,12 +124,16 @@ Production-safe entry points:
 - `run_ai_windows.bat`
 - `batch_create_videos_windows.bat`
 
+P0-only development/debug path:
+
+- `redditTxtToImg.P0Entrypoint`
+
 Explicit raw/debug path:
 
 - `redditTxtToImg.RawCheckedRunner`
 - direct platform renderer classes
 
-The raw path still omits fabricated social metrics because integrity is now enforced at the renderer source, but it intentionally bypasses P0 format/novelty/timed-video orchestration.
+The raw path still omits fabricated social metrics because integrity is now enforced at the renderer source, but it intentionally bypasses P0/P1/P2 orchestration.
 
 ## Validation
 
@@ -146,4 +150,4 @@ GitHub Actions includes:
 - Explicit raw compatibility smoke test.
 - OP-image overlay integration smoke test.
 - Failure-path tests for stale/missing input and video without TTS.
-- A Windows job that compiles the Java sources and parses the setup, interactive runner, and batch-runner PowerShell files with the Windows PowerShell parser.
+- Windows validation of the integrated Java/runtime path plus the complete production batch PowerShell stack.
