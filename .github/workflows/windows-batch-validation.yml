@@ -1,0 +1,74 @@
+name: Windows Batch Production Validation
+
+on:
+  push:
+    paths:
+      - 'batch_create_videos_windows.bat'
+      - 'tools/batch_*.ps1'
+      - 'tools/ollama_serial_proxy.py'
+      - 'tools/kokoro_tts.py'
+      - 'requirements-kokoro.txt'
+      - '.github/workflows/windows-batch-validation.yml'
+  pull_request:
+    paths:
+      - 'batch_create_videos_windows.bat'
+      - 'tools/batch_*.ps1'
+      - 'tools/ollama_serial_proxy.py'
+      - 'tools/kokoro_tts.py'
+      - 'requirements-kokoro.txt'
+      - '.github/workflows/windows-batch-validation.yml'
+
+jobs:
+  windows-batch-validation:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Parse production PowerShell batch stack
+        shell: powershell
+        run: |
+          $files = @(
+            'setup_windows.ps1',
+            'tools\run_ai_windows.ps1',
+            'tools\batch_create_videos.ps1',
+            'tools\batch_create_videos_parallel.ps1',
+            'tools\batch_parallel_worker.ps1',
+            'tools\batch_format_rotation.ps1',
+            'tools\batch_create_videos_dashboard.ps1',
+            'tools\batch_create_videos_color_dashboard.ps1'
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path $file)) {
+              Write-Error "Required production batch file is missing: $file"
+              exit 1
+            }
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "${file}: $($_.Message)" }
+              exit 1
+            }
+          }
+
+      - name: Compile Python helpers
+        shell: powershell
+        run: |
+          python -m py_compile tools\ollama_serial_proxy.py tools\kokoro_tts.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run parallel scheduler self-test directly
+        shell: powershell
+        run: |
+          & powershell -NoProfile -ExecutionPolicy Bypass -File tools\batch_create_videos_parallel.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run full Windows batch launcher self-test
+        shell: cmd
+        run: batch_create_videos_windows.bat --self-test
