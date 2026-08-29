@@ -30,6 +30,12 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Resolve pinned Kokoro environment
+        shell: powershell
+        run: |
+          python -m pip install --disable-pip-version-check --dry-run -r requirements-kokoro.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Parse production PowerShell batch stack
         shell: powershell
         run: |
