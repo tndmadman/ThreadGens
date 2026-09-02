@@ -90,11 +90,14 @@ final class VoicePlan {
             Delivery delivery,
             int timeoutSeconds
     ) {
+        String effectiveEngine = engine == null ? "none" : engine.trim().toLowerCase(Locale.ROOT);
         this.selection = Selection.resolve(selection);
-        this.voices = resolveVoices(engine, primaryVoice, voiceSeries, voiceDirectory, this.selection);
+        this.voices = resolveVoices(effectiveEngine, primaryVoice, voiceSeries, voiceDirectory, this.selection);
         String key = seriesKey == null || seriesKey.isBlank() ? "threadgens-default-series" : seriesKey.trim();
         this.seriesVoiceIndex = Math.floorMod(key.hashCode(), voices.size());
-        this.generator = new VoiceGenerator(engine, command, voices.get(0), timeoutSeconds, delivery);
+        this.generator = "qwen3".equals(effectiveEngine) || "qwen3-tts".equals(effectiveEngine)
+                ? new Qwen3VoiceGenerator(command, voices.get(0), timeoutSeconds, delivery)
+                : new VoiceGenerator(effectiveEngine, command, voices.get(0), timeoutSeconds, delivery);
     }
 
     boolean isEnabled() {
@@ -143,12 +146,21 @@ final class VoicePlan {
             rawVoices.add(primaryVoice.toString().trim());
         }
         if (rawVoices.isEmpty()) {
-            rawVoices.add("kokoro".equalsIgnoreCase(engine) ? "af_heart" : "en_US-lessac-medium");
+            if ("kokoro".equalsIgnoreCase(engine)) {
+                rawVoices.add("af_heart");
+            } else if ("qwen3".equalsIgnoreCase(engine) || "qwen3-tts".equalsIgnoreCase(engine)) {
+                rawVoices.add("Ryan");
+            } else {
+                rawVoices.add("en_US-lessac-medium");
+            }
         }
 
+        boolean namedVoiceEngine = "kokoro".equalsIgnoreCase(engine)
+                || "qwen3".equalsIgnoreCase(engine)
+                || "qwen3-tts".equalsIgnoreCase(engine);
         List<Path> result = new ArrayList<>();
         for (String value : rawVoices) {
-            result.add("kokoro".equalsIgnoreCase(engine)
+            result.add(namedVoiceEngine
                     ? Path.of(value)
                     : VoiceCatalog.resolveVoice(value, voiceDirectory));
         }
