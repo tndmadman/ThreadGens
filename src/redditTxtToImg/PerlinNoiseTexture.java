@@ -105,7 +105,7 @@ final class PerlinNoiseTexture {
                 }
 
                 double value = normalization <= 0.0 ? 0.0 : sum / normalization;
-                int gray = clamp((int) Math.round(128.0 + value * 46.0));
+                int gray = clamp((int) Math.round(128.0 + value * 18.0));
                 frame[offset++] = (byte) gray;
             }
         }
