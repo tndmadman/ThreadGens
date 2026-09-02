@@ -90,14 +90,16 @@ final class VoicePlan {
             Delivery delivery,
             int timeoutSeconds
     ) {
-        String effectiveEngine = engine == null ? "none" : engine.trim().toLowerCase(Locale.ROOT);
+        String configuredEngine = engine == null ? "none" : engine.trim().toLowerCase(Locale.ROOT);
+        String effectiveEngine = resolveEngineOverride(configuredEngine);
+        String effectiveCommand = resolveCommandOverride(command, configuredEngine, effectiveEngine);
         this.selection = Selection.resolve(selection);
         this.voices = resolveVoices(effectiveEngine, primaryVoice, voiceSeries, voiceDirectory, this.selection);
         String key = seriesKey == null || seriesKey.isBlank() ? "threadgens-default-series" : seriesKey.trim();
         this.seriesVoiceIndex = Math.floorMod(key.hashCode(), voices.size());
-        this.generator = "qwen3".equals(effectiveEngine) || "qwen3-tts".equals(effectiveEngine)
-                ? new Qwen3VoiceGenerator(command, voices.get(0), timeoutSeconds, delivery)
-                : new VoiceGenerator(effectiveEngine, command, voices.get(0), timeoutSeconds, delivery);
+        this.generator = isQwenEngine(effectiveEngine)
+                ? new Qwen3VoiceGenerator(effectiveCommand, voices.get(0), timeoutSeconds, delivery)
+                : new VoiceGenerator(effectiveEngine, effectiveCommand, voices.get(0), timeoutSeconds, delivery);
     }
 
     boolean isEnabled() {
@@ -122,6 +124,37 @@ final class VoicePlan {
 
     Selection selection() {
         return selection;
+    }
+
+    private static String resolveEngineOverride(String configuredEngine) {
+        String override = System.getenv("THREADGENS_TTS_ENGINE_OVERRIDE");
+        if (override == null || override.isBlank()) {
+            return configuredEngine;
+        }
+        String normalized = override.trim().toLowerCase(Locale.ROOT);
+        if (isQwenEngine(normalized)) {
+            return "qwen3";
+        }
+        if ("kokoro".equals(normalized) || "piper".equals(normalized) || "none".equals(normalized)) {
+            return normalized;
+        }
+        throw new IllegalArgumentException(
+                "Unsupported THREADGENS_TTS_ENGINE_OVERRIDE: " + override
+                        + ". Use qwen3, kokoro, piper, or none.");
+    }
+
+    private static String resolveCommandOverride(String command, String configuredEngine, String effectiveEngine) {
+        if (!isQwenEngine(effectiveEngine) || isQwenEngine(configuredEngine)) {
+            return command;
+        }
+        String explicitPython = System.getenv("THREADGENS_QWEN3_PYTHON");
+        if (explicitPython != null && !explicitPython.isBlank()) {
+            return explicitPython.trim();
+        }
+        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+            return Path.of(".venv-qwen3-tts", "Scripts", "python.exe").toString();
+        }
+        return Path.of(".venv-qwen3-tts", "bin", "python").toString();
     }
 
     private static List<Path> resolveVoices(
