@@ -5,6 +5,10 @@ cd /d "%~dp0"
 set "TARGET_VIDEOS=30"
 set "COUNT=10"
 set "WORKERS=4"
+set "MAX_SLOT_ATTEMPTS=10"
+set "MAX_SLOT_RENDERED_REJECTS=3"
+set "MAX_TOKYO_IDEAS=2"
+set "MAX_SYNC_IDEAS=3"
 set "MODEL=llama3.1:8b"
 set "VOICE=af_heart"
 set "VOICE_SERIES=af_heart,af_bella,af_nicole,bf_emma"
@@ -107,13 +111,15 @@ echo   workers:  %WORKERS%
 echo   encoder:  %THREADGENS_VIDEO_ENCODER%
 echo   platform: %PLATFORM%
 echo   voices:   %VOICE_SERIES% (one high-end voice per video)
+echo   slot cap: %MAX_SLOT_ATTEMPTS% attempts, %MAX_SLOT_RENDERED_REJECTS% rendered rejects
+echo   cooldown: Tokyo/Japan %MAX_TOKYO_IDEAS%, sync/alignment %MAX_SYNC_IDEAS%
 echo.
 echo Detailed engine, Ollama, TTS, FFmpeg, P0/P1/P2, and worker output is saved to debug.log.
 echo The live screen will show color-coded progress, worker stages, slots, events, and system resources.
 echo Press Q or Esc to stop cleanly. Ctrl+C also terminates the entire ThreadGens process tree.
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_color_dashboard.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Workers %WORKERS% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -VoiceSelection series -Platform "%PLATFORM%" -Captions off %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\batch_create_videos_color_dashboard.ps1" -TargetVideos %TARGET_VIDEOS% -Count %COUNT% -Workers %WORKERS% -Model "%MODEL%" -Voice "%VOICE%" -VoiceSeries "%VOICE_SERIES%" -VoiceSelection series -Platform "%PLATFORM%" -Captions off -MaxSlotAttempts %MAX_SLOT_ATTEMPTS% -MaxSlotRenderedRejects %MAX_SLOT_RENDERED_REJECTS% -MaxTokyoIdeas %MAX_TOKYO_IDEAS% -MaxSynchronizationIdeas %MAX_SYNC_IDEAS% %KEEP_OLLAMA_FLAG% %OP_IMAGE_FLAG%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

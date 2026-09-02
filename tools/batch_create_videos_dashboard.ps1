@@ -26,6 +26,10 @@ param(
     [int]$IdeaHistoryLimit = 80,
     [int]$IdeaRetries = 8,
     [int]$MaxAttempts = 0,
+    [int]$MaxSlotAttempts = 10,
+    [int]$MaxSlotRenderedRejects = 3,
+    [int]$MaxTokyoIdeas = 2,
+    [int]$MaxSynchronizationIdeas = 3,
     [switch]$KeepOllamaLoaded,
     [switch]$GenerateOpImage,
     [switch]$StopOnError,
@@ -607,7 +611,11 @@ function Build-EngineArgumentLine {
         '-PublishHistoryFile', $PublishHistoryFile,
         '-IdeaHistoryLimit', [string]$IdeaHistoryLimit,
         '-IdeaRetries', [string]$IdeaRetries,
-        '-MaxAttempts', [string]$MaxAttempts)) { [void]$tokens.Add($token) }
+        '-MaxAttempts', [string]$MaxAttempts,
+        '-MaxSlotAttempts', [string]$MaxSlotAttempts,
+        '-MaxSlotRenderedRejects', [string]$MaxSlotRenderedRejects,
+        '-MaxTokyoIdeas', [string]$MaxTokyoIdeas,
+        '-MaxSynchronizationIdeas', [string]$MaxSynchronizationIdeas)) { [void]$tokens.Add($token) }
     if (-not [string]::IsNullOrWhiteSpace($SeriesId)) { [void]$tokens.Add('-SeriesId'); [void]$tokens.Add($SeriesId) }
     if ($KeepOllamaLoaded) { [void]$tokens.Add('-KeepOllamaLoaded') }
     if ($GenerateOpImage) { [void]$tokens.Add('-GenerateOpImage') }

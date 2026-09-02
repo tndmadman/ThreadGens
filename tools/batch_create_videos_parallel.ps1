@@ -26,6 +26,10 @@ param(
     [int]$IdeaHistoryLimit = 80,
     [int]$IdeaRetries = 8,
     [int]$MaxAttempts = 0,
+    [int]$MaxSlotAttempts = 10,
+    [int]$MaxSlotRenderedRejects = 3,
+    [int]$MaxTokyoIdeas = 2,
+    [int]$MaxSynchronizationIdeas = 3,
     [switch]$KeepOllamaLoaded,
     [switch]$GenerateOpImage,
     [switch]$StopOnError,
@@ -62,6 +66,18 @@ if ($IdeaHistoryLimit -lt 1) {
 if ($IdeaRetries -lt 1) {
     $IdeaRetries = 1
 }
+if ($MaxSlotAttempts -lt 1) {
+    $MaxSlotAttempts = 1
+}
+if ($MaxSlotRenderedRejects -lt 1) {
+    $MaxSlotRenderedRejects = 1
+}
+if ($MaxTokyoIdeas -lt 0) {
+    $MaxTokyoIdeas = 0
+}
+if ($MaxSynchronizationIdeas -lt 0) {
+    $MaxSynchronizationIdeas = 0
+}
 if ($GenerateOpImage -and $Workers -gt 1) {
     Write-Host 'ComfyUI OP images share the GPU compute lane with Ollama; parallel whole-video workers are clamped to 1 while OP image generation is enabled.' -ForegroundColor Yellow
     $Workers = 1
@@ -73,6 +89,7 @@ $WorkerScript = Join-Path $RepoRoot 'tools\batch_parallel_worker.ps1'
 $ProxyScript = Join-Path $RepoRoot 'tools\ollama_serial_proxy.py'
 $OutputRoot = Join-Path $RepoRoot ('output\batch_videos\' + $Platform + '_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
 $FinalDir = Join-Path $OutputRoot 'final_videos'
+$BatchSummaryPath = Join-Path $OutputRoot 'batch_summary.csv'
 $IdeaHistoryPath = if ([System.IO.Path]::IsPathRooted($IdeaHistoryFile)) { $IdeaHistoryFile } else { Join-Path $RepoRoot $IdeaHistoryFile }
 $GlobalGenerationHistoryPath = if ([System.IO.Path]::IsPathRooted($GenerationHistoryFile)) { $GenerationHistoryFile } else { Join-Path $RepoRoot $GenerationHistoryFile }
 $PublishHistoryPath = if ([System.IO.Path]::IsPathRooted($PublishHistoryFile)) { $PublishHistoryFile } else { Join-Path $RepoRoot $PublishHistoryFile }
@@ -88,10 +105,15 @@ $script:pendingReservations = @{}
 $script:completedSlots = @{}
 $script:reservedFinalNames = @{}
 $script:failedAttempts = New-Object System.Collections.ArrayList
+$script:skippedSlots = New-Object System.Collections.ArrayList
 $script:succeededVideos = 0
 $script:totalAttempts = 0
 $script:ideaHistory = @()
 $script:seenIdeaKeys = @{}
+$script:slotAttemptCounts = @{}
+$script:slotRenderedRejectCounts = @{}
+$script:batchCooldownCounts = @{ tokyo = 0; synchronization = 0 }
+$script:currentBatchLocationCounts = @{}
 $script:targetLabel = '{0:D3}' -f $TargetVideos
 
 function Write-Step($Message) {
@@ -213,6 +235,76 @@ function Get-IdeaShapeProblem($Title, $Body, $IdeaPlatform) {
         return 'Reddit title contains a word longer than 24 characters, which is unsafe for fixed-width rendering'
     }
     return $null
+}
+
+function Get-IdeaLocationTokens($Title, $Body) {
+    $text = " $Title $Body "
+    $locations = @(
+        'tokyo', 'japan', 'new york', 'los angeles', 'london', 'paris', 'dubai',
+        'berlin', 'singapore', 'seoul', 'beijing', 'shanghai', 'sydney',
+        'toronto', 'chicago', 'miami', 'las vegas', 'san francisco'
+    )
+    $foundLocations = New-Object System.Collections.ArrayList
+    foreach ($location in $locations) {
+        if ($text -match ('(?i)(^|[^a-z])' + [regex]::Escape($location) + '([^a-z]|$)')) {
+            [void]$foundLocations.Add($location)
+        }
+    }
+    return @($foundLocations)
+}
+
+function Test-HasSynchronizationLanguage($Title, $Body) {
+    $text = " $Title $Body "
+    return ($text -match '(?i)(^|[^a-z])(synchroniz(?:e|es|ed|ing|ation)|sync(?:s|ed|ing)?|align(?:s|ed|ing|ment)?|unison|harmoniz(?:e|es|ed|ing)|simultaneous(?:ly)?|identical(?:ly)?|match(?:es|ed|ing)?)([^a-z]|$)')
+}
+
+function Get-ActiveIdeaBans {
+    $bans = New-Object System.Collections.ArrayList
+    if ($script:batchCooldownCounts.tokyo -ge $MaxTokyoIdeas) {
+        [void]$bans.Add('Do not use Tokyo or Japan.')
+    }
+    if ($script:batchCooldownCounts.synchronization -ge $MaxSynchronizationIdeas) {
+        [void]$bans.Add('Do not use synchronization, sync, align, aligned, alignment, unison, harmonize, simultaneous, identical, matching, or citywide coordinated-object premises.')
+    }
+    foreach ($key in @($script:currentBatchLocationCounts.Keys | Sort-Object)) {
+        if ([int]$script:currentBatchLocationCounts[$key] -ge 2) {
+            [void]$bans.Add("Do not use the location '$key' again in this batch.")
+        }
+    }
+    if ($bans.Count -eq 0) { return 'No extra batch cooldown bans are active yet.' }
+    return ($bans -join [Environment]::NewLine)
+}
+
+function Get-IdeaCooldownProblem($Title, $Body) {
+    $locations = @(Get-IdeaLocationTokens $Title $Body)
+    if (($locations -contains 'tokyo' -or $locations -contains 'japan') -and $script:batchCooldownCounts.tokyo -ge $MaxTokyoIdeas) {
+        return "batch cooldown blocked overused location Tokyo/Japan (limit $MaxTokyoIdeas)"
+    }
+    foreach ($location in $locations) {
+        if ($script:currentBatchLocationCounts.ContainsKey($location) -and [int]$script:currentBatchLocationCounts[$location] -ge 2) {
+            return "batch cooldown blocked repeated location '$location' (limit 2)"
+        }
+    }
+    if ((Test-HasSynchronizationLanguage $Title $Body) -and $script:batchCooldownCounts.synchronization -ge $MaxSynchronizationIdeas) {
+        return "batch cooldown blocked overused synchronization/alignment language (limit $MaxSynchronizationIdeas)"
+    }
+    return $null
+}
+
+function Add-IdeaCooldownTerms($Title, $Body) {
+    $locations = @(Get-IdeaLocationTokens $Title $Body)
+    if ($locations -contains 'tokyo' -or $locations -contains 'japan') {
+        $script:batchCooldownCounts.tokyo = [int]$script:batchCooldownCounts.tokyo + 1
+    }
+    foreach ($location in $locations) {
+        if (-not $script:currentBatchLocationCounts.ContainsKey($location)) {
+            $script:currentBatchLocationCounts[$location] = 0
+        }
+        $script:currentBatchLocationCounts[$location] = [int]$script:currentBatchLocationCounts[$location] + 1
+    }
+    if (Test-HasSynchronizationLanguage $Title $Body) {
+        $script:batchCooldownCounts.synchronization = [int]$script:batchCooldownCounts.synchronization + 1
+    }
 }
 
 function Get-RecentIdeaBlock($History) {
@@ -342,6 +434,7 @@ function Invoke-NewBatchIdea($AttemptNumber, $History, [hashtable]$SeenKeys) {
         $lens = $lenses[(($axis * 11 + 5) % $lenses.Count)]
         $setting = $settings[(($axis * 7 + 1) % $settings.Count)]
         $recentBlock = Get-RecentIdeaBlock $History
+        $activeBans = Get-ActiveIdeaBans
         if ($Platform -eq 'x') {
             $shape = @"
 Create one NEW ThreadGens X seed.
@@ -371,6 +464,8 @@ $correction
 Target subject family: $theme
 Creative lens: $lens
 Setting guidance: $setting
+Active batch cooldown bans:
+$activeBans
 
 Diversity mandate:
 - The subject family is the core of this attempt. It can be educational, technical, scientific, weird, factual, speculative, travel-focused, animal-focused, artistic, or personal. Do NOT force every seed into interpersonal conflict.
@@ -421,6 +516,12 @@ $recentBlock
             Write-Host "Idea generation try $ideaTry/$IdeaRetries failed render-fit guard: $shapeProblem; regenerating before video attempt." -ForegroundColor Yellow
             continue
         }
+        $cooldownProblem = Get-IdeaCooldownProblem $title $body
+        if (-not [string]::IsNullOrWhiteSpace([string]$cooldownProblem)) {
+            $shapeFeedback = [string]$cooldownProblem
+            Write-Host "Idea generation try $ideaTry/$IdeaRetries failed batch cooldown guard: $cooldownProblem; regenerating before video attempt." -ForegroundColor Yellow
+            continue
+        }
         $shapeFeedback = ''
         $key = Get-IdeaKey $title $body $Platform
         if ($SeenKeys.ContainsKey($key)) {
@@ -435,6 +536,7 @@ $recentBlock
         }
         Add-IdeaHistoryEvent $entry
         $SeenKeys[$key] = $true
+        Add-IdeaCooldownTerms $title $body
         return $entry
     }
     throw "Could not generate a unique render-fit batch idea after $IdeaRetries tries. Last size problem: $shapeFeedback"
@@ -627,6 +729,92 @@ function Add-FailureRecord($AttemptLabel, $SlotLabel, $Title, $Reason) {
     [void]$script:failedAttempts.Add([pscustomobject]@{ Attempt = $AttemptLabel; Slot = $SlotLabel; Title = $Title; Reason = $Reason })
 }
 
+function Get-WorkerFailureDetail($LogPath) {
+    if ([string]::IsNullOrWhiteSpace([string]$LogPath) -or -not (Test-Path $LogPath)) { return '' }
+    try {
+        $patterns = @(
+            'ThreadGens P2 failed:',
+            'P2 pre-publish audit BLOCKED',
+            '\[worker\] launcher failure:',
+            'Ollama idea response',
+            'render-fit guard',
+            'NativeCommandError',
+            'Exception',
+            'ERROR',
+            'failed'
+        )
+        foreach ($pattern in $patterns) {
+            $match = Select-String -Path $LogPath -Pattern $pattern -CaseSensitive:$false | Select-Object -Last 1
+            if ($null -ne $match) {
+                return (([string]$match.Line) -replace '\s+', ' ').Trim()
+            }
+        }
+    } catch { }
+    return ''
+}
+
+function Add-BatchSummaryRecord($SlotLabel, $AttemptLabel, $Stage, $Result, $Title, $Reason, $Format = '', $Output = '') {
+    $folder = Split-Path -Parent $BatchSummaryPath
+    if ($folder) { New-Item -ItemType Directory -Force -Path $folder | Out-Null }
+    if (-not (Test-Path $BatchSummaryPath)) {
+        [System.IO.File]::AppendAllText(
+            $BatchSummaryPath,
+            "created,slot,attempt,stage,result,title,reason,format,output" + [Environment]::NewLine,
+            $Utf8NoBom)
+    }
+    $row = [pscustomobject]@{
+        created = (Get-Date).ToUniversalTime().ToString('o')
+        slot = [string]$SlotLabel
+        attempt = [string]$AttemptLabel
+        stage = [string]$Stage
+        result = [string]$Result
+        title = [string]$Title
+        reason = [string]$Reason
+        format = [string]$Format
+        output = [string]$Output
+    }
+    $csv = $row | ConvertTo-Csv -NoTypeInformation
+    [System.IO.File]::AppendAllText($BatchSummaryPath, ([string]$csv[1]) + [Environment]::NewLine, $Utf8NoBom)
+}
+
+function Get-SlotAttemptCount([int]$Slot) {
+    $key = [string]$Slot
+    if (-not $script:slotAttemptCounts.ContainsKey($key)) { return 0 }
+    return [int]$script:slotAttemptCounts[$key]
+}
+
+function Add-SlotAttempt([int]$Slot) {
+    $key = [string]$Slot
+    if (-not $script:slotAttemptCounts.ContainsKey($key)) { $script:slotAttemptCounts[$key] = 0 }
+    $script:slotAttemptCounts[$key] = [int]$script:slotAttemptCounts[$key] + 1
+    return [int]$script:slotAttemptCounts[$key]
+}
+
+function Get-SlotRenderedRejectCount([int]$Slot) {
+    $key = [string]$Slot
+    if (-not $script:slotRenderedRejectCounts.ContainsKey($key)) { return 0 }
+    return [int]$script:slotRenderedRejectCounts[$key]
+}
+
+function Add-SlotRenderedReject([int]$Slot) {
+    $key = [string]$Slot
+    if (-not $script:slotRenderedRejectCounts.ContainsKey($key)) { $script:slotRenderedRejectCounts[$key] = 0 }
+    $script:slotRenderedRejectCounts[$key] = [int]$script:slotRenderedRejectCounts[$key] + 1
+    return [int]$script:slotRenderedRejectCounts[$key]
+}
+
+function Test-SlotCanRetry([int]$Slot) {
+    return ((Get-SlotAttemptCount $Slot) -lt $MaxSlotAttempts -and
+        (Get-SlotRenderedRejectCount $Slot) -lt $MaxSlotRenderedRejects)
+}
+
+function Skip-Slot($Slot, $SlotLabel, $Reason) {
+    if ($script:completedSlots.ContainsKey([string]$Slot)) { return }
+    [void]$script:skippedSlots.Add([pscustomobject]@{ Slot = $SlotLabel; Reason = $Reason })
+    Add-BatchSummaryRecord $SlotLabel '' 'slot' 'skipped' '<slot skipped>' $Reason
+    Write-Host "Slot $SlotLabel skipped: $Reason" -ForegroundColor Red
+}
+
 function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
     $slotLabel = '{0:D3}' -f $Slot
     $title = [string]$Idea.title
@@ -649,7 +837,7 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
     $jobFile = Join-Path $jobRoot 'worker_job.json'
     $palette = $Palettes[(($Slot - 1) % $Palettes.Count)]
     $selectedFormat = Select-BatchFormat $FormatSelection $Format $FormatPool $Slot ([int]$AttemptLabel) $FormatOffset
-    $effectiveSeriesId = Get-BatchSeriesId $VoiceSelection $SeriesId $Platform $Slot
+    $effectiveSeriesId = Get-BatchSeriesId $VoiceSelection $SeriesId $Platform $Slot ([int]$AttemptLabel)
     New-Item -ItemType Directory -Force -Path $imageDir, $audioDir, $videoDir, $scriptDir, $historyDir | Out-Null
     if ($GenerateOpImage) { New-Item -ItemType Directory -Force -Path $opImageDir, $opImageCacheDir | Out-Null }
     New-JobHistorySnapshot $jobHistoryPath
@@ -732,7 +920,13 @@ function Complete-Worker($Job) {
     $finalVideo = Join-Path $Job.VideoDir $Job.FinalVideoName
     $provenance = "$finalVideo.provenance.json"
     $reason = ''
-    if ($exitCode -ne 0) { $reason = "Video attempt $($Job.AttemptLabel) failed with exit code $exitCode. See $($Job.LogPath)" }
+    if ($exitCode -ne 0) {
+        $failureDetail = Get-WorkerFailureDetail $Job.LogPath
+        if ([string]::IsNullOrWhiteSpace($failureDetail)) {
+            $failureDetail = "See $($Job.LogPath)"
+        }
+        $reason = "Video attempt $($Job.AttemptLabel) failed with exit code ${exitCode}: $failureDetail"
+    }
     elseif (-not (Test-Path $finalVideo)) { $reason = "Video attempt $($Job.AttemptLabel) finished but final video was not found: $finalVideo" }
     elseif (-not (Test-Path $provenance)) { $reason = "Video attempt $($Job.AttemptLabel) finished but provenance sidecar was not found: $provenance" }
 
@@ -747,23 +941,33 @@ function Complete-Worker($Job) {
             attempt = [int]$Job.AttemptLabel; approvedSlot = $Job.Slot; palette = $Job.Palette; output = $copyTo
             format = $Job.Format
         })
+        Add-BatchSummaryRecord $Job.SlotLabel $Job.AttemptLabel 'render' 'approved' $Job.Title '' $Job.Format $copyTo
         Write-Host "Approved slot $($Job.SlotLabel). Progress $script:succeededVideos/$TargetVideos. Saved: $copyTo" -ForegroundColor Green
     } else {
+        $renderRejects = Add-SlotRenderedReject ([int]$Job.Slot)
         Add-IdeaHistoryEvent ([pscustomobject]@{
             event = 'outcome'; id = $Job.Idea.id; created = (Get-Date).ToUniversalTime().ToString('o'); status = 'rejected'
             attempt = [int]$Job.AttemptLabel; approvedSlot = $Job.Slot; palette = $Job.Palette; reason = $reason
             format = $Job.Format
         })
         Add-FailureRecord $Job.AttemptLabel $Job.SlotLabel $Job.Title $reason
+        Add-BatchSummaryRecord $Job.SlotLabel $Job.AttemptLabel 'render' 'rejected' $Job.Title $reason $Job.Format
         [void]$script:reservedFinalNames.Remove($Job.FinalVideoName.ToLowerInvariant())
         [void]$script:pendingReservations.Remove($Job.AttemptLabel)
-        [void]$script:pendingSlots.Insert(0, [int]$Job.Slot)
+        if (Test-SlotCanRetry ([int]$Job.Slot)) {
+            [void]$script:pendingSlots.Insert(0, [int]$Job.Slot)
+        } else {
+            $skipReason = "retry cap reached after $(Get-SlotAttemptCount ([int]$Job.Slot)) total attempts and $renderRejects rendered rejects"
+            Skip-Slot ([int]$Job.Slot) $Job.SlotLabel $skipReason
+        }
         Write-Host "Attempt $($Job.AttemptLabel) did not fill slot $($Job.SlotLabel): $reason" -ForegroundColor Red
         if ($StopOnError) {
             foreach ($other in @($script:activeJobs)) { if ($other -ne $Job) { Stop-ProcessTree $other.Process } }
             throw $reason
         }
-        Write-Host "Replacement queued; approved progress remains $script:succeededVideos/$TargetVideos." -ForegroundColor Yellow
+        if (Test-SlotCanRetry ([int]$Job.Slot)) {
+            Write-Host "Replacement queued; approved progress remains $script:succeededVideos/$TargetVideos." -ForegroundColor Yellow
+        }
     }
     [void]$script:pendingReservations.Remove($Job.AttemptLabel)
     [void]$script:activeJobs.Remove($Job)
@@ -775,6 +979,19 @@ function Run-SelfTest {
     if ($null -ne $compact) { throw "Compact Reddit seed unexpectedly failed: $compact" }
     $oversized = Get-IdeaShapeProblem "Why do my neighbor's vintage synthesizer always produce a faint melody in perfect harmony with our building's fire alarm?" 'This body is intentionally short enough that only the title guard should fail.' 'reddit'
     if ($null -eq $oversized) { throw 'Render-fit self-test failed to reject the known oversized synthesizer title.' }
+    $oldCooldownCounts = $script:batchCooldownCounts
+    $oldLocationCounts = $script:currentBatchLocationCounts
+    try {
+        $script:batchCooldownCounts = @{ tokyo = $MaxTokyoIdeas; synchronization = $MaxSynchronizationIdeas }
+        $script:currentBatchLocationCounts = @{ tokyo = 2 }
+        $tokyoBlocked = Get-IdeaCooldownProblem 'Why do Tokyo signs glow together?' 'People keep noticing matching signs in Tokyo tonight.'
+        if ($tokyoBlocked -notmatch 'Tokyo/Japan') { throw 'Cooldown self-test failed to block overused Tokyo/Japan ideas.' }
+        $syncBlocked = Get-IdeaCooldownProblem 'Why do factory lights synchronize?' 'Every indicator light flashes in unison across the floor.'
+        if ($syncBlocked -notmatch 'synchronization') { throw 'Cooldown self-test failed to block overused synchronization language.' }
+    } finally {
+        $script:batchCooldownCounts = $oldCooldownCounts
+        $script:currentBatchLocationCounts = $oldLocationCounts
+    }
     $roundTrip = 'history reservation test — exact text'
     if ((ConvertFrom-Base64Url (ConvertTo-Base64Url $roundTrip)) -ne $roundTrip) { throw 'Base64url history helper round-trip failed.' }
 
@@ -851,6 +1068,9 @@ Write-Host "P1 voice selection: $VoiceSelection from [$VoiceSeries], delivery=$T
 Write-Host 'Final MP4 names: title-based with no numeric prefix'
 Write-Host 'Rejected workers are replaced until every target slot is filled' -ForegroundColor Green
 if ($MaxAttempts -gt 0) { Write-Host "Attempt cap: $MaxAttempts total ideas" } else { Write-Host 'Attempt cap: none' }
+Write-Host "Per-slot attempt cap: $MaxSlotAttempts total seed/render launches"
+Write-Host "Per-slot rendered reject cap: $MaxSlotRenderedRejects"
+Write-Host "Batch cooldowns: Tokyo/Japan max $MaxTokyoIdeas; synchronization/alignment language max $MaxSynchronizationIdeas"
 if ($GenerateOpImage) { Write-Host 'OP image generation: enabled; worker count forced to 1 for GPU safety' -ForegroundColor Yellow } else { Write-Host 'OP image generation: disabled' }
 
 Write-Step 'Building Java files'
@@ -891,9 +1111,15 @@ try {
             if ($MaxAttempts -gt 0 -and $script:totalAttempts -ge $MaxAttempts) { break }
             $slot = [int]$script:pendingSlots[0]
             $script:pendingSlots.RemoveAt(0)
-            $script:totalAttempts++
-            $attemptLabel = '{0:D4}' -f $script:totalAttempts
             $slotLabel = '{0:D3}' -f $slot
+            if (-not (Test-SlotCanRetry $slot)) {
+                $skipReason = "retry cap reached before launch after $(Get-SlotAttemptCount $slot) total attempts and $(Get-SlotRenderedRejectCount $slot) rendered rejects"
+                Skip-Slot $slot $slotLabel $skipReason
+                continue
+            }
+            $script:totalAttempts++
+            [void](Add-SlotAttempt $slot)
+            $attemptLabel = '{0:D4}' -f $script:totalAttempts
             $ideaResult = Invoke-NewBatchIdeaSafe $script:totalAttempts $script:ideaHistory $script:seenIdeaKeys
             if (-not $ideaResult.succeeded) {
                 $reason = [string]$ideaResult.reason
@@ -902,10 +1128,18 @@ try {
                     attempt = $script:totalAttempts; approvedSlot = $slot; retries = $IdeaRetries; reason = $reason
                 })
                 Add-FailureRecord $attemptLabel $slotLabel '<idea generation>' $reason
-                [void]$script:pendingSlots.Insert(0, $slot)
+                Add-BatchSummaryRecord $slotLabel $attemptLabel 'seed' 'rejected' '<idea generation>' $reason
+                if (Test-SlotCanRetry $slot) {
+                    [void]$script:pendingSlots.Insert(0, $slot)
+                } else {
+                    $skipReason = "retry cap reached after $(Get-SlotAttemptCount $slot) seed/render attempts"
+                    Skip-Slot $slot $slotLabel $skipReason
+                }
                 Write-Host "Attempt $attemptLabel exhausted all $IdeaRetries seed retries for slot ${slotLabel}: $reason" -ForegroundColor Red
                 if ($StopOnError) { throw "Idea generation failed after $IdeaRetries retries: $reason" }
-                Write-Host 'Starting a fresh seed-generation cycle; active render workers continue.' -ForegroundColor Yellow
+                if (Test-SlotCanRetry $slot) {
+                    Write-Host 'Starting a fresh seed-generation cycle; active render workers continue.' -ForegroundColor Yellow
+                }
                 continue
             }
             $idea = $ideaResult.idea
@@ -946,12 +1180,14 @@ Write-Step 'Batch complete'
 Write-Host "Approved final videos: $script:succeededVideos/$TargetVideos" -ForegroundColor Green
 Write-Host "Total ideas attempted:  $script:totalAttempts"
 Write-Host "Rejected attempts:      $($script:failedAttempts.Count)"
+Write-Host "Skipped slots:          $($script:skippedSlots.Count)"
 Write-Host "Maximum video workers:  $Workers"
 Write-Host 'Ollama request workers: 1 (serialized)'
 Write-Host "Persistent idea history: $IdeaHistoryPath"
 Write-Host "Persistent generation history: $GlobalGenerationHistoryPath"
 Write-Host "All attempt folders:     $OutputRoot"
 Write-Host "Final MP4 copies:        $FinalDir" -ForegroundColor Green
+Write-Host "Batch summary CSV:      $BatchSummaryPath"
 
 if ($script:failedAttempts.Count -gt 0) {
     $failureReport = Join-Path $OutputRoot 'rejected_attempts.txt'

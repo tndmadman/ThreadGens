@@ -70,11 +70,17 @@ function Get-BatchSeriesId(
     [string]$VoiceSelection,
     [string]$ConfiguredSeriesId,
     [string]$Platform,
-    [int]$Slot
+    [int]$Slot,
+    [int]$Attempt = 0
 ) {
     if (-not [string]::IsNullOrWhiteSpace($ConfiguredSeriesId)) { return $ConfiguredSeriesId.Trim() }
     if ($VoiceSelection -ne 'series') { return '' }
-    return ('threadgens-{0}-slot-{1:D4}' -f $Platform.ToLowerInvariant(), [Math]::Max(1, $Slot))
+    $safeSlot = [Math]::Max(1, $Slot)
+    $safeAttempt = [Math]::Max(0, $Attempt)
+    if ($safeAttempt -gt 0) {
+        return ('threadgens-{0}-slot-{1:D4}-attempt-{2:D4}' -f $Platform.ToLowerInvariant(), $safeSlot, $safeAttempt)
+    }
+    return ('threadgens-{0}-slot-{1:D4}' -f $Platform.ToLowerInvariant(), $safeSlot)
 }
 
 function Test-BatchFormatRotation {
@@ -94,6 +100,9 @@ function Test-BatchFormatRotation {
     }
     if ((Get-BatchSeriesId 'series' '' 'reddit' 1) -eq (Get-BatchSeriesId 'series' '' 'reddit' 2)) {
         throw 'Automatic per-video voice series IDs did not change between target slots.'
+    }
+    if ((Get-BatchSeriesId 'series' '' 'reddit' 1 1) -eq (Get-BatchSeriesId 'series' '' 'reddit' 1 2)) {
+        throw 'Automatic per-video voice series IDs did not change between replacement attempts.'
     }
     if ((Get-BatchSeriesId 'series' 'named-series' 'reddit' 2) -ne 'named-series') {
         throw 'An explicit voice series ID must remain stable across target slots.'
