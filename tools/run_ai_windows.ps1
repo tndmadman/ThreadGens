@@ -6,9 +6,9 @@ $Model = 'llama3.1:8b'
 $Count = 10
 $Platform = 'reddit'
 $Format = 'auto'
-$Tts = 'kokoro'
-$Voice = 'af_heart'
-$VoiceSeries = 'af_heart,af_bella,af_nicole,bf_emma'
+$Tts = 'qwen3'
+$Voice = 'Ryan'
+$VoiceSeries = 'Ryan,Aiden'
 $VoiceSelection = 'series'
 $SeriesId = ''
 $TtsDelivery = 'natural'
@@ -16,10 +16,11 @@ $Captions = 'word'
 $VideoFlags = @()
 $ImageFlags = @()
 $KeepOllamaFlags = @('--keep-ollama-loaded')
-$KokoroPython = Join-Path $RepoRoot '.venv-kokoro\Scripts\python.exe'
+$QwenPython = Join-Path $RepoRoot '.venv-qwen3-tts\Scripts\python.exe'
 
-$env:THREADGENS_KOKORO_VERBOSE = '0'
-$env:THREADGENS_REQUIRE_EXACT_KOKORO_TIMING = '1'
+$env:THREADGENS_QWEN3_VERBOSE = '0'
+$env:THREADGENS_QWEN3_MODEL = 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice'
+$env:THREADGENS_QWEN3_ATTN = 'sdpa'
 $env:THREADGENS_REQUIRE_SMOOTH_REVEAL = '1'
 $env:PYTHONWARNINGS = 'ignore'
 $env:HF_HUB_DISABLE_PROGRESS_BARS = '1'
@@ -27,7 +28,7 @@ $env:TOKENIZERS_PARALLELISM = 'false'
 
 Write-Host ''
 Write-Host 'ThreadGens local AI runner'
-Write-Host 'Pipeline: P0 content originality + Kokoro neural narration + exact narration-timed reveal + provenance'
+Write-Host 'Pipeline: P0 content originality + Qwen3-TTS 1.7B neural narration + narration-timed reveal + provenance'
 Write-Host ''
 
 Write-Host 'Choose platform/thread style:'
@@ -41,15 +42,15 @@ $manualRunNumber = if (Test-Path $publishHistoryPath) {
 } else { 1 }
 $SeriesId = 'threadgens-{0}-manual-{1:D4}' -f $Platform, $manualRunNumber
 
-if (-not (Test-Path $KokoroPython)) {
-    throw "Kokoro Python was not found: $KokoroPython. Run setup_windows.bat first. ThreadGens production no longer falls back to Piper."
+if (-not (Test-Path $QwenPython)) {
+    throw "Qwen3-TTS Python was not found: $QwenPython. Run setup_windows.bat first."
 }
-$TtsCmd = $KokoroPython
+$TtsCmd = $QwenPython
 
 Write-Host ''
-Write-Host 'Narration engine: Kokoro neural TTS only (Piper fallback disabled).'
-Write-Host 'High-end Kokoro voices: af_heart af_bella af_nicole bf_emma'
-$voiceInput = Read-Host 'Press Enter to rotate all four, or type one voice to use only that voice'
+Write-Host 'Narration engine: Qwen3-TTS 1.7B CustomVoice.'
+Write-Host 'Recommended English voices: Ryan Aiden'
+$voiceInput = Read-Host 'Press Enter to rotate Ryan/Aiden, or type one Qwen speaker to use only that voice'
 if (-not [string]::IsNullOrWhiteSpace($voiceInput)) {
     $Voice = $voiceInput.Trim()
     $VoiceSeries = $Voice
@@ -143,12 +144,12 @@ Write-Host "Format:       $Format"
 Write-Host "Reply style:  $postTitle"
 Write-Host "Original:     $topic"
 Write-Host "Count:        $Count"
-Write-Host "TTS:          Kokoro only"
+Write-Host "TTS:          Qwen3-TTS 1.7B CustomVoice"
 Write-Host "Voice plan:   $VoiceSelection from [$VoiceSeries]"
 Write-Host "Delivery:     $TtsDelivery"
 Write-Host "Captions:     $Captions"
 Write-Host "Cmd:          $TtsCmd"
-Write-Host "Reveal:       exact Kokoro timing required"
+Write-Host "Reveal:       fitted to the generated Qwen narration duration"
 Write-Host "OP image:     $($ImageFlags -join ' ')"
 Write-Host "Video:        $($VideoFlags -join ' ')"
 Write-Host "Ollama:       $(if ($KeepOllamaFlags.Count -gt 0) { 'keep loaded' } else { 'unload after text' })"
