@@ -20,9 +20,9 @@ param(
     [string]$FormatSelection = 'per-slot',
     [string]$FormatSeries = 'thread_story,confession,debate,best_answers,escalating_conversation',
     [string]$FormatVariant = 'auto',
-    [string]$IdeaHistoryFile = 'data\\batch_idea_history.jsonl',
-    [string]$GenerationHistoryFile = 'data\\generation_history.jsonl',
-    [string]$PublishHistoryFile = 'data\\publish_history.jsonl',
+    [string]$IdeaHistoryFile = 'data\batch_idea_history.jsonl',
+    [string]$GenerationHistoryFile = 'data\generation_history.jsonl',
+    [string]$PublishHistoryFile = 'data\publish_history.jsonl',
     [int]$IdeaHistoryLimit = 80,
     [int]$IdeaRetries = 8,
     [int]$MaxAttempts = 0,
@@ -68,10 +68,10 @@ if ($GenerateOpImage -and $Workers -gt 1) {
 }
 
 $TtsEngine = 'kokoro'
-$KokoroPython = Join-Path $RepoRoot '.venv-kokoro\\Scripts\\python.exe'
-$WorkerScript = Join-Path $RepoRoot 'tools\\batch_parallel_worker.ps1'
-$ProxyScript = Join-Path $RepoRoot 'tools\\ollama_serial_proxy.py'
-$OutputRoot = Join-Path $RepoRoot ('output\\batch_videos\\' + $Platform + '_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+$KokoroPython = Join-Path $RepoRoot '.venv-kokoro\Scripts\python.exe'
+$WorkerScript = Join-Path $RepoRoot 'tools\batch_parallel_worker.ps1'
+$ProxyScript = Join-Path $RepoRoot 'tools\ollama_serial_proxy.py'
+$OutputRoot = Join-Path $RepoRoot ('output\batch_videos\' + $Platform + '_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
 $FinalDir = Join-Path $OutputRoot 'final_videos'
 $IdeaHistoryPath = if ([System.IO.Path]::IsPathRooted($IdeaHistoryFile)) { $IdeaHistoryFile } else { Join-Path $RepoRoot $IdeaHistoryFile }
 $GlobalGenerationHistoryPath = if ([System.IO.Path]::IsPathRooted($GenerationHistoryFile)) { $GenerationHistoryFile } else { Join-Path $RepoRoot $GenerationHistoryFile }
@@ -187,14 +187,14 @@ function ConvertFrom-IdeaResponse($Text) {
 }
 
 function Get-IdeaWordCount($Value) {
-    $text = (([string]$Value) -replace '\\s+', ' ').Trim()
+    $text = (([string]$Value) -replace '\s+', ' ').Trim()
     if ([string]::IsNullOrWhiteSpace($text)) { return 0 }
-    return @($text -split '\\s+').Count
+    return @($text -split '\s+').Count
 }
 
 function Get-IdeaShapeProblem($Title, $Body, $IdeaPlatform) {
-    $safeTitle = (([string]$Title) -replace '\\s+', ' ').Trim()
-    $safeBody = (([string]$Body) -replace '\\s+', ' ').Trim()
+    $safeTitle = (([string]$Title) -replace '\s+', ' ').Trim()
+    $safeBody = (([string]$Body) -replace '\s+', ' ').Trim()
     $platformName = (([string]$IdeaPlatform).ToLowerInvariant()).Trim()
     if ([string]::IsNullOrWhiteSpace($safeTitle) -or [string]::IsNullOrWhiteSpace($safeBody) -or $safeTitle.Length -lt 3 -or $safeBody.Length -lt 12) {
         return 'title/body is empty or too short'
@@ -208,7 +208,7 @@ function Get-IdeaShapeProblem($Title, $Body, $IdeaPlatform) {
     }
     if ($safeTitle.Length -gt 64 -or $titleWords -gt 11) { return "Reddit title is too long ($($safeTitle.Length) chars/$titleWords words; max 64 chars/11 words)" }
     if ($safeBody.Length -gt 300 -or $bodyWords -gt 52) { return "Reddit body is too long ($($safeBody.Length) chars/$bodyWords words; max 300 chars/52 words)" }
-    $longestTitleWord = @($safeTitle -split '\\s+' | Sort-Object Length -Descending | Select-Object -First 1)[0]
+    $longestTitleWord = @($safeTitle -split '\s+' | Sort-Object Length -Descending | Select-Object -First 1)[0]
     if ($null -ne $longestTitleWord -and ([string]$longestTitleWord).Length -gt 24) {
         return 'Reddit title contains a word longer than 24 characters, which is unsafe for fixed-width rendering'
     }
@@ -220,8 +220,8 @@ function Get-RecentIdeaBlock($History) {
     $start = [Math]::Max(0, $History.Count - $IdeaHistoryLimit)
     $lines = @()
     for ($i = $start; $i -lt $History.Count; $i++) {
-        $title = (([string]$History[$i].title) -replace '\\s+', ' ').Trim()
-        $body = (([string]$History[$i].body) -replace '\\s+', ' ').Trim()
+        $title = (([string]$History[$i].title) -replace '\s+', ' ').Trim()
+        $body = (([string]$History[$i].body) -replace '\s+', ' ').Trim()
         if ($body.Length -gt 180) { $body = $body.Substring(0, 177) + '...' }
         $lines += "- $title :: $body"
     }
@@ -413,8 +413,8 @@ $recentBlock
             Write-Host "Idea generation try $ideaTry/$IdeaRetries failed: $($_.Exception.Message)" -ForegroundColor Yellow
             continue
         }
-        $title = (([string]$idea.title) -replace '\\s+', ' ').Trim()
-        $body = (([string]$idea.body) -replace '\\s+', ' ').Trim()
+        $title = (([string]$idea.title) -replace '\s+', ' ').Trim()
+        $body = (([string]$idea.body) -replace '\s+', ' ').Trim()
         $shapeProblem = Get-IdeaShapeProblem $title $body $Platform
         if (-not [string]::IsNullOrWhiteSpace([string]$shapeProblem)) {
             $shapeFeedback = [string]$shapeProblem
@@ -586,8 +586,8 @@ function Update-WorkerGenerationState($Job) {
     $formatMarker = $null
     $variantMarker = $null
     try {
-        $formatMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format:\\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
-        $variantMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format variant:\\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
+        $formatMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format:\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
+        $variantMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format variant:\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
     } catch { }
     if ($null -eq $formatMarker -or $null -eq $variantMarker) { return }
     try { $scriptText = (Get-Content -Raw -Path $Job.ScriptOut -Encoding UTF8).Trim() } catch { return }
@@ -656,7 +656,7 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
 
     $javaArgs = @(
         '-cp', 'out', 'redditTxtToImg.OpImageVideoSafeRunner',
-        'data\\comments.txt', $imageDir,
+        'data\comments.txt', $imageDir,
         '--platform', $Platform,
         '--auto',
         '--post-title', $title,
@@ -790,7 +790,7 @@ function Run-SelfTest {
                 Format = 'thread_story'; Variant = 'witness_chain'
             }
         }
-        $snapshot = Join-Path $temp 'job\\history.jsonl'
+        $snapshot = Join-Path $temp 'job\history.jsonl'
         New-JobHistorySnapshot $snapshot
         $rows = @(Get-Content $snapshot -Encoding UTF8)
         if ($rows.Count -ne 1 -or $rows[0] -notmatch '"hash":"pending"') { throw 'Pending novelty reservation was not written to the worker history snapshot.' }
@@ -855,8 +855,8 @@ if ($GenerateOpImage) { Write-Host 'OP image generation: enabled; worker count f
 
 Write-Step 'Building Java files'
 New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot 'out') | Out-Null
-$javaFiles = Get-ChildItem -Path (Join-Path $RepoRoot 'src\\redditTxtToImg') -Filter '*.java' | ForEach-Object { $_.FullName }
-if (-not $javaFiles -or $javaFiles.Count -eq 0) { throw 'No Java files found in src\\redditTxtToImg.' }
+$javaFiles = Get-ChildItem -Path (Join-Path $RepoRoot 'src\redditTxtToImg') -Filter '*.java' | ForEach-Object { $_.FullName }
+if (-not $javaFiles -or $javaFiles.Count -eq 0) { throw 'No Java files found in src\redditTxtToImg.' }
 & javac -d (Join-Path $RepoRoot 'out') $javaFiles
 if ($LASTEXITCODE -ne 0) { throw "Java build failed with exit code $LASTEXITCODE." }
 
