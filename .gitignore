@@ -7,6 +7,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .venv-kokoro/
+.venv-qwen3-tts/
 data/generation_history.jsonl
 data/identity_history.jsonl
 data/identity_history.jsonl.lock

@@ -90,11 +90,14 @@ final class VoicePlan {
             Delivery delivery,
             int timeoutSeconds
     ) {
+        String effectiveEngine = engine == null ? "none" : engine.trim().toLowerCase(Locale.ROOT);
         this.selection = Selection.resolve(selection);
-        this.voices = resolveVoices(engine, primaryVoice, voiceSeries, voiceDirectory, this.selection);
+        this.voices = resolveVoices(effectiveEngine, primaryVoice, voiceSeries, voiceDirectory, this.selection);
         String key = seriesKey == null || seriesKey.isBlank() ? "threadgens-default-series" : seriesKey.trim();
         this.seriesVoiceIndex = Math.floorMod(key.hashCode(), voices.size());
-        this.generator = new VoiceGenerator(engine, command, voices.get(0), timeoutSeconds, delivery);
+        this.generator = "qwen3".equals(effectiveEngine) || "qwen3-tts".equals(effectiveEngine)
+                ? new Qwen3VoiceGenerator(command, voices.get(0), timeoutSeconds, delivery)
+                : new VoiceGenerator(effectiveEngine, command, voices.get(0), timeoutSeconds, delivery);
     }
 
     boolean isEnabled() {
@@ -143,15 +146,47 @@ final class VoicePlan {
             rawVoices.add(primaryVoice.toString().trim());
         }
         if (rawVoices.isEmpty()) {
-            rawVoices.add("kokoro".equalsIgnoreCase(engine) ? "af_heart" : "en_US-lessac-medium");
+            if ("kokoro".equalsIgnoreCase(engine)) {
+                rawVoices.add("af_heart");
+            } else if (isQwenEngine(engine)) {
+                rawVoices.add("Ryan");
+            } else {
+                rawVoices.add("en_US-lessac-medium");
+            }
         }
 
         List<Path> result = new ArrayList<>();
         for (String value : rawVoices) {
-            result.add("kokoro".equalsIgnoreCase(engine)
-                    ? Path.of(value)
-                    : VoiceCatalog.resolveVoice(value, voiceDirectory));
+            if ("kokoro".equalsIgnoreCase(engine)) {
+                result.add(Path.of(value));
+            } else if (isQwenEngine(engine)) {
+                result.add(Path.of(normalizeQwenVoice(value)));
+            } else {
+                result.add(VoiceCatalog.resolveVoice(value, voiceDirectory));
+            }
         }
         return List.copyOf(result);
+    }
+
+    private static boolean isQwenEngine(String engine) {
+        return "qwen3".equalsIgnoreCase(engine) || "qwen3-tts".equalsIgnoreCase(engine);
+    }
+
+    private static String normalizeQwenVoice(String value) {
+        String safe = value == null ? "" : value.trim();
+        if (safe.isBlank()) {
+            return "Ryan";
+        }
+        String fileName = Path.of(safe).getFileName().toString();
+        if (fileName.toLowerCase(Locale.ROOT).endsWith(".onnx")) {
+            fileName = fileName.substring(0, fileName.length() - ".onnx".length());
+        }
+        // Existing CLI parsing resolves non-Kokoro --voice values as Piper paths.
+        // If the inherited default Piper voice leaks through, use Qwen's default
+        // English voice instead of sending an invalid speaker name to the model.
+        if ("en_us-lessac-medium".equalsIgnoreCase(fileName)) {
+            return "Ryan";
+        }
+        return fileName;
     }
 }
