@@ -11,7 +11,7 @@ Thumbs.db
 data/generation_history.jsonl
 data/identity_history.jsonl
 data/identity_history.jsonl.lock
-data/identity_history_history.jsonl.tmp
+data/identity_history.jsonl.tmp
 data/publish_history.jsonl
 data/publish_history.jsonl.lock
 data/batch_idea_history.jsonl
