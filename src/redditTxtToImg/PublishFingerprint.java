@@ -364,11 +364,12 @@ final class PublishFingerprint {
             throw new IOException("Could not decode image for identity fingerprint: " + imagePath);
         }
         boolean x = "x".equalsIgnoreCase(platform) || "twitter".equalsIgnoreCase(platform);
-        double yTop = x ? 0.105 : 0.145;
-        double yBottom = x ? 0.225 : 0.245;
-        BufferedImage avatar = cropNormalized(source, 0.07, yTop, 0.27, yBottom);
-        BufferedImage header = cropNormalized(source, 0.07, yTop, 0.72, yBottom);
-        return List.of(dHash(avatar), dHash(header));
+        double left = x ? 0.092 : 0.070;
+        double right = x ? 0.195 : 0.180;
+        double top = x ? 0.118 : 0.145;
+        double bottom = x ? 0.205 : 0.245;
+        BufferedImage avatar = cropNormalized(source, left, top, right, bottom);
+        return List.of(dHash(avatar));
     }
 
     private static BufferedImage cropNormalized(

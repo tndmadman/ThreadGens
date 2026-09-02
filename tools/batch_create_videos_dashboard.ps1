@@ -30,6 +30,8 @@ param(
     [int]$MaxSlotRenderedRejects = 3,
     [int]$MaxTokyoIdeas = 2,
     [int]$MaxSynchronizationIdeas = 3,
+    [int]$IdentityHistoryLimit = 2000,
+    [string]$PacingProfiles = 'rapid_beats,balanced,slow_reveal,qa_cadence,three_act,staccato',
     [switch]$KeepOllamaLoaded,
     [switch]$GenerateOpImage,
     [switch]$StopOnError,
@@ -615,7 +617,9 @@ function Build-EngineArgumentLine {
         '-MaxSlotAttempts', [string]$MaxSlotAttempts,
         '-MaxSlotRenderedRejects', [string]$MaxSlotRenderedRejects,
         '-MaxTokyoIdeas', [string]$MaxTokyoIdeas,
-        '-MaxSynchronizationIdeas', [string]$MaxSynchronizationIdeas)) { [void]$tokens.Add($token) }
+        '-MaxSynchronizationIdeas', [string]$MaxSynchronizationIdeas,
+        '-IdentityHistoryLimit', [string]$IdentityHistoryLimit,
+        '-PacingProfiles', $PacingProfiles)) { [void]$tokens.Add($token) }
     if (-not [string]::IsNullOrWhiteSpace($SeriesId)) { [void]$tokens.Add('-SeriesId'); [void]$tokens.Add($SeriesId) }
     if ($KeepOllamaLoaded) { [void]$tokens.Add('-KeepOllamaLoaded') }
     if ($GenerateOpImage) { [void]$tokens.Add('-GenerateOpImage') }
@@ -666,7 +670,7 @@ $argumentLine = Build-EngineArgumentLine
 
 Append-DebugLine 'ThreadGens live dashboard wrapper'
 Append-DebugLine ("Started: " + $script:runStarted.ToString('o'))
-Append-DebugLine ("Dashboard settings: target=$TargetVideos count=$Count workers=$Workers platform=$Platform format=$Format formatSelection=$FormatSelection formatSeries=$FormatSeries formatVariant=$FormatVariant model=$Model voice=$Voice voiceSelection=$VoiceSelection captions=$Captions encoder=$env:THREADGENS_VIDEO_ENCODER")
+Append-DebugLine ("Dashboard settings: target=$TargetVideos count=$Count workers=$Workers platform=$Platform format=$Format formatSelection=$FormatSelection formatSeries=$FormatSeries formatVariant=$FormatVariant model=$Model voice=$Voice voiceSelection=$VoiceSelection captions=$Captions pacingProfiles=$PacingProfiles identityHistoryLimit=$IdentityHistoryLimit encoder=$env:THREADGENS_VIDEO_ENCODER")
 Append-DebugLine ("Engine: $EngineScript")
 
 $process = $null

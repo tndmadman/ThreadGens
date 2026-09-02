@@ -102,6 +102,8 @@ public final class P0Entrypoint {
                         requestedCount,
                         format,
                         variant,
+                        config.renderStyle,
+                        config.pacingProfile,
                         feedback,
                         config.scriptOut
                 );
@@ -333,7 +335,9 @@ public final class P0Entrypoint {
                 || "--novelty-retries".equals(arg)
                 || "--embedding-model".equals(arg)
                 || "--semantic-threshold".equals(arg)
-                || "--semantic-history-limit".equals(arg);
+                || "--semantic-history-limit".equals(arg)
+                || "--render-style".equals(arg)
+                || "--pacing-profile".equals(arg);
     }
 
     private static boolean contains(String[] args, String value) {

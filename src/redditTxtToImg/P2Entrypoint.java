@@ -131,14 +131,39 @@ public final class P2Entrypoint {
 
     private static void printResult(PrePublishAuditor.Result result, Path report, Path history) {
         PrePublishAuditor.Scores s = result.scores();
-        System.out.println("P2 pre-publish audit: " + result.status() + " — " + result.risk() + "/100 repetition risk");
+        System.out.println("P2 pre-publish audit: " + result.status() + " - " + result.risk() + "/100 repetition risk");
         System.out.println(String.format(Locale.US,
                 "  content %.0f%% | visual %.0f%% | identity %.0f%% | audio %.0f%% | format %.0f%% | pacing %.0f%% | metadata %.0f%%",
                 s.content() * 100.0, s.visual() * 100.0, s.identity() * 100.0, s.audio() * 100.0,
                 s.format() * 100.0, s.pacing() * 100.0, s.metadata() * 100.0));
+        if (result.closest() != null) {
+            PublishFingerprint closest = result.closest().fingerprint();
+            System.out.println(String.format(Locale.US,
+                    "  closest approved: %s | %s/%s | voice %s | prior risk %d",
+                    closest.created, closest.format, closest.formatVariant,
+                    closest.voice, result.closest().risk()));
+        }
+        System.out.println("  strongest drivers: " + strongestDrivers(s));
         for (String finding : result.findings()) System.out.println("  - " + finding);
         System.out.println("P2 audit report: " + report);
         System.out.println("P2 publish history: " + history);
+    }
+
+    private static String strongestDrivers(PrePublishAuditor.Scores s) {
+        List<String> drivers = new ArrayList<>();
+        addDriver(drivers, "audio", s.audio());
+        addDriver(drivers, "format", s.format());
+        addDriver(drivers, "pacing", s.pacing());
+        addDriver(drivers, "identity", s.identity());
+        addDriver(drivers, "content", s.content());
+        addDriver(drivers, "metadata", s.metadata());
+        return drivers.isEmpty() ? "none above 60%" : String.join(", ", drivers);
+    }
+
+    private static void addDriver(List<String> drivers, String label, double score) {
+        if (score >= 0.60) {
+            drivers.add(String.format(Locale.US, "%s %.0f%%", label, score * 100.0));
+        }
     }
 
     private static String resolveActualFormat(AuditConfig config, String script) throws IOException {
@@ -413,6 +438,7 @@ public final class P2Entrypoint {
             out.append("p1-provenance:");
             for (String key : List.of(
                     "schema", "disclosure", "origin", "platform", "format", "llmModel",
+                    "renderStyle", "pacingProfile",
                     "engine", "voiceSelection", "voiceSeries", "delivery", "language",
                     "imageMode", "imageCheckpoint", "captions", "captionTiming")) {
                 String value = JsonText.extractString(json, key);
@@ -435,6 +461,7 @@ public final class P2Entrypoint {
         private static boolean isP1MetadataValueOption(String value) {
             return "--captions".equals(value) || "--caption-words".equals(value)
                     || "--visual-max-scenes".equals(value)
+                    || "--render-style".equals(value) || "--pacing-profile".equals(value)
                     || "--voice-series".equals(value) || "--voice-selection".equals(value)
                     || "--series-id".equals(value) || "--tts-delivery".equals(value)
                     || "--tts-speed".equals(value) || "--tts-language".equals(value)

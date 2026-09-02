@@ -163,8 +163,12 @@ final class PrePublishAuditor {
                 + "  \"risk\": " + result.risk + ",\n"
                 + "  \"candidate_format\": \"" + escape(candidate.format) + "\",\n"
                 + "  \"candidate_format_variant\": \"" + escape(candidate.formatVariant) + "\",\n"
+                + "  \"candidate_voice\": \"" + escape(candidate.voice) + "\",\n"
+                + "  \"candidate_tts\": \"" + escape(candidate.ttsEngine) + "\",\n"
+                + "  \"candidate_duration\": " + String.format(Locale.US, "%.3f", candidate.totalDuration) + ",\n"
                 + "  \"candidate_artifact_hash\": \"" + escape(candidate.artifactHash) + "\",\n"
                 + "  \"closest_created\": \"" + escape(closestCreated) + "\",\n"
+                + "  \"closest\": " + closestJson(result.closest) + ",\n"
                 + "  \"scores\": {\n"
                 + field("content", s.content, true)
                 + field("visual", s.visual, true)
@@ -185,6 +189,24 @@ final class PrePublishAuditor {
                 scores.pacing, scores.identity, scores.metadata);
         return new Scores(content, 0.0, scores.audio, scores.format, scores.pacing,
                 scores.identity, scores.metadata, overall);
+    }
+
+    private static String closestJson(PublishAuditHistory.Entry entry) {
+        if (entry == null || entry.fingerprint() == null) {
+            return "null";
+        }
+        PublishFingerprint fp = entry.fingerprint();
+        return "{"
+                + "\"created\":\"" + escape(fp.created) + "\","
+                + "\"platform\":\"" + escape(fp.platform) + "\","
+                + "\"format\":\"" + escape(fp.format) + "\","
+                + "\"format_variant\":\"" + escape(fp.formatVariant) + "\","
+                + "\"voice\":\"" + escape(fp.voice) + "\","
+                + "\"tts\":\"" + escape(fp.ttsEngine) + "\","
+                + "\"duration\":" + String.format(Locale.US, "%.3f", fp.totalDuration) + ","
+                + "\"status\":\"" + escape(entry.status()) + "\","
+                + "\"risk\":" + entry.risk()
+                + "}";
     }
 
     private static Scores compare(PublishFingerprint a, PublishFingerprint b) {

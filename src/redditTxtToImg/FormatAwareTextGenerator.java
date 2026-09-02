@@ -55,8 +55,25 @@ final class FormatAwareTextGenerator {
             String noveltyFeedback,
             Path outputFile
     ) throws IOException, InterruptedException {
+        return generateToFile(platform, visibleTitle, visibleOriginalPost, count,
+                format, variant, "auto", "balanced", noveltyFeedback, outputFile);
+    }
+
+    Path generateToFile(
+            String platform,
+            String visibleTitle,
+            String visibleOriginalPost,
+            int count,
+            ContentFormat format,
+            ContentVariant variant,
+            String renderStyle,
+            String pacingProfile,
+            String noveltyFeedback,
+            Path outputFile
+    ) throws IOException, InterruptedException {
         List<String> lines = generateLines(
-                platform, visibleTitle, visibleOriginalPost, count, format, variant, noveltyFeedback);
+                platform, visibleTitle, visibleOriginalPost, count,
+                format, variant, renderStyle, pacingProfile, noveltyFeedback);
         if (outputFile.getParent() != null) {
             Files.createDirectories(outputFile.getParent());
         }
@@ -85,6 +102,21 @@ final class FormatAwareTextGenerator {
             ContentVariant variant,
             String noveltyFeedback
     ) throws IOException, InterruptedException {
+        return generateLines(platform, visibleTitle, visibleOriginalPost, count,
+                format, variant, "auto", "balanced", noveltyFeedback);
+    }
+
+    List<String> generateLines(
+            String platform,
+            String visibleTitle,
+            String visibleOriginalPost,
+            int count,
+            ContentFormat format,
+            ContentVariant variant,
+            String renderStyle,
+            String pacingProfile,
+            String noveltyFeedback
+    ) throws IOException, InterruptedException {
         if (count <= 0) {
             return List.of();
         }
@@ -95,6 +127,8 @@ final class FormatAwareTextGenerator {
         ContentFormat selectedFormat = format == null ? ContentFormat.THREAD_STORY : format;
         ContentVariant selectedVariant = variant == null
                 ? ContentVariant.forFormat(selectedFormat).get(0) : variant;
+        String selectedRenderStyle = normalizePlanLabel(renderStyle, "auto");
+        String selectedPacingProfile = normalizePlanLabel(pacingProfile, "balanced");
 
         List<String> lines = new ArrayList<>();
         lines.add(original);
@@ -110,6 +144,8 @@ final class FormatAwareTextGenerator {
                     original,
                     selectedFormat,
                     selectedVariant,
+                    selectedRenderStyle,
+                    selectedPacingProfile,
                     noveltyFeedback,
                     remaining,
                     lines
@@ -182,6 +218,8 @@ final class FormatAwareTextGenerator {
             String originalPost,
             ContentFormat format,
             ContentVariant variant,
+            String renderStyle,
+            String pacingProfile,
             String noveltyFeedback,
             int count,
             List<String> existingLines
@@ -200,6 +238,12 @@ final class FormatAwareTextGenerator {
                 .append("HIDDEN FORMAT SUBSTYLE INSTRUCTION (apply this structure and cadence):\n")
                 .append(variant.promptGuide()).append("\n\n");
 
+        prompt.append("HIDDEN PRESENTATION PLAN:\n")
+                .append("- Render style: ").append(humanize(renderStyle)).append(".\n")
+                .append("- Pacing profile: ").append(humanize(pacingProfile)).append(". ")
+                .append(pacingGuide(pacingProfile)).append("\n")
+                .append("- Make the replies naturally fit that style, but do not mention the style label.\n\n");
+
         if (noveltyFeedback != null && !noveltyFeedback.isBlank()) {
             prompt.append("HIDDEN ORIGINALITY CORRECTION FROM THE NOVELTY CHECK:\n")
                     .append(noveltyFeedback.trim()).append("\n\n");
@@ -207,8 +251,8 @@ final class FormatAwareTextGenerator {
 
         prompt.append("Global rules:\n")
                 .append("- Return exactly ").append(count).append(" lines, one reply per line.\n")
-                .append("- Each reply must be concise: 8-").append(MAX_REPLY_WORDS)
-                .append(" words and never more than ").append(MAX_REPLY_WORDS).append(" words.\n")
+                .append("- Each reply must obey the pacing profile and never exceed ")
+                .append(MAX_REPLY_WORDS).append(" words.\n")
                 .append("- The full reply must fit visibly on one ThreadGens social card; do not write long paragraphs.\n")
                 .append("- Do not output the original post, title, prompt instructions, labels, or explanations.\n")
                 .append("- No numbering, bullets, markdown, or quote wrappers.\n")
@@ -223,6 +267,34 @@ final class FormatAwareTextGenerator {
             prompt.append(line).append('\n');
         }
         return prompt.toString();
+    }
+
+    private static String pacingGuide(String value) {
+        return switch (normalizePlanLabel(value, "balanced")) {
+            case "rapid_beats" ->
+                    "Use short, fast-moving replies, mostly 8-18 words, with quick turns and minimal setup.";
+            case "slow_reveal" ->
+                    "Use fewer but fuller beats, mixing 14-32 word replies with deliberate pauses and a clearer reveal.";
+            case "qa_cadence" ->
+                    "Alternate compact questions and direct answers so the rhythm does not match ordinary story updates.";
+            case "three_act" ->
+                    "Shape the thread as setup, turn, and payoff, with noticeably different line lengths across the thirds.";
+            case "staccato" ->
+                    "Use very compact replies, mostly 6-14 words, with clipped reactions and quick pivots.";
+            default ->
+                    "Use varied 8-28 word replies with no repeated sentence openings or evenly matched line lengths.";
+        };
+    }
+
+    private static String normalizePlanLabel(String value, String fallback) {
+        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT)
+                .replace('-', '_')
+                .replace(' ', '_');
+        return normalized.isBlank() ? fallback : normalized;
+    }
+
+    private static String humanize(String value) {
+        return normalizePlanLabel(value, "auto").replace('_', ' ');
     }
 
     private static List<String> cleanGeneratedLines(String text, int count) {

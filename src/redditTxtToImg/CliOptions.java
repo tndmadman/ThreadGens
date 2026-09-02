@@ -11,6 +11,7 @@ final class CliOptions {
             "--tts-language", "--tts-sentence-pause-ms",
             "--video-dir", "--video-command", "--fps", "--video-timeout", "--final-video",
             "--captions", "--caption-words", "--visual-max-scenes",
+            "--render-style", "--pacing-profile",
             "--identity-history-file", "--identity-history-limit",
             "--metadata-dir", "--disclosure", "--content-origin",
             "--image-mode", "--op-image", "--image-dir", "--image-cache-dir", "--comfy-url",

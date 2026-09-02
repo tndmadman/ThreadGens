@@ -72,6 +72,8 @@ final class ProvenanceManifest {
                         variant == null ? "unknown" : variant.id())).append(",\n")
                 .append("    \"pacingFamily\": ").append(JsonText.quote(
                         variant == null ? "unknown" : variant.pacingFamily())).append(",\n")
+                .append("    \"renderStyle\": ").append(JsonText.quote(config.renderStyle)).append(",\n")
+                .append("    \"pacingProfile\": ").append(JsonText.quote(config.pacingProfile)).append(",\n")
                 .append("    \"title\": ").append(JsonText.quote(config.postTitle)).append(",\n")
                 .append("    \"topic\": ").append(JsonText.quote(config.topic)).append(",\n")
                 .append("    \"scriptSha256\": ").append(JsonText.quote(

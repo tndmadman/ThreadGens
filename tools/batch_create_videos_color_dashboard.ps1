@@ -30,6 +30,8 @@ param(
     [int]$MaxSlotRenderedRejects = 3,
     [int]$MaxTokyoIdeas = 2,
     [int]$MaxSynchronizationIdeas = 3,
+    [int]$IdentityHistoryLimit = 2000,
+    [string]$PacingProfiles = 'rapid_beats,balanced,slow_reveal,qa_cadence,three_act,staccato',
     [switch]$KeepOllamaLoaded,
     [switch]$GenerateOpImage,
     [switch]$StopOnError,
@@ -239,7 +241,9 @@ function Build-ForwardArgumentLine {
         '-MaxSlotAttempts', [string]$MaxSlotAttempts,
         '-MaxSlotRenderedRejects', [string]$MaxSlotRenderedRejects,
         '-MaxTokyoIdeas', [string]$MaxTokyoIdeas,
-        '-MaxSynchronizationIdeas', [string]$MaxSynchronizationIdeas
+        '-MaxSynchronizationIdeas', [string]$MaxSynchronizationIdeas,
+        '-IdentityHistoryLimit', [string]$IdentityHistoryLimit,
+        '-PacingProfiles', $PacingProfiles
     )) { [void]$tokens.Add($token) }
     if (-not [string]::IsNullOrWhiteSpace($SeriesId)) { [void]$tokens.Add('-SeriesId'); [void]$tokens.Add($SeriesId) }
     if ($KeepOllamaLoaded) { [void]$tokens.Add('-KeepOllamaLoaded') }

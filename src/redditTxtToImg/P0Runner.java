@@ -62,6 +62,8 @@ public final class P0Runner {
         ContentVariant variant = ContentVariant.resolve(config.requestedFormatVariant, format, noveltyGuard);
         System.out.println("P0 format: " + format.id() + " (" + format.label() + ")");
         System.out.println("P0 format variant: " + variant.id() + " (" + variant.pacingFamily() + " pacing)");
+        System.out.println("P0 render style: " + config.renderStyle
+                + " / pacing profile " + config.pacingProfile);
         System.out.println("P0 novelty history: " + noveltyGuard.historyFile());
 
         int artifactCount = config.expectedCount();
@@ -316,6 +318,8 @@ public final class P0Runner {
                 || "--captions".equals(arg)
                 || "--caption-words".equals(arg)
                 || "--visual-max-scenes".equals(arg)
+                || "--render-style".equals(arg)
+                || "--pacing-profile".equals(arg)
                 || "--metadata-dir".equals(arg)
                 || "--disclosure".equals(arg)
                 || "--content-origin".equals(arg);
@@ -364,6 +368,8 @@ public final class P0Runner {
         String topic = "weird everyday stories";
         String requestedFormat = "auto";
         String requestedFormatVariant = "auto";
+        String renderStyle = "auto";
+        String pacingProfile = "balanced";
         String llmModel = "llama3.1:8b";
         String imageMode = "none";
         String imageCheckpoint = "";
@@ -498,6 +504,12 @@ public final class P0Runner {
                         case "--format-variant" -> {
                             if (i + 1 < args.length) config.requestedFormatVariant = args[++i];
                         }
+                        case "--render-style" -> {
+                            if (i + 1 < args.length) config.renderStyle = normalizeLooseId(args[++i], "auto");
+                        }
+                        case "--pacing-profile" -> {
+                            if (i + 1 < args.length) config.pacingProfile = normalizeLooseId(args[++i], "balanced");
+                        }
                         case "--history-file" -> {
                             if (i + 1 < args.length) config.historyFile = Path.of(args[++i]);
                         }
@@ -575,6 +587,8 @@ public final class P0Runner {
                 config.metadataDirectory = config.outputDirectory.resolve("metadata");
             }
             config.captionMode = CaptionTimeline.Mode.resolve(config.captionMode).name().toLowerCase(Locale.ROOT);
+            config.renderStyle = normalizeLooseId(config.renderStyle, "auto");
+            config.pacingProfile = normalizeLooseId(config.pacingProfile, "balanced");
             config.captionWordsPerCue = Math.max(1, Math.min(12, config.captionWordsPerCue));
             config.visualMaxScenes = Math.max(1, Math.min(20, config.visualMaxScenes));
             config.identityHistoryLimit = Math.max(1, config.identityHistoryLimit);
@@ -641,6 +655,10 @@ public final class P0Runner {
             config.requestedFormat = properties.getProperty("format", config.requestedFormat);
             config.requestedFormatVariant = properties.getProperty(
                     "formatVariant", config.requestedFormatVariant);
+            config.renderStyle = normalizeLooseId(
+                    properties.getProperty("renderStyle", config.renderStyle), "auto");
+            config.pacingProfile = normalizeLooseId(
+                    properties.getProperty("pacingProfile", config.pacingProfile), "balanced");
             config.historyFile = Path.of(properties.getProperty("historyFile", config.historyFile.toString()));
             config.historyLimit = parseInt(properties.getProperty("historyLimit"), config.historyLimit);
             config.noveltyThreshold = parseInt(
@@ -767,6 +785,13 @@ public final class P0Runner {
                         "Unsupported content origin: " + value + ". Use manual, ai, or mixed.");
             }
             return normalized;
+        }
+
+        private static String normalizeLooseId(String value, String fallback) {
+            String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT)
+                    .replace('-', '_')
+                    .replace(' ', '_');
+            return normalized.isBlank() ? fallback : normalized;
         }
 
         private static int parseInt(String value, int fallback) {

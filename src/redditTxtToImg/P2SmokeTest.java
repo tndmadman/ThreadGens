@@ -348,6 +348,8 @@ public final class P2SmokeTest {
             require(json.contains("\"status\": \"PASS\""), "report should contain status");
             require(json.contains("\"identity\""), "report should contain identity score");
             require(json.contains("\"candidate_format_variant\""), "report should contain format substyle");
+            require(json.contains("\"candidate_voice\""), "report should contain candidate voice");
+            require(json.contains("\"closest\""), "report should contain closest-match details");
             require(json.contains("\"risk\""), "report should contain risk");
         } finally {
             deleteTree(dir);

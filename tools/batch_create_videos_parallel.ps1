@@ -30,6 +30,8 @@ param(
     [int]$MaxSlotRenderedRejects = 3,
     [int]$MaxTokyoIdeas = 2,
     [int]$MaxSynchronizationIdeas = 3,
+    [int]$IdentityHistoryLimit = 2000,
+    [string]$PacingProfiles = 'rapid_beats,balanced,slow_reveal,qa_cadence,three_act,staccato',
     [switch]$KeepOllamaLoaded,
     [switch]$GenerateOpImage,
     [switch]$StopOnError,
@@ -78,6 +80,9 @@ if ($MaxTokyoIdeas -lt 0) {
 if ($MaxSynchronizationIdeas -lt 0) {
     $MaxSynchronizationIdeas = 0
 }
+if ($IdentityHistoryLimit -lt 1) {
+    $IdentityHistoryLimit = 1
+}
 if ($GenerateOpImage -and $Workers -gt 1) {
     Write-Host 'ComfyUI OP images share the GPU compute lane with Ollama; parallel whole-video workers are clamped to 1 while OP image generation is enabled.' -ForegroundColor Yellow
     $Workers = 1
@@ -102,6 +107,7 @@ $script:proxyProcess = $null
 $script:activeJobs = New-Object System.Collections.ArrayList
 $script:pendingSlots = New-Object System.Collections.ArrayList
 $script:pendingReservations = @{}
+$script:pendingProductionPlans = New-Object System.Collections.ArrayList
 $script:completedSlots = @{}
 $script:reservedFinalNames = @{}
 $script:failedAttempts = New-Object System.Collections.ArrayList
@@ -320,7 +326,7 @@ function Get-RecentIdeaBlock($History) {
     return ($lines -join [Environment]::NewLine)
 }
 
-function Invoke-NewBatchIdea($AttemptNumber, $History, [hashtable]$SeenKeys) {
+function Invoke-NewBatchIdea($AttemptNumber, $History, [hashtable]$SeenKeys, $ProductionPlan = $null) {
     $themes = @(
         'space exploration and orbital engineering',
         'SpaceX rockets, launch systems, Starship, Falcon, or reusable rocketry',
@@ -435,6 +441,7 @@ function Invoke-NewBatchIdea($AttemptNumber, $History, [hashtable]$SeenKeys) {
         $setting = $settings[(($axis * 7 + 1) % $settings.Count)]
         $recentBlock = Get-RecentIdeaBlock $History
         $activeBans = Get-ActiveIdeaBans
+        $productionPlanBlock = Get-ProductionPlanPromptBlock $ProductionPlan
         if ($Platform -eq 'x') {
             $shape = @"
 Create one NEW ThreadGens X seed.
@@ -464,11 +471,14 @@ $correction
 Target subject family: $theme
 Creative lens: $lens
 Setting guidance: $setting
+Assigned production plan:
+$productionPlanBlock
 Active batch cooldown bans:
 $activeBans
 
 Diversity mandate:
 - The subject family is the core of this attempt. It can be educational, technical, scientific, weird, factual, speculative, travel-focused, animal-focused, artistic, or personal. Do NOT force every seed into interpersonal conflict.
+- The visible seed must naturally suit the assigned render style and pacing profile, but do not mention production labels, pacing labels, voice, format, or substyle.
 - A seed may be a question, startling fact, comparison, scenario, mini-explainer, engineering tradeoff, niche-location curiosity, observation, debate, or human story.
 - Strongly vary domains across the batch. Avoid falling back to the same cities, jobs, relationship conflicts, horror beats, mysterious notes, abandoned buildings, or generic "something strange happened" setups.
 - Named places are optional. Do not default to Tokyo, Japan, New York, Los Angeles, London, Paris, Dubai, or another famous megacity. Tokyo is not banned; it should simply be rare and only appear when genuinely relevant.
@@ -532,7 +542,12 @@ $recentBlock
         $created = (Get-Date).ToUniversalTime().ToString('o')
         $entry = [pscustomobject]@{
             event = 'generated'; id = $id; created = $created; status = 'generated'; attempt = $AttemptNumber
-            platform = $Platform; theme = $theme; lens = $lens; setting = $setting; title = $title; body = $body; key = $key
+            platform = $Platform; theme = $theme; lens = $lens; setting = $setting
+            renderStyle = if ($null -eq $ProductionPlan) { '' } else { [string]$ProductionPlan.RenderStyle }
+            pacingProfile = if ($null -eq $ProductionPlan) { '' } else { [string]$ProductionPlan.PacingProfile }
+            plannedFormat = if ($null -eq $ProductionPlan) { '' } else { [string]$ProductionPlan.Format }
+            plannedFormatVariant = if ($null -eq $ProductionPlan) { '' } else { [string]$ProductionPlan.FormatVariant }
+            title = $title; body = $body; key = $key
         }
         Add-IdeaHistoryEvent $entry
         $SeenKeys[$key] = $true
@@ -542,9 +557,9 @@ $recentBlock
     throw "Could not generate a unique render-fit batch idea after $IdeaRetries tries. Last size problem: $shapeFeedback"
 }
 
-function Invoke-NewBatchIdeaSafe($AttemptNumber, $History, [hashtable]$SeenKeys, [scriptblock]$GeneratorOverride = $null) {
+function Invoke-NewBatchIdeaSafe($AttemptNumber, $History, [hashtable]$SeenKeys, $ProductionPlan = $null, [scriptblock]$GeneratorOverride = $null) {
     try {
-        $idea = if ($null -ne $GeneratorOverride) { & $GeneratorOverride } else { Invoke-NewBatchIdea $AttemptNumber $History $SeenKeys }
+        $idea = if ($null -ne $GeneratorOverride) { & $GeneratorOverride } else { Invoke-NewBatchIdea $AttemptNumber $History $SeenKeys $ProductionPlan }
         if ($null -eq $idea) { throw 'Idea generator returned no idea.' }
         return [pscustomobject]@{ succeeded = $true; idea = $idea; reason = '' }
     } catch {
@@ -564,6 +579,330 @@ function ConvertFrom-Base64Url($Value) {
         3 { $text += '=' }
     }
     return [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($text))
+}
+
+function Normalize-BatchId($Value, [string]$Fallback = '') {
+    $normalized = (([string]$Value).Trim().ToLowerInvariant() -replace '[- ]', '_')
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return $Fallback }
+    return $normalized
+}
+
+function Resolve-BatchPacingProfiles([string]$Series) {
+    $supported = @('rapid_beats', 'balanced', 'slow_reveal', 'qa_cadence', 'three_act', 'staccato')
+    $pool = New-Object System.Collections.ArrayList
+    foreach ($item in @($Series -split '[,;]')) {
+        $profile = Normalize-BatchId $item
+        if ([string]::IsNullOrWhiteSpace($profile)) { continue }
+        if ($profile -notin $supported) {
+            throw "Unsupported pacing profile in PacingProfiles: $item"
+        }
+        if ($profile -notin $pool) { [void]$pool.Add($profile) }
+    }
+    if ($pool.Count -eq 0) { [void]$pool.Add('balanced') }
+    return @($pool)
+}
+
+function Get-PacingProfileSpec([string]$Profile) {
+    switch (Normalize-BatchId $Profile 'balanced') {
+        'rapid_beats' {
+            return [pscustomobject]@{
+                Name = 'rapid_beats'; RenderStyle = 'quick explainer'; TtsDelivery = 'energetic'
+                TtsSpeed = '1.1200'; SentencePauseMs = 80; CaptionWords = 4; VisualMaxScenes = 8
+                PromptGuide = 'short rapid beats with quick turns and minimal setup'
+            }
+        }
+        'slow_reveal' {
+            return [pscustomobject]@{
+                Name = 'slow_reveal'; RenderStyle = 'slow reveal'; TtsDelivery = 'calm'
+                TtsSpeed = '0.9200'; SentencePauseMs = 330; CaptionWords = 7; VisualMaxScenes = 6
+                PromptGuide = 'slower setup with fuller beats and a deliberate reveal'
+            }
+        }
+        'qa_cadence' {
+            return [pscustomobject]@{
+                Name = 'qa_cadence'; RenderStyle = 'skeptical qa'; TtsDelivery = 'natural'
+                TtsSpeed = '1.0400'; SentencePauseMs = 150; CaptionWords = 5; VisualMaxScenes = 10
+                PromptGuide = 'alternating compact questions and direct answers'
+            }
+        }
+        'three_act' {
+            return [pscustomobject]@{
+                Name = 'three_act'; RenderStyle = 'three act mini story'; TtsDelivery = 'dramatic'
+                TtsSpeed = '0.9700'; SentencePauseMs = 260; CaptionWords = 6; VisualMaxScenes = 9
+                PromptGuide = 'clear setup, turn, and payoff with mixed line lengths'
+            }
+        }
+        'staccato' {
+            return [pscustomobject]@{
+                Name = 'staccato'; RenderStyle = 'staccato replies'; TtsDelivery = 'energetic'
+                TtsSpeed = '1.1600'; SentencePauseMs = 70; CaptionWords = 3; VisualMaxScenes = 14
+                PromptGuide = 'very compact replies with clipped reactions and quick pivots'
+            }
+        }
+        default {
+            return [pscustomobject]@{
+                Name = 'balanced'; RenderStyle = 'balanced explainer'; TtsDelivery = 'natural'
+                TtsSpeed = '1.0000'; SentencePauseMs = 180; CaptionWords = 6; VisualMaxScenes = 12
+                PromptGuide = 'varied medium-length replies without evenly matched line lengths'
+            }
+        }
+    }
+}
+
+function Get-BatchFormatVariants([string]$FormatName) {
+    switch (Normalize-BatchId $FormatName) {
+        'thread_story' { return @('timeline_updates', 'witness_chain', 'mystery_reveal', 'escalating_discovery') }
+        'confession' { return @('private_note', 'workplace_admission', 'noticed_something', 'regret_reveal') }
+        'debate' { return @('expert_panel', 'skeptical_qa', 'neighbor_dispute', 'comment_argument') }
+        'best_answers' { return @('ranked_answers', 'myth_fact', 'editor_picks', 'practical_explanations') }
+        'escalating_conversation' { return @('calm_to_weird', 'multiple_witnesses', 'disagreement_resolution', 'reveal_by_replies') }
+        default { return @('auto') }
+    }
+}
+
+function Get-PacingFamilyForVariant([string]$Variant) {
+    switch (Normalize-BatchId $Variant) {
+        { $_ -in @('timeline_updates') } { return 'timeline' }
+        { $_ -in @('witness_chain', 'multiple_witnesses') } { return 'relay' }
+        { $_ -in @('mystery_reveal', 'regret_reveal', 'reveal_by_replies') } { return 'reveal' }
+        { $_ -in @('escalating_discovery', 'calm_to_weird') } { return 'escalation' }
+        'private_note' { return 'intimate' }
+        'workplace_admission' { return 'admission' }
+        'noticed_something' { return 'observation' }
+        'expert_panel' { return 'panel' }
+        'skeptical_qa' { return 'qa' }
+        'neighbor_dispute' { return 'dispute' }
+        'comment_argument' { return 'argument' }
+        'ranked_answers' { return 'ranked' }
+        'myth_fact' { return 'contrast' }
+        'editor_picks' { return 'curated' }
+        'practical_explanations' { return 'practical' }
+        'disagreement_resolution' { return 'resolution' }
+        default { return 'unknown' }
+    }
+}
+
+function Get-VoicePool {
+    $pool = New-Object System.Collections.ArrayList
+    foreach ($item in @($VoiceSeries -split '[,;]')) {
+        $voiceName = ([string]$item).Trim()
+        if ([string]::IsNullOrWhiteSpace($voiceName)) { continue }
+        if ($voiceName -notin $pool) { [void]$pool.Add($voiceName) }
+    }
+    if ($pool.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($Voice)) {
+        [void]$pool.Add(([string]$Voice).Trim())
+    }
+    if ($pool.Count -eq 0) { [void]$pool.Add('af_heart') }
+    return @($pool)
+}
+
+function Get-VoiceSignature($Voices) {
+    $labels = @($Voices | ForEach-Object { "${TtsEngine}:$(([string]$_).Trim())" } | Sort-Object)
+    return ($labels -join '|')
+}
+
+function Get-VoicePlanCandidates {
+    $pool = @(Get-VoicePool)
+    $candidates = New-Object System.Collections.ArrayList
+    foreach ($voiceName in $pool) {
+        [void]$candidates.Add([pscustomobject]@{
+            Voice = $voiceName; VoiceSeries = $voiceName; VoiceSelection = 'single'
+            VoiceSignature = Get-VoiceSignature @($voiceName)
+            Label = $voiceName
+        })
+    }
+    if ($pool.Count -gt 1) {
+        for ($i = 0; $i -lt $pool.Count; $i++) {
+            for ($j = $i + 1; $j -lt $pool.Count; $j++) {
+                $combo = @($pool[$i], $pool[$j])
+                [void]$candidates.Add([pscustomobject]@{
+                    Voice = [string]$combo[0]; VoiceSeries = ($combo -join ','); VoiceSelection = 'per-slide'
+                    VoiceSignature = Get-VoiceSignature $combo
+                    Label = ($combo -join '+')
+                })
+            }
+        }
+    }
+    if ($pool.Count -gt 2) {
+        for ($i = 0; $i -lt $pool.Count; $i++) {
+            $combo = @($pool[$i], $pool[(($i + 1) % $pool.Count)], $pool[(($i + 2) % $pool.Count)])
+            [void]$candidates.Add([pscustomobject]@{
+                Voice = [string]$combo[0]; VoiceSeries = ($combo -join ','); VoiceSelection = 'per-slide'
+                VoiceSignature = Get-VoiceSignature $combo
+                Label = ($combo -join '+')
+            })
+        }
+    }
+    return @($candidates)
+}
+
+function Get-RecentPublishEntries([int]$Limit = 100) {
+    if (-not (Test-Path -LiteralPath $PublishHistoryPath)) { return @() }
+    $entries = New-Object System.Collections.ArrayList
+    foreach ($rawLine in @(Get-Content -LiteralPath $PublishHistoryPath -Tail $Limit -Encoding UTF8)) {
+        $line = ([string]$rawLine).Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try { $entry = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        $voiceSignature = ''
+        if (-not [string]::IsNullOrWhiteSpace([string]$entry.voice_b64)) {
+            try { $voiceSignature = ConvertFrom-Base64Url $entry.voice_b64 } catch { $voiceSignature = '' }
+        }
+        $formatName = Normalize-BatchId $entry.format 'unknown'
+        $variantName = Normalize-BatchId $entry.format_variant 'unknown'
+        $riskValue = 0
+        [void][int]::TryParse([string]$entry.risk, [ref]$riskValue)
+        [void]$entries.Add([pscustomobject]@{
+            Source = 'history'
+            Created = [string]$entry.created
+            Format = $formatName
+            Variant = $variantName
+            PacingFamily = Get-PacingFamilyForVariant $variantName
+            VoiceSignature = $voiceSignature
+            PacingProfile = ''
+            RenderStyle = ''
+            Risk = $riskValue
+        })
+    }
+    $recent = @($entries)
+    [array]::Reverse($recent)
+    return @($recent)
+}
+
+function Get-PendingProductionEntries {
+    $entries = New-Object System.Collections.ArrayList
+    foreach ($plan in @($script:pendingProductionPlans)) {
+        if ($null -eq $plan) { continue }
+        [void]$entries.Add([pscustomobject]@{
+            Source = 'pending'
+            Created = ''
+            Format = [string]$plan.Format
+            Variant = [string]$plan.FormatVariant
+            PacingFamily = Get-PacingFamilyForVariant $plan.FormatVariant
+            VoiceSignature = [string]$plan.VoiceSignature
+            PacingProfile = [string]$plan.PacingProfile
+            RenderStyle = [string]$plan.RenderStyle
+            Risk = [int]$plan.EstimatedRisk
+        })
+    }
+    return @($entries)
+}
+
+function Get-FormatCandidatesForPlan($Pool, [string]$RequestedFormat, [string]$Selection, [int]$Slot, [int]$Attempt, [int]$Offset) {
+    $base = Select-BatchFormat $Selection $RequestedFormat $Pool $Slot $Attempt $Offset
+    if ($base -ne 'auto' -and $RequestedFormat -ne 'auto' -and $Selection -eq 'single') {
+        return @($base)
+    }
+    $ordered = New-Object System.Collections.ArrayList
+    if ($base -ne 'auto' -and $base -in $Pool) { [void]$ordered.Add($base) }
+    foreach ($formatName in $Pool) {
+        if ($formatName -notin $ordered) { [void]$ordered.Add($formatName) }
+    }
+    return @($ordered)
+}
+
+function Measure-ProductionPlanRisk($FormatName, $VariantName, $VoicePlan, $PacingSpec, $History) {
+    $reasons = New-Object System.Collections.ArrayList
+    $risk = 6
+    $voiceMatches = @($History | Where-Object { $_.VoiceSignature -eq $VoicePlan.VoiceSignature })
+    $formatMatches = @($History | Where-Object { $_.Format -eq $FormatName })
+    $variantMatches = @($History | Where-Object { $_.Format -eq $FormatName -and $_.Variant -eq $VariantName })
+    $family = Get-PacingFamilyForVariant $VariantName
+    $familyMatches = @($History | Where-Object { $_.PacingFamily -eq $family -and $family -ne 'unknown' })
+    $profileMatches = @($History | Where-Object { $_.PacingProfile -eq $PacingSpec.Name -and -not [string]::IsNullOrWhiteSpace([string]$_.PacingProfile) })
+    $pendingComboMatches = @($History | Where-Object {
+            $_.Source -eq 'pending' -and $_.Format -eq $FormatName -and $_.Variant -eq $VariantName -and
+            $_.VoiceSignature -eq $VoicePlan.VoiceSignature -and $_.PacingProfile -eq $PacingSpec.Name
+        })
+
+    if ($voiceMatches.Count -gt 0) {
+        $risk += [Math]::Min(30, $voiceMatches.Count * 8)
+        [void]$reasons.Add("voice signature seen $($voiceMatches.Count)x recently")
+    }
+    if ($History.Count -gt 0 -and $History[0].VoiceSignature -eq $VoicePlan.VoiceSignature) {
+        $risk += 10
+        [void]$reasons.Add('voice would repeat the most recent approved video')
+    }
+    if ($variantMatches.Count -gt 0) {
+        $risk += [Math]::Min(26, $variantMatches.Count * 11)
+        [void]$reasons.Add("same format/substyle seen $($variantMatches.Count)x recently")
+    } elseif ($formatMatches.Count -gt 0) {
+        $risk += [Math]::Min(16, $formatMatches.Count * 5)
+        [void]$reasons.Add("same top-level format seen $($formatMatches.Count)x recently")
+    }
+    if ($familyMatches.Count -gt 0) {
+        $risk += [Math]::Min(10, $familyMatches.Count * 3)
+        [void]$reasons.Add("same pacing family seen $($familyMatches.Count)x recently")
+    }
+    if ($profileMatches.Count -gt 0) {
+        $risk += [Math]::Min(12, $profileMatches.Count * 4)
+        [void]$reasons.Add("same pacing profile already pending $($profileMatches.Count)x")
+    }
+    if ($pendingComboMatches.Count -gt 0) {
+        $risk += 24
+        [void]$reasons.Add('same production combo already pending in this batch')
+    }
+    if ($reasons.Count -eq 0) { [void]$reasons.Add('no close production combo in recent history') }
+    return [pscustomobject]@{ Risk = [Math]::Min(100, [int]$risk); Reasons = @($reasons) }
+}
+
+function New-BatchProductionPlan([int]$Slot, [int]$Attempt) {
+    $history = @((Get-RecentPublishEntries 100) + (Get-PendingProductionEntries))
+    $formats = @(Get-FormatCandidatesForPlan $FormatPool $Format $FormatSelection $Slot $Attempt $FormatOffset)
+    $voices = @(Get-VoicePlanCandidates)
+    $profiles = @(Resolve-BatchPacingProfiles $PacingProfiles)
+    $candidates = New-Object System.Collections.ArrayList
+    $candidateIndex = 0
+
+    foreach ($formatName in $formats) {
+        $variants = if ($FormatVariant -eq 'auto') { @(Get-BatchFormatVariants $formatName) } else { @(Normalize-BatchId $FormatVariant) }
+        foreach ($variantName in $variants) {
+            foreach ($profileName in $profiles) {
+                $pacingSpec = Get-PacingProfileSpec $profileName
+                foreach ($voicePlan in $voices) {
+                    $candidateIndex++
+                    $measured = Measure-ProductionPlanRisk $formatName $variantName $voicePlan $pacingSpec $history
+                    [void]$candidates.Add([pscustomobject]@{
+                        Format = $formatName
+                        FormatVariant = $variantName
+                        Voice = $voicePlan.Voice
+                        VoiceSeries = $voicePlan.VoiceSeries
+                        VoiceSelection = $voicePlan.VoiceSelection
+                        VoiceSignature = $voicePlan.VoiceSignature
+                        VoiceLabel = $voicePlan.Label
+                        RenderStyle = $pacingSpec.RenderStyle
+                        PacingProfile = $pacingSpec.Name
+                        PacingPrompt = $pacingSpec.PromptGuide
+                        TtsDelivery = $pacingSpec.TtsDelivery
+                        TtsSpeed = $pacingSpec.TtsSpeed
+                        SentencePauseMs = $pacingSpec.SentencePauseMs
+                        CaptionWords = $pacingSpec.CaptionWords
+                        VisualMaxScenes = $pacingSpec.VisualMaxScenes
+                        EstimatedRisk = $measured.Risk
+                        RiskReasons = @($measured.Reasons)
+                        CandidateIndex = $candidateIndex
+                    })
+                }
+            }
+        }
+    }
+    if ($candidates.Count -eq 0) { throw 'No production plan candidates were available.' }
+    $minRisk = (@($candidates) | Measure-Object -Property EstimatedRisk -Minimum).Minimum
+    $nearBest = @($candidates | Where-Object { $_.EstimatedRisk -le ($minRisk + 3) })
+    $choiceIndex = [Math]::Abs(($Slot * 31 + $Attempt * 17 + $FormatOffset)) % $nearBest.Count
+    return $nearBest[$choiceIndex]
+}
+
+function Get-ProductionPlanPromptBlock($Plan) {
+    if ($null -eq $Plan) {
+        return 'No assigned production plan.'
+    }
+    return @"
+Format/substyle: $($Plan.Format) / $($Plan.FormatVariant)
+Render style: $($Plan.RenderStyle)
+Pacing profile: $($Plan.PacingProfile) - $($Plan.PacingPrompt)
+Voice plan: $($Plan.VoiceLabel)
+Pre-render repetition estimate: $($Plan.EstimatedRisk)/100 ($($Plan.RiskReasons -join '; '))
+"@
 }
 
 function New-PendingHistoryLine($Reservation) {
@@ -815,8 +1154,11 @@ function Skip-Slot($Slot, $SlotLabel, $Reason) {
     Write-Host "Slot $SlotLabel skipped: $Reason" -ForegroundColor Red
 }
 
-function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
+function Start-VideoWorker($Slot, $Idea, $AttemptLabel, $ProductionPlan = $null) {
     $slotLabel = '{0:D3}' -f $Slot
+    if ($null -eq $ProductionPlan) {
+        $ProductionPlan = New-BatchProductionPlan ([int]$Slot) ([int]$AttemptLabel)
+    }
     $title = [string]$Idea.title
     $body = [string]$Idea.body
     $safeTitle = New-SafeFileName $title
@@ -836,8 +1178,13 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
     $logPath = Join-Path $jobRoot 'worker.log'
     $jobFile = Join-Path $jobRoot 'worker_job.json'
     $palette = $Palettes[(($Slot - 1) % $Palettes.Count)]
-    $selectedFormat = Select-BatchFormat $FormatSelection $Format $FormatPool $Slot ([int]$AttemptLabel) $FormatOffset
-    $effectiveSeriesId = Get-BatchSeriesId $VoiceSelection $SeriesId $Platform $Slot ([int]$AttemptLabel)
+    $selectedFormat = [string]$ProductionPlan.Format
+    $selectedVariant = [string]$ProductionPlan.FormatVariant
+    $selectedVoice = [string]$ProductionPlan.Voice
+    $selectedVoiceSeries = [string]$ProductionPlan.VoiceSeries
+    $selectedVoiceSelection = [string]$ProductionPlan.VoiceSelection
+    $selectedTtsDelivery = [string]$ProductionPlan.TtsDelivery
+    $effectiveSeriesId = Get-BatchSeriesId $selectedVoiceSelection $SeriesId $Platform $Slot ([int]$AttemptLabel)
     New-Item -ItemType Directory -Force -Path $imageDir, $audioDir, $videoDir, $scriptDir, $historyDir | Out-Null
     if ($GenerateOpImage) { New-Item -ItemType Directory -Force -Path $opImageDir, $opImageCacheDir | Out-Null }
     New-JobHistorySnapshot $jobHistoryPath
@@ -851,16 +1198,20 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
         '--topic', $body,
         '--count', [string]$Count,
         '--format', $selectedFormat,
-        '--format-variant', $FormatVariant,
+        '--format-variant', $selectedVariant,
+        '--render-style', [string]$ProductionPlan.RenderStyle,
+        '--pacing-profile', [string]$ProductionPlan.PacingProfile,
         '--llm-model', $Model,
         '--llm-url', $script:OllamaGenerateUrl,
         '--history-file', $jobHistoryPath,
         '--tts', $TtsEngine,
         '--tts-command', $KokoroPython,
-        '--voice', $Voice,
-        '--voice-series', $VoiceSeries,
-        '--voice-selection', $VoiceSelection,
-        '--tts-delivery', $TtsDelivery,
+        '--voice', $selectedVoice,
+        '--voice-series', $selectedVoiceSeries,
+        '--voice-selection', $selectedVoiceSelection,
+        '--tts-delivery', $selectedTtsDelivery,
+        '--tts-speed', [string]$ProductionPlan.TtsSpeed,
+        '--tts-sentence-pause-ms', [string]$ProductionPlan.SentencePauseMs,
         '--audio-dir', $audioDir,
         '--video',
         '--concat-video',
@@ -868,6 +1219,9 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
         '--script-out', $scriptOut,
         '--final-video', $finalVideoName,
         '--captions', $Captions,
+        '--caption-words', [string]$ProductionPlan.CaptionWords,
+        '--visual-max-scenes', [string]$ProductionPlan.VisualMaxScenes,
+        '--identity-history-limit', [string]$IdentityHistoryLimit,
         '--metadata-dir', $metadataDir,
         '--publish-history', $PublishHistoryPath,
         '--no-watermark',
@@ -883,11 +1237,22 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
     if (-not (Test-Path $powerShellExe)) { $powerShellExe = 'powershell.exe' }
     $workerCommandLine = "-NoProfile -ExecutionPolicy Bypass -File `"$WorkerScript`" -JobFile `"$jobFile`""
     $process = Start-Process -FilePath $powerShellExe -ArgumentList $workerCommandLine -PassThru -WindowStyle Hidden
+    $planRecord = [pscustomobject]@{
+        AttemptLabel = $AttemptLabel
+        Format = $selectedFormat
+        FormatVariant = $selectedVariant
+        VoiceSignature = [string]$ProductionPlan.VoiceSignature
+        RenderStyle = [string]$ProductionPlan.RenderStyle
+        PacingProfile = [string]$ProductionPlan.PacingProfile
+        EstimatedRisk = [int]$ProductionPlan.EstimatedRisk
+    }
+    [void]$script:pendingProductionPlans.Add($planRecord)
     $job = [pscustomobject]@{
         Process = $process; Slot = $Slot; SlotLabel = $slotLabel; AttemptLabel = $AttemptLabel; Idea = $Idea
         Title = $title; Body = $body; Palette = $palette; Format = $selectedFormat; FinalVideoName = $finalVideoName; VideoDir = $videoDir
         ScriptOut = $scriptOut; JobHistoryPath = $jobHistoryPath; LogPath = $logPath; LogLineCount = 0
         GenerationSettled = $false; HistoryMerged = $false; Script = ''; Variant = ''; Started = Get-Date
+        ProductionPlan = $planRecord
     }
     [void]$script:activeJobs.Add($job)
 
@@ -895,7 +1260,10 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
     if ($Platform -eq 'x') { Write-Host "X style: $title"; Write-Host "Visible X post: $body" } else { Write-Host "Reddit title: $title"; Write-Host "Reddit body: $body" }
     Write-Host "Idea family: $($Idea.theme)"
     Write-Host "Background palette: $palette"
-    Write-Host "P0 format: $selectedFormat / substyle $FormatVariant"
+    Write-Host "P0 format: $selectedFormat / substyle $selectedVariant"
+    Write-Host "Render style: $($ProductionPlan.RenderStyle) / pacing $($ProductionPlan.PacingProfile)"
+    Write-Host "Voice plan: $($ProductionPlan.VoiceLabel) [$selectedVoiceSelection]"
+    Write-Host "Pre-render P2 estimate: $($ProductionPlan.EstimatedRisk)/100 - $($ProductionPlan.RiskReasons -join '; ')"
     if (-not [string]::IsNullOrWhiteSpace($effectiveSeriesId)) { Write-Host "Voice series key: $effectiveSeriesId" }
     Write-Host "Worker log: $logPath"
     Write-Host "Final MP4 if approved: $finalVideoName"
@@ -939,7 +1307,10 @@ function Complete-Worker($Job) {
         Add-IdeaHistoryEvent ([pscustomobject]@{
             event = 'outcome'; id = $Job.Idea.id; created = (Get-Date).ToUniversalTime().ToString('o'); status = 'approved'
             attempt = [int]$Job.AttemptLabel; approvedSlot = $Job.Slot; palette = $Job.Palette; output = $copyTo
-            format = $Job.Format
+            format = $Job.Format; variant = $Job.Variant
+            renderStyle = if ($null -eq $Job.ProductionPlan) { '' } else { [string]$Job.ProductionPlan.RenderStyle }
+            pacingProfile = if ($null -eq $Job.ProductionPlan) { '' } else { [string]$Job.ProductionPlan.PacingProfile }
+            voiceSignature = if ($null -eq $Job.ProductionPlan) { '' } else { [string]$Job.ProductionPlan.VoiceSignature }
         })
         Add-BatchSummaryRecord $Job.SlotLabel $Job.AttemptLabel 'render' 'approved' $Job.Title '' $Job.Format $copyTo
         Write-Host "Approved slot $($Job.SlotLabel). Progress $script:succeededVideos/$TargetVideos. Saved: $copyTo" -ForegroundColor Green
@@ -948,7 +1319,10 @@ function Complete-Worker($Job) {
         Add-IdeaHistoryEvent ([pscustomobject]@{
             event = 'outcome'; id = $Job.Idea.id; created = (Get-Date).ToUniversalTime().ToString('o'); status = 'rejected'
             attempt = [int]$Job.AttemptLabel; approvedSlot = $Job.Slot; palette = $Job.Palette; reason = $reason
-            format = $Job.Format
+            format = $Job.Format; variant = $Job.Variant
+            renderStyle = if ($null -eq $Job.ProductionPlan) { '' } else { [string]$Job.ProductionPlan.RenderStyle }
+            pacingProfile = if ($null -eq $Job.ProductionPlan) { '' } else { [string]$Job.ProductionPlan.PacingProfile }
+            voiceSignature = if ($null -eq $Job.ProductionPlan) { '' } else { [string]$Job.ProductionPlan.VoiceSignature }
         })
         Add-FailureRecord $Job.AttemptLabel $Job.SlotLabel $Job.Title $reason
         Add-BatchSummaryRecord $Job.SlotLabel $Job.AttemptLabel 'render' 'rejected' $Job.Title $reason $Job.Format
@@ -970,6 +1344,9 @@ function Complete-Worker($Job) {
         }
     }
     [void]$script:pendingReservations.Remove($Job.AttemptLabel)
+    if ($null -ne $Job.ProductionPlan) {
+        [void]$script:pendingProductionPlans.Remove($Job.ProductionPlan)
+    }
     [void]$script:activeJobs.Remove($Job)
 }
 
@@ -994,6 +1371,13 @@ function Run-SelfTest {
     }
     $roundTrip = 'history reservation test — exact text'
     if ((ConvertFrom-Base64Url (ConvertTo-Base64Url $roundTrip)) -ne $roundTrip) { throw 'Base64url history helper round-trip failed.' }
+    $plan = New-BatchProductionPlan 1 1
+    if ([string]::IsNullOrWhiteSpace([string]$plan.Format) -or
+        [string]::IsNullOrWhiteSpace([string]$plan.FormatVariant) -or
+        [string]::IsNullOrWhiteSpace([string]$plan.VoiceSignature) -or
+        [string]::IsNullOrWhiteSpace([string]$plan.PacingProfile)) {
+        throw 'Production planner did not select a complete pre-render plan.'
+    }
 
     $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('threadgens-parallel-selftest-' + [Guid]::NewGuid().ToString('N'))
     try {
@@ -1065,6 +1449,7 @@ Write-Host "Output root: $OutputRoot"
 Write-Host "Defaults: platform=$Platform, formatSelection=$FormatSelection, formatSeries=[$($FormatPool -join ',')], substyle=$FormatVariant, model=$Model, tts=$TtsEngine"
 Write-Host "Format cooldown history: $PublishHistoryPath (rotation offset $FormatOffset)"
 Write-Host "P1 voice selection: $VoiceSelection from [$VoiceSeries], delivery=$TtsDelivery, captions=$Captions"
+Write-Host "P1 production planner: pacingProfiles=[$PacingProfiles], identityHistoryLimit=$IdentityHistoryLimit"
 Write-Host 'Final MP4 names: title-based with no numeric prefix'
 Write-Host 'Rejected workers are replaced until every target slot is filled' -ForegroundColor Green
 if ($MaxAttempts -gt 0) { Write-Host "Attempt cap: $MaxAttempts total ideas" } else { Write-Host 'Attempt cap: none' }
@@ -1120,7 +1505,8 @@ try {
             $script:totalAttempts++
             [void](Add-SlotAttempt $slot)
             $attemptLabel = '{0:D4}' -f $script:totalAttempts
-            $ideaResult = Invoke-NewBatchIdeaSafe $script:totalAttempts $script:ideaHistory $script:seenIdeaKeys
+            $productionPlan = New-BatchProductionPlan $slot ([int]$attemptLabel)
+            $ideaResult = Invoke-NewBatchIdeaSafe $script:totalAttempts $script:ideaHistory $script:seenIdeaKeys $productionPlan
             if (-not $ideaResult.succeeded) {
                 $reason = [string]$ideaResult.reason
                 Add-IdeaHistoryEvent ([pscustomobject]@{
@@ -1144,7 +1530,7 @@ try {
             }
             $idea = $ideaResult.idea
             $script:ideaHistory = @($script:ideaHistory + $idea)
-            [void](Start-VideoWorker $slot $idea $attemptLabel)
+            [void](Start-VideoWorker $slot $idea $attemptLabel $productionPlan)
             $launchedSomething = $true
             # The newly launched worker must finish P0 generation and establish its
             # pending novelty reservation before another worker is allowed to start.
