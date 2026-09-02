@@ -12,14 +12,15 @@ set "MAX_SYNC_IDEAS=3"
 set "IDENTITY_HISTORY_LIMIT=2000"
 set "PACING_PROFILES=rapid_beats,balanced,slow_reveal,qa_cadence,three_act,staccato"
 set "MODEL=llama3.1:8b"
-set "VOICE=af_heart"
-set "VOICE_SERIES=af_heart,af_bella,af_nicole,bf_emma"
+set "VOICE=Ryan"
+set "VOICE_SERIES=Ryan,Aiden"
 set "PLATFORM=reddit"
 set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
 set "OP_IMAGE_FLAG="
 set "THREADGENS_VIDEO_ENCODER=auto"
-set "THREADGENS_KOKORO_VERBOSE=0"
-set "THREADGENS_REQUIRE_EXACT_KOKORO_TIMING=1"
+set "THREADGENS_QWEN3_VERBOSE=0"
+set "THREADGENS_QWEN3_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+set "THREADGENS_QWEN3_ATTN=sdpa"
 set "THREADGENS_REQUIRE_SMOOTH_REVEAL=1"
 set "PYTHONWARNINGS=ignore"
 set "HF_HUB_DISABLE_PROGRESS_BARS=1"
@@ -52,6 +53,7 @@ echo.
 echo This mode generates fresh ideas with local Ollama and keeps replacing rejected
 echo attempts until the requested number of approved final videos has been created.
 echo Ollama stays serialized while complete video workers render in parallel.
+echo Qwen3-TTS 1.7B stays loaded as a persistent local CUDA narration service.
 echo.
 echo Usage:
 echo   batch_create_videos_windows.bat [approved-video-target] [slides-per-video] [workers]
@@ -112,6 +114,7 @@ echo   slides:   %COUNT% per video
 echo   workers:  %WORKERS%
 echo   encoder:  %THREADGENS_VIDEO_ENCODER%
 echo   platform: %PLATFORM%
+echo   TTS:      Qwen3-TTS 1.7B CustomVoice
 echo   voices:   %VOICE_SERIES% (planner may use one voice or mixed per-slide pairs)
 echo   planner:  pacing %PACING_PROFILES%; identity history %IDENTITY_HISTORY_LIMIT%
 echo   slot cap: %MAX_SLOT_ATTEMPTS% attempts, %MAX_SLOT_RENDERED_REJECTS% rendered rejects
