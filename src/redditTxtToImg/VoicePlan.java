@@ -148,22 +148,45 @@ final class VoicePlan {
         if (rawVoices.isEmpty()) {
             if ("kokoro".equalsIgnoreCase(engine)) {
                 rawVoices.add("af_heart");
-            } else if ("qwen3".equalsIgnoreCase(engine) || "qwen3-tts".equalsIgnoreCase(engine)) {
+            } else if (isQwenEngine(engine)) {
                 rawVoices.add("Ryan");
             } else {
                 rawVoices.add("en_US-lessac-medium");
             }
         }
 
-        boolean namedVoiceEngine = "kokoro".equalsIgnoreCase(engine)
-                || "qwen3".equalsIgnoreCase(engine)
-                || "qwen3-tts".equalsIgnoreCase(engine);
         List<Path> result = new ArrayList<>();
         for (String value : rawVoices) {
-            result.add(namedVoiceEngine
-                    ? Path.of(value)
-                    : VoiceCatalog.resolveVoice(value, voiceDirectory));
+            if ("kokoro".equalsIgnoreCase(engine)) {
+                result.add(Path.of(value));
+            } else if (isQwenEngine(engine)) {
+                result.add(Path.of(normalizeQwenVoice(value)));
+            } else {
+                result.add(VoiceCatalog.resolveVoice(value, voiceDirectory));
+            }
         }
         return List.copyOf(result);
+    }
+
+    private static boolean isQwenEngine(String engine) {
+        return "qwen3".equalsIgnoreCase(engine) || "qwen3-tts".equalsIgnoreCase(engine);
+    }
+
+    private static String normalizeQwenVoice(String value) {
+        String safe = value == null ? "" : value.trim();
+        if (safe.isBlank()) {
+            return "Ryan";
+        }
+        String fileName = Path.of(safe).getFileName().toString();
+        if (fileName.toLowerCase(Locale.ROOT).endsWith(".onnx")) {
+            fileName = fileName.substring(0, fileName.length() - ".onnx".length());
+        }
+        // Existing CLI parsing resolves non-Kokoro --voice values as Piper paths.
+        // If the inherited default Piper voice leaks through, use Qwen's default
+        // English voice instead of sending an invalid speaker name to the model.
+        if ("en_us-lessac-medium".equalsIgnoreCase(fileName)) {
+            return "Ryan";
+        }
+        return fileName;
     }
 }
