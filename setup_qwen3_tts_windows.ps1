@@ -20,19 +20,25 @@ function Test-Command($Name) {
 }
 
 function New-QwenVenv {
-    if (Test-Command 'py') {
-        & py -3.12 -c "import sys; print(sys.version)" *> $null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host 'Creating Qwen3-TTS venv with Python 3.12...'
-            & py -3.12 -m venv $QwenVenvDir
-            return
-        }
-    }
     if (-not (Test-Command 'python')) {
-        throw 'Python was not found. Run setup_windows.bat first so Python 3.12 is installed.'
+        throw 'Python was not found. Run setup_windows.bat first so a supported Python is installed.'
     }
-    Write-Host 'Creating Qwen3-TTS venv with the default Python...'
+
+    $pythonVersion = (& python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')").Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not determine the default Python version.'
+    }
+
+    & python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Qwen3-TTS requires Python 3.9 or newer. Default Python is $pythonVersion."
+    }
+
+    Write-Host "Creating Qwen3-TTS venv with Python $pythonVersion..."
     & python -m venv $QwenVenvDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create the Qwen3-TTS venv with Python $pythonVersion."
+    }
 }
 
 Write-Step 'Setting up Qwen3-TTS 1.7B for NVIDIA CUDA'
