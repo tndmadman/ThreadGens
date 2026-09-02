@@ -1,7 +1,6 @@
-# Qwen3-TTS runtime dependencies. Torch/torchaudio are installed separately
-# from the CUDA 12.4 PyTorch index by setup_qwen3_tts_windows.ps1 so the
-# Windows environment does not accidentally fall back to CPU wheels.
-qwen-tts==0.1.1
+# Qwen3-TTS support dependencies. setup_qwen3_tts_windows.ps1 installs
+# CUDA-enabled torch/torchaudio and qwen-tts itself separately so pip cannot
+# replace the GPU PyTorch build with an unintended wheel.
 transformers==4.57.3
 accelerate==1.12.0
 gradio
