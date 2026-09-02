@@ -20,9 +20,9 @@ param(
     [string]$FormatSelection = 'per-slot',
     [string]$FormatSeries = 'thread_story,confession,debate,best_answers,escalating_conversation',
     [string]$FormatVariant = 'auto',
-    [string]$IdeaHistoryFile = 'data\batch_idea_history.jsonl',
-    [string]$GenerationHistoryFile = 'data\generation_history.jsonl',
-    [string]$PublishHistoryFile = 'data\publish_history.jsonl',
+    [string]$IdeaHistoryFile = 'data\\batch_idea_history.jsonl',
+    [string]$GenerationHistoryFile = 'data\\generation_history.jsonl',
+    [string]$PublishHistoryFile = 'data\\publish_history.jsonl',
     [int]$IdeaHistoryLimit = 80,
     [int]$IdeaRetries = 8,
     [int]$MaxAttempts = 0,
@@ -68,10 +68,10 @@ if ($GenerateOpImage -and $Workers -gt 1) {
 }
 
 $TtsEngine = 'kokoro'
-$KokoroPython = Join-Path $RepoRoot '.venv-kokoro\Scripts\python.exe'
-$WorkerScript = Join-Path $RepoRoot 'tools\batch_parallel_worker.ps1'
-$ProxyScript = Join-Path $RepoRoot 'tools\ollama_serial_proxy.py'
-$OutputRoot = Join-Path $RepoRoot ('output\batch_videos\' + $Platform + '_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+$KokoroPython = Join-Path $RepoRoot '.venv-kokoro\\Scripts\\python.exe'
+$WorkerScript = Join-Path $RepoRoot 'tools\\batch_parallel_worker.ps1'
+$ProxyScript = Join-Path $RepoRoot 'tools\\ollama_serial_proxy.py'
+$OutputRoot = Join-Path $RepoRoot ('output\\batch_videos\\' + $Platform + '_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
 $FinalDir = Join-Path $OutputRoot 'final_videos'
 $IdeaHistoryPath = if ([System.IO.Path]::IsPathRooted($IdeaHistoryFile)) { $IdeaHistoryFile } else { Join-Path $RepoRoot $IdeaHistoryFile }
 $GlobalGenerationHistoryPath = if ([System.IO.Path]::IsPathRooted($GenerationHistoryFile)) { $GenerationHistoryFile } else { Join-Path $RepoRoot $GenerationHistoryFile }
@@ -187,14 +187,14 @@ function ConvertFrom-IdeaResponse($Text) {
 }
 
 function Get-IdeaWordCount($Value) {
-    $text = (([string]$Value) -replace '\s+', ' ').Trim()
+    $text = (([string]$Value) -replace '\\s+', ' ').Trim()
     if ([string]::IsNullOrWhiteSpace($text)) { return 0 }
-    return @($text -split '\s+').Count
+    return @($text -split '\\s+').Count
 }
 
 function Get-IdeaShapeProblem($Title, $Body, $IdeaPlatform) {
-    $safeTitle = (([string]$Title) -replace '\s+', ' ').Trim()
-    $safeBody = (([string]$Body) -replace '\s+', ' ').Trim()
+    $safeTitle = (([string]$Title) -replace '\\s+', ' ').Trim()
+    $safeBody = (([string]$Body) -replace '\\s+', ' ').Trim()
     $platformName = (([string]$IdeaPlatform).ToLowerInvariant()).Trim()
     if ([string]::IsNullOrWhiteSpace($safeTitle) -or [string]::IsNullOrWhiteSpace($safeBody) -or $safeTitle.Length -lt 3 -or $safeBody.Length -lt 12) {
         return 'title/body is empty or too short'
@@ -208,7 +208,7 @@ function Get-IdeaShapeProblem($Title, $Body, $IdeaPlatform) {
     }
     if ($safeTitle.Length -gt 64 -or $titleWords -gt 11) { return "Reddit title is too long ($($safeTitle.Length) chars/$titleWords words; max 64 chars/11 words)" }
     if ($safeBody.Length -gt 300 -or $bodyWords -gt 52) { return "Reddit body is too long ($($safeBody.Length) chars/$bodyWords words; max 300 chars/52 words)" }
-    $longestTitleWord = @($safeTitle -split '\s+' | Sort-Object Length -Descending | Select-Object -First 1)[0]
+    $longestTitleWord = @($safeTitle -split '\\s+' | Sort-Object Length -Descending | Select-Object -First 1)[0]
     if ($null -ne $longestTitleWord -and ([string]$longestTitleWord).Length -gt 24) {
         return 'Reddit title contains a word longer than 24 characters, which is unsafe for fixed-width rendering'
     }
@@ -220,8 +220,8 @@ function Get-RecentIdeaBlock($History) {
     $start = [Math]::Max(0, $History.Count - $IdeaHistoryLimit)
     $lines = @()
     for ($i = $start; $i -lt $History.Count; $i++) {
-        $title = (([string]$History[$i].title) -replace '\s+', ' ').Trim()
-        $body = (([string]$History[$i].body) -replace '\s+', ' ').Trim()
+        $title = (([string]$History[$i].title) -replace '\\s+', ' ').Trim()
+        $body = (([string]$History[$i].body) -replace '\\s+', ' ').Trim()
         if ($body.Length -gt 180) { $body = $body.Substring(0, 177) + '...' }
         $lines += "- $title :: $body"
     }
@@ -230,14 +230,117 @@ function Get-RecentIdeaBlock($History) {
 
 function Invoke-NewBatchIdea($AttemptNumber, $History, [hashtable]$SeenKeys) {
     $themes = @(
-        'awkward social situation', 'workplace problem', 'family story', 'neighbor conflict',
-        'travel surprise', 'technology mishap', 'relationship misunderstanding', 'unexpected discovery',
-        'pet or animal story', 'school memory', 'customer service story', 'money or purchase dilemma',
-        'wholesome surprise', 'two-sided debate', 'confession or regret', 'ordinary situation that becomes strange'
+        'space exploration and orbital engineering',
+        'SpaceX rockets, launch systems, Starship, Falcon, or reusable rocketry',
+        'astronomy, planets, stars, black holes, or strange space phenomena',
+        'physics and counterintuitive everyday physics',
+        'chemistry, materials, unusual elements, or surprising reactions',
+        'nuclear science, fission, fusion, reactors, radiation, or isotope uses',
+        'clean energy, power grids, solar, wind, geothermal, storage, or transmission',
+        'batteries, charging, energy density, and electric vehicle engineering',
+        'Tesla vehicles, manufacturing, charging, autonomy engineering, or EV design',
+        'cars, engines, transmissions, aerodynamics, tires, or automotive engineering',
+        'motorsports, race engineering, unusual race cars, or speed records',
+        'aircraft, aviation engineering, airports, or unusual airplanes',
+        'ships, submarines, ports, maritime engineering, or ocean transport',
+        'trains, rail engineering, transit systems, or unusual rail technology',
+        'computers, CPUs, GPUs, memory, storage, cooling, or computer architecture',
+        'semiconductors, chip fabrication, lithography, or transistor technology',
+        'computer programming, algorithms, compilers, software design, or debugging',
+        'operating systems, retro computing, terminals, or unusual computer history',
+        'computer networking, the internet, data centers, cables, or infrastructure',
+        'AI, machine learning, neural networks, robotics, or computer vision',
+        'cybersecurity concepts, defensive computing, encryption, or privacy engineering',
+        'robotics, automation, industrial machines, or factory engineering',
+        '3D printing, CNC machining, manufacturing, tooling, or clever mechanisms',
+        'electronics, circuit design, sensors, radio, or embedded systems',
+        'quantum science, quantum computing, or strange quantum behavior',
+        'biology, evolution, genetics, cells, or unusual living systems',
+        'animal intelligence, behavior, senses, migration, or survival adaptations',
+        'weird animals, deep-sea creatures, insects, birds, reptiles, or microscopic life',
+        'plants, fungi, forests, ecology, or surprising plant behavior',
+        'ocean science, deep sea, currents, reefs, hydrothermal vents, or marine life',
+        'geology, volcanoes, earthquakes, minerals, caves, or strange landforms',
+        'weather, storms, lightning, atmospheric optics, or unusual climate phenomena',
+        'paleontology, dinosaurs, fossils, extinct animals, or ancient ecosystems',
+        'archaeology, ancient engineering, lost techniques, or historical artifacts',
+        'weird true historical event or overlooked moment in history',
+        'niche travel location, remote region, unusual landscape, or little-known destination',
+        'geography, borders, islands, enclaves, extreme places, or map oddities',
+        'architecture, megaprojects, bridges, tunnels, dams, towers, or unusual buildings',
+        'cities and infrastructure without defaulting to famous megacities',
+        'mines, quarries, tunnels, underground infrastructure, or large industrial sites',
+        'agriculture, food science, farming technology, or unusual crops',
+        'art, visual design, sculpture, photography, animation, or creative techniques',
+        'music technology, acoustics, instruments, recording, or sound science',
+        'everyday object with surprising engineering or hidden complexity',
+        'invention history, failed inventions, accidental discoveries, or clever patents',
+        'mathematics, probability, geometry, patterns, or counterintuitive statistics',
+        'psychology or perception phenomenon framed carefully as general curiosity',
+        'human senses, biomechanics, sleep, memory, or non-medical body science',
+        'logistics, warehouses, shipping networks, routing, or supply-chain engineering',
+        'space habitats, Moon or Mars engineering, life support, or off-world construction',
+        'future technology grounded in plausible engineering',
+        'science myth versus reality',
+        'unexpected scientific fact with a concrete mechanism behind it',
+        'weird natural event that really can happen',
+        'strange machine, vehicle, tool, or piece of industrial equipment',
+        'museum object, preserved machine, historic vehicle, or unusual artifact',
+        'travel surprise or cultural curiosity from a lesser-known place',
+        'pet or animal story with an unusual but believable behavior',
+        'wholesome human story',
+        'awkward social situation',
+        'workplace problem',
+        'family story',
+        'neighbor conflict',
+        'relationship misunderstanding',
+        'customer service story',
+        'money or purchase dilemma',
+        'two-sided debate where both positions have a real argument',
+        'confession or regret',
+        'ordinary situation that becomes unexpectedly interesting rather than horror'
     )
+    $lenses = @(
+        'surprising fact followed by the mechanism that explains it',
+        'a question that sounds simple but has a non-obvious answer',
+        'engineering tradeoff: why designers choose one compromise over another',
+        'compare two technologies, animals, places, machines, or approaches',
+        'hidden system people use every day without noticing',
+        'myth versus reality without being smug or preachy',
+        'what-if scenario that stays physically or technically plausible',
+        'small design detail that creates a surprisingly large consequence',
+        'niche historical connection that makes the modern world make more sense',
+        'visual or sensory phenomenon that would make a strong short video hook',
+        'counterintuitive behavior that invites explanations in the replies',
+        'one unusually specific object, machine, animal, place, or process',
+        'future possibility grounded in current science rather than fantasy',
+        'practical curiosity: why something is built or operated that way',
+        'unexpected comparison of scale, speed, energy, distance, cost, or complexity',
+        'mini mystery with a real technical or natural explanation, not horror',
+        'first-person observation that leads to a broader factual discussion',
+        'debate prompt with two defensible technical or cultural perspectives',
+        'overlooked failure, edge case, or unintended consequence',
+        'beautiful, weird, elegant, or absurd detail that is still believable'
+    )
+    $settings = @(
+        'No named city or country unless the subject genuinely needs one.',
+        'Keep the setting location-neutral; focus on the object, mechanism, animal, or fact.',
+        'Use a lab, workshop, garage, factory, launch site, data center, farm, port, mine, or field site if useful.',
+        'Use space, orbit, the Moon, Mars, an observatory, or a launch range if the subject calls for it.',
+        'Use a remote natural environment such as desert, tundra, rainforest, mountain, cave, reef, or deep ocean if relevant.',
+        'If a real location materially improves the idea, choose a lesser-known and geographically varied location rather than a default famous megacity.',
+        'Prefer a niche regional setting, small town, island, border region, industrial area, rural site, or unusual landscape when place matters.',
+        'Use a road, racetrack, rail yard, airport, shipyard, charging station, power plant, or infrastructure site when it fits.',
+        'No named location; make this one globally relatable.',
+        'No named location; make the hook about scale, mechanism, design, behavior, or discovery.'
+    )
+    $sequence = [Math]::Max(1, [int]$AttemptNumber)
     $shapeFeedback = ''
     for ($ideaTry = 1; $ideaTry -le $IdeaRetries; $ideaTry++) {
-        $theme = $themes[(($AttemptNumber + $ideaTry - 2) % $themes.Count)]
+        $axis = $sequence + $ideaTry - 1
+        $theme = $themes[(($axis * 17 + 3) % $themes.Count)]
+        $lens = $lenses[(($axis * 11 + 5) % $lenses.Count)]
+        $setting = $settings[(($axis * 7 + 1) % $settings.Count)]
         $recentBlock = Get-RecentIdeaBlock $History
         if ($Platform -eq 'x') {
             $shape = @"
@@ -265,14 +368,27 @@ Keep both fields compact. Do not pad the setup with extra adjectives, backstory,
 $shape
 $correction
 
-Target idea family for this attempt: $theme
+Target subject family: $theme
+Creative lens: $lens
+Setting guidance: $setting
+
+Diversity mandate:
+- The subject family is the core of this attempt. It can be educational, technical, scientific, weird, factual, speculative, travel-focused, animal-focused, artistic, or personal. Do NOT force every seed into interpersonal conflict.
+- A seed may be a question, startling fact, comparison, scenario, mini-explainer, engineering tradeoff, niche-location curiosity, observation, debate, or human story.
+- Strongly vary domains across the batch. Avoid falling back to the same cities, jobs, relationship conflicts, horror beats, mysterious notes, abandoned buildings, or generic "something strange happened" setups.
+- Named places are optional. Do not default to Tokyo, Japan, New York, Los Angeles, London, Paris, Dubai, or another famous megacity. Tokyo is not banned; it should simply be rare and only appear when genuinely relevant.
+- When a location matters, choose it because the subject belongs there. Vary continents, climates, rural/urban scale, industrial/natural settings, and well-known versus obscure places. Do not reuse a place from RECENT IDEAS.
+- For science, engineering, technology, animals, and history, prefer a concrete real mechanism, stable fact, or clearly framed question. Never invent a study, quote, discovery, record, accident, launch, product announcement, or breaking-news claim.
+- SpaceX, Tesla, EVs, AI, nuclear science, energy, cars, and other real technologies are welcome subjects, but use stable/common knowledge or curiosity rather than pretending to know current announcements or live status.
+- Be specific enough to create vivid replies: name the component, animal, material, machine, phenomenon, design constraint, landscape, or process when useful.
+- Keep the premise understandable to a general audience without flattening it into generic trivia.
 
 Hard rules:
 - Invent a materially new premise, not a paraphrase of anything in RECENT IDEAS.
-- Vary hook, setting, people, objects, conflict, emotional tone, and likely reply structure.
-- Do not keep producing horror/mystery prompts; use the requested idea family and broad variety across attempts.
+- Vary hook, setting, people, objects, mechanism, question type, emotional tone, and likely reply structure.
+- Do not keep producing horror/mystery prompts; broad curiosity and useful knowledge should be common.
 - Make the setup easy to narrate aloud.
-- Do not mention ThreadGens, AI, prompts, engagement counts, verification, moderation actions, or platform algorithms.
+- Do not mention ThreadGens, AI prompts, engagement counts, verification, moderation actions, or platform algorithms. AI itself may be the subject when the selected family calls for it.
 - Do not make accusations about identifiable real people.
 - Respect every title/body size limit above. Limits are hard validation rules, not suggestions.
 - No markdown, no code fence, no explanation: output only the JSON object.
@@ -287,7 +403,7 @@ $recentBlock
             stream = $false
             format = 'json'
             keep_alive = $keepAlive
-            options = @{ temperature = 1.02; top_p = 0.95 }
+            options = @{ temperature = 1.10; top_p = 0.97; top_k = 60; repeat_penalty = 1.12 }
         } | ConvertTo-Json -Depth 8
         try {
             $response = Invoke-RestMethod -Uri $script:OllamaGenerateUrl -Method Post -ContentType 'application/json' -Body $payload -TimeoutSec 300
@@ -297,8 +413,8 @@ $recentBlock
             Write-Host "Idea generation try $ideaTry/$IdeaRetries failed: $($_.Exception.Message)" -ForegroundColor Yellow
             continue
         }
-        $title = (([string]$idea.title) -replace '\s+', ' ').Trim()
-        $body = (([string]$idea.body) -replace '\s+', ' ').Trim()
+        $title = (([string]$idea.title) -replace '\\s+', ' ').Trim()
+        $body = (([string]$idea.body) -replace '\\s+', ' ').Trim()
         $shapeProblem = Get-IdeaShapeProblem $title $body $Platform
         if (-not [string]::IsNullOrWhiteSpace([string]$shapeProblem)) {
             $shapeFeedback = [string]$shapeProblem
@@ -315,7 +431,7 @@ $recentBlock
         $created = (Get-Date).ToUniversalTime().ToString('o')
         $entry = [pscustomobject]@{
             event = 'generated'; id = $id; created = $created; status = 'generated'; attempt = $AttemptNumber
-            platform = $Platform; theme = $theme; title = $title; body = $body; key = $key
+            platform = $Platform; theme = $theme; lens = $lens; setting = $setting; title = $title; body = $body; key = $key
         }
         Add-IdeaHistoryEvent $entry
         $SeenKeys[$key] = $true
@@ -470,8 +586,8 @@ function Update-WorkerGenerationState($Job) {
     $formatMarker = $null
     $variantMarker = $null
     try {
-        $formatMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format:\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
-        $variantMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format variant:\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
+        $formatMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format:\\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
+        $variantMarker = Select-String -Path $Job.LogPath -Pattern '^P0 format variant:\\s+([a-z_]+)' -ErrorAction Stop | Select-Object -Last 1
     } catch { }
     if ($null -eq $formatMarker -or $null -eq $variantMarker) { return }
     try { $scriptText = (Get-Content -Raw -Path $Job.ScriptOut -Encoding UTF8).Trim() } catch { return }
@@ -540,7 +656,7 @@ function Start-VideoWorker($Slot, $Idea, $AttemptLabel) {
 
     $javaArgs = @(
         '-cp', 'out', 'redditTxtToImg.OpImageVideoSafeRunner',
-        'data\comments.txt', $imageDir,
+        'data\\comments.txt', $imageDir,
         '--platform', $Platform,
         '--auto',
         '--post-title', $title,
@@ -674,7 +790,7 @@ function Run-SelfTest {
                 Format = 'thread_story'; Variant = 'witness_chain'
             }
         }
-        $snapshot = Join-Path $temp 'job\history.jsonl'
+        $snapshot = Join-Path $temp 'job\\history.jsonl'
         New-JobHistorySnapshot $snapshot
         $rows = @(Get-Content $snapshot -Encoding UTF8)
         if ($rows.Count -ne 1 -or $rows[0] -notmatch '"hash":"pending"') { throw 'Pending novelty reservation was not written to the worker history snapshot.' }
@@ -739,8 +855,8 @@ if ($GenerateOpImage) { Write-Host 'OP image generation: enabled; worker count f
 
 Write-Step 'Building Java files'
 New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot 'out') | Out-Null
-$javaFiles = Get-ChildItem -Path (Join-Path $RepoRoot 'src\redditTxtToImg') -Filter '*.java' | ForEach-Object { $_.FullName }
-if (-not $javaFiles -or $javaFiles.Count -eq 0) { throw 'No Java files found in src\redditTxtToImg.' }
+$javaFiles = Get-ChildItem -Path (Join-Path $RepoRoot 'src\\redditTxtToImg') -Filter '*.java' | ForEach-Object { $_.FullName }
+if (-not $javaFiles -or $javaFiles.Count -eq 0) { throw 'No Java files found in src\\redditTxtToImg.' }
 & javac -d (Join-Path $RepoRoot 'out') $javaFiles
 if ($LASTEXITCODE -ne 0) { throw "Java build failed with exit code $LASTEXITCODE." }
 
