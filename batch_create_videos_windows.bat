@@ -109,6 +109,29 @@ set /p "UNLOAD_OLLAMA=Unload Ollama between generation calls? y/N [default N, ke
 if /I "%UNLOAD_OLLAMA%"=="Y" set "KEEP_OLLAMA_FLAG="
 if /I "%UNLOAD_OLLAMA%"=="YES" set "KEEP_OLLAMA_FLAG="
 
+set "QWEN_EFFECTIVE_WORKERS=%WORKERS%"
+if defined OP_IMAGE_FLAG set "QWEN_EFFECTIVE_WORKERS=1"
+set /a QWEN_MAX_QUEUE=QWEN_EFFECTIVE_WORKERS*2
+if %QWEN_MAX_QUEUE% LSS 4 set "QWEN_MAX_QUEUE=4"
+set "THREADGENS_QWEN3_WORKERS=%QWEN_EFFECTIVE_WORKERS%"
+set "THREADGENS_QWEN3_MAX_BATCH=%QWEN_EFFECTIVE_WORKERS%"
+set "THREADGENS_QWEN3_BATCH_WINDOW_MS=100"
+set "THREADGENS_QWEN3_MAX_QUEUE=%QWEN_MAX_QUEUE%"
+
+echo.
+echo Preparing Qwen3-TTS worker-aware GPU scheduler...
+echo   worker lanes: %QWEN_EFFECTIVE_WORKERS%
+echo   max batch:    %QWEN_EFFECTIVE_WORKERS%
+echo   queue limit:  %QWEN_MAX_QUEUE%
+"%THREADGENS_QWEN3_PYTHON%" "%~dp0tools\qwen3_tts.py" --ensure-server --workers %QWEN_EFFECTIVE_WORKERS% --max-batch %QWEN_EFFECTIVE_WORKERS% --batch-window-ms 100 --max-queue %QWEN_MAX_QUEUE%
+if errorlevel 1 (
+  echo.
+  echo Qwen3-TTS scheduler startup/configuration failed. Batch workers were not started.
+  echo If an older Qwen service is still listening on port 8765, stop it once and rerun this launcher.
+  pause
+  exit /b 1
+)
+
 echo.
 echo Starting color live batch dashboard...
 echo   target:   %TARGET_VIDEOS% approved videos

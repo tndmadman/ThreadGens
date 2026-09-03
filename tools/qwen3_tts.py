@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ThreadGens Qwen3-TTS client with automatic persistent-server startup."""
+"""ThreadGens Qwen3-TTS client and persistent-server bootstrap helper."""
 
 from __future__ import annotations
 
@@ -51,31 +51,47 @@ def _health(timeout: float = 1.5) -> dict | None:
 
 @contextlib.contextmanager
 def _startup_lock():
+    """Serialize server startup without blocking-lock reentrancy failures on Windows."""
     lock_path = _runtime_dir() / "qwen3_tts_server.start.lock"
     handle = open(lock_path, "a+b")
+    locked = False
     try:
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
             handle.write(b"\0")
             handle.flush()
         handle.seek(0)
+
         if os.name == "nt":
             import msvcrt
 
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
+            deadline = time.monotonic() + 1200.0
+            while True:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    locked = True
+                    break
+                except OSError:
+                    if _health(timeout=1.0) is not None:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Timed out waiting for the Qwen3-TTS startup lock.")
+                    time.sleep(0.10)
+            yield
+            if locked:
                 handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         else:
             import fcntl
 
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            locked = True
             try:
                 yield
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                locked = False
     finally:
         handle.close()
 
@@ -152,6 +168,48 @@ def _ensure_server() -> dict:
     )
 
 
+def _configure_server(
+    workers: int | None,
+    max_batch: int | None,
+    batch_window_ms: int | None,
+    max_queue: int | None,
+) -> dict:
+    ready = _ensure_server()
+    if "scheduler_version" not in ready:
+        raise RuntimeError(
+            "The running Qwen3-TTS service predates the worker-aware batch scheduler. "
+            "Stop the process listening on port 8765 once, then rerun ThreadGens."
+        )
+
+    payload: dict[str, int] = {}
+    if workers is not None:
+        payload["workers"] = max(1, int(workers))
+    if max_batch is not None:
+        payload["max_batch"] = max(1, int(max_batch))
+    if batch_window_ms is not None:
+        payload["batch_window_ms"] = max(0, int(batch_window_ms))
+    if max_queue is not None:
+        payload["max_queue"] = max(1, int(max_queue))
+    if not payload:
+        return ready
+
+    request = urllib.request.Request(
+        _base_url() + "/configure",
+        data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10.0) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Qwen3-TTS configuration failed with HTTP {exc.code}: {body}") from exc
+    if not value.get("ok"):
+        raise RuntimeError(f"Qwen3-TTS configuration failed: {value}")
+    return {**ready, **value}
+
+
 def _synthesize(args: argparse.Namespace) -> None:
     text_path = Path(args.text_file)
     output_path = Path(args.output)
@@ -166,6 +224,11 @@ def _synthesize(args: argparse.Namespace) -> None:
             flush=True,
         )
 
+    worker_id = (
+        args.worker_id
+        or os.environ.get("THREADGENS_WORKER_ID")
+        or f"python-{os.getpid()}"
+    )
     payload = {
         "text": text,
         "speaker": args.voice,
@@ -173,6 +236,8 @@ def _synthesize(args: argparse.Namespace) -> None:
         "speed": args.speed,
         "sentence_pause_ms": args.sentence_pause_ms,
         "delivery": args.delivery,
+        "worker_id": worker_id,
+        "request_id": f"{worker_id}-{output_path.stem}",
     }
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
@@ -181,7 +246,7 @@ def _synthesize(args: argparse.Namespace) -> None:
         method="POST",
         headers={"Content-Type": "application/json; charset=utf-8"},
     )
-    request_timeout = int(os.environ.get("THREADGENS_QWEN3_REQUEST_TIMEOUT", "900"))
+    request_timeout = int(os.environ.get("THREADGENS_QWEN3_REQUEST_TIMEOUT", "1800"))
     try:
         with urllib.request.urlopen(request, timeout=max(30, request_timeout)) as response:
             audio = response.read()
@@ -215,13 +280,30 @@ def main() -> int:
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed, 0.60-1.60")
     parser.add_argument("--sentence-pause-ms", type=int, default=180)
     parser.add_argument("--delivery", default="natural", choices=["natural", "calm", "energetic", "dramatic"])
+    parser.add_argument("--worker-id", default="")
+    parser.add_argument("--ensure-server", action="store_true", help="Start/validate the persistent service and exit")
+    parser.add_argument("--workers", type=int)
+    parser.add_argument("--max-batch", type=int)
+    parser.add_argument("--batch-window-ms", type=int)
+    parser.add_argument("--max-queue", type=int)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
     if args.self_test:
         return _self_test()
+
+    if args.ensure_server:
+        ready = _configure_server(
+            workers=args.workers,
+            max_batch=args.max_batch,
+            batch_window_ms=args.batch_window_ms,
+            max_queue=args.max_queue,
+        )
+        print(json.dumps(ready, sort_keys=True), flush=True)
+        return 0
+
     if not args.text_file or not args.output:
-        parser.error("--text-file and --output are required unless --self-test is used")
+        parser.error("--text-file and --output are required unless --self-test or --ensure-server is used")
     if not 0.60 <= args.speed <= 1.60:
         parser.error("--speed must be between 0.60 and 1.60")
     if not 0 <= args.sentence_pause_ms <= 2000:
