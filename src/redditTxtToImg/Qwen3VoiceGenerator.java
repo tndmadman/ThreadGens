@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
@@ -16,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 final class Qwen3VoiceGenerator extends VoiceGenerator {
     private static final Object STARTUP_LOCK = new Object();
     private static final String DEFAULT_URL = "http://127.0.0.1:8765";
+    private static final String VIDEO_VOICE_SERIES_ENV = "THREADGENS_QWEN3_VIDEO_VOICE_SERIES";
 
     private final String command;
     private final int timeoutSeconds;
@@ -65,9 +68,10 @@ final class Qwen3VoiceGenerator extends VoiceGenerator {
             Files.createDirectories(outputFile.getParent());
         }
 
-        String voiceName = selectedVoice == null || selectedVoice.toString().isBlank()
+        String requestedVoice = selectedVoice == null || selectedVoice.toString().isBlank()
                 ? "Ryan"
                 : selectedVoice.toString();
+        String voiceName = resolveVideoVoice(outputFile, requestedVoice);
 
         ensureServer();
 
@@ -123,6 +127,58 @@ final class Qwen3VoiceGenerator extends VoiceGenerator {
 
         Files.write(outputFile, audio);
         writeVoiceMetadata(outputFile, voiceName);
+    }
+
+    /**
+     * The batch launcher can make the video slot authoritative for Qwen voice
+     * selection. Every narration clip under one slot therefore uses the same
+     * speaker, while consecutive video slots rotate through the configured pool.
+     */
+    private static String resolveVideoVoice(Path outputFile, String fallbackVoice) {
+        String configuredSeries = System.getenv(VIDEO_VOICE_SERIES_ENV);
+        if (configuredSeries == null || configuredSeries.isBlank()) {
+            return fallbackVoice;
+        }
+
+        List<String> voices = new ArrayList<>();
+        for (String value : configuredSeries.split("[,;]")) {
+            String voice = value.trim();
+            if (!voice.isBlank() && !voices.contains(voice)) {
+                voices.add(voice);
+            }
+        }
+        if (voices.isEmpty()) {
+            return fallbackVoice;
+        }
+
+        int slot = extractVideoSlot(outputFile);
+        int index = slot > 0 ? Math.floorMod(slot - 1, voices.size()) : 0;
+        return voices.get(index);
+    }
+
+    private static int extractVideoSlot(Path outputFile) {
+        if (outputFile == null) {
+            return -1;
+        }
+        String value = outputFile.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
+        String marker = "_slot_";
+        int start = value.lastIndexOf(marker);
+        if (start < 0) {
+            return -1;
+        }
+        start += marker.length();
+        int end = start;
+        while (end < value.length() && Character.isDigit(value.charAt(end))) {
+            end++;
+        }
+        if (end == start) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(value.substring(start, end));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     private void ensureServer() throws IOException, InterruptedException {
