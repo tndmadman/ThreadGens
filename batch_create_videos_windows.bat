@@ -13,7 +13,7 @@ set "IDENTITY_HISTORY_LIMIT=2000"
 set "PACING_PROFILES=rapid_beats,balanced,slow_reveal,qa_cadence,three_act,staccato"
 set "MODEL=llama3.1:8b"
 set "VOICE=Ryan"
-set "VOICE_SERIES=Ryan,Aiden"
+set "VOICE_SERIES=Ryan,Aiden,Ono_Anna,Sohee"
 set "PLATFORM=reddit"
 set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
 set "OP_IMAGE_FLAG="
@@ -23,6 +23,7 @@ set "THREADGENS_QWEN3_PYTHON=%~dp0.venv-qwen3-tts\Scripts\python.exe"
 set "THREADGENS_QWEN3_VERBOSE=0"
 set "THREADGENS_QWEN3_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
 set "THREADGENS_QWEN3_ATTN=sdpa"
+set "THREADGENS_QWEN3_VIDEO_VOICE_SERIES=%VOICE_SERIES%"
 set "THREADGENS_REQUIRE_SMOOTH_REVEAL=1"
 set "PYTHONWARNINGS=ignore"
 set "HF_HUB_DISABLE_PROGRESS_BARS=1"
@@ -140,7 +141,7 @@ echo   workers:  %WORKERS%
 echo   encoder:  %THREADGENS_VIDEO_ENCODER%
 echo   platform: %PLATFORM%
 echo   TTS:      Qwen3-TTS 1.7B CustomVoice
-echo   voices:   %VOICE_SERIES% (planner may use one voice or mixed per-slide pairs)
+echo   voices:   %VOICE_SERIES% (one stable voice per video; rotates by video slot)
 echo   planner:  pacing %PACING_PROFILES%; identity history %IDENTITY_HISTORY_LIMIT%
 echo   slot cap: %MAX_SLOT_ATTEMPTS% attempts, %MAX_SLOT_RENDERED_REJECTS% rendered rejects
 echo   cooldown: Tokyo/Japan %MAX_TOKYO_IDEAS%, sync/alignment %MAX_SYNC_IDEAS%
