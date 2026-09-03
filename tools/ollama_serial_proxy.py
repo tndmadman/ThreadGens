@@ -8,8 +8,70 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
+REDDIT_IDEA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "body": {"type": "string"},
+    },
+    "required": ["title", "body"],
+    "additionalProperties": False,
+}
+
+X_IDEA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "body": {"type": "string"},
+    },
+    "required": ["title", "body"],
+    "additionalProperties": False,
+}
+
+
+def constrain_threadgens_idea_request(body):
+    """Force batch seed requests into the exact title/body shape ThreadGens expects."""
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return body, None
+
+    if not isinstance(payload, dict):
+        return body, None
+
+    prompt = str(payload.get("prompt") or "")
+    if "Create one NEW ThreadGens Reddit seed." in prompt:
+        schema = REDDIT_IDEA_SCHEMA
+        kind = "reddit"
+    elif "Create one NEW ThreadGens X seed." in prompt:
+        schema = X_IDEA_SCHEMA
+        kind = "x"
+    else:
+        return body, None
+
+    # format='json' only guarantees some JSON. A JSON schema guarantees the
+    # two fields the batch parser actually consumes and blocks unrelated
+    # article/search-shaped objects.
+    payload["format"] = schema
+
+    # The batch prompt previously used temperature 1.10. That is useful for
+    # free-form ideation but unnecessarily increases schema drift. Keep enough
+    # randomness for varied seeds while making the structured response stable.
+    options = payload.get("options")
+    if not isinstance(options, dict):
+        options = {}
+    try:
+        temperature = float(options.get("temperature", 0.80))
+    except (TypeError, ValueError):
+        temperature = 0.80
+    options["temperature"] = min(temperature, 0.80)
+    payload["options"] = options
+
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8"), kind
+
+
 class SerialProxyHandler(BaseHTTPRequestHandler):
-    server_version = "ThreadGensOllamaProxy/1.0"
+    server_version = "ThreadGensOllamaProxy/1.1"
 
     def log_message(self, fmt, *args):
         return
@@ -28,10 +90,16 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length)
+        body, constrained_kind = constrain_threadgens_idea_request(body)
         upstream = self.server.upstream.rstrip("/") + self.path
         started = time.time()
         self.server.request_counter += 1
         request_id = self.server.request_counter
+        if constrained_kind:
+            print(
+                f"[ollama-proxy] #{request_id} constrained {constrained_kind} seed to title/body schema",
+                flush=True,
+            )
         print(f"[ollama-proxy] #{request_id} -> {self.path}", flush=True)
 
         request = urllib.request.Request(
