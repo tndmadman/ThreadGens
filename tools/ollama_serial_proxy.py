@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -11,8 +12,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 REDDIT_IDEA_SCHEMA = {
     "type": "object",
     "properties": {
-        "title": {"type": "string"},
-        "body": {"type": "string"},
+        "title": {"type": "string", "minLength": 3, "maxLength": 64},
+        "body": {"type": "string", "minLength": 12, "maxLength": 300},
     },
     "required": ["title", "body"],
     "additionalProperties": False,
@@ -21,16 +22,53 @@ REDDIT_IDEA_SCHEMA = {
 X_IDEA_SCHEMA = {
     "type": "object",
     "properties": {
-        "title": {"type": "string"},
-        "body": {"type": "string"},
+        "title": {"type": "string", "minLength": 3, "maxLength": 48},
+        "body": {"type": "string", "minLength": 12, "maxLength": 280},
     },
     "required": ["title", "body"],
     "additionalProperties": False,
 }
 
 
+def _prompt_value(prompt, label, fallback):
+    match = re.search(rf"(?m)^{re.escape(label)}\s*(.+?)\s*$", prompt)
+    if not match:
+        return fallback
+    value = " ".join(match.group(1).split())
+    return value or fallback
+
+
+def _compact_seed_prompt(prompt, kind):
+    subject = _prompt_value(prompt, "Target subject family:", "an interesting everyday or technical subject")
+    lens = _prompt_value(prompt, "Creative lens:", "a concrete angle with a clear hook")
+    setting = _prompt_value(prompt, "Setting guidance:", "use a natural setting only if it helps the idea")
+
+    if kind == "reddit":
+        return (
+            "Create one strong Reddit post seed.\n"
+            f"Subject: {subject}\n"
+            f"Angle: {lens}\n"
+            f"Context: {setting}\n\n"
+            "Write a natural Reddit-style title and a concrete body that gives people something specific to respond to.\n"
+            "Title: 5-11 words, at most 64 characters.\n"
+            "Body: 1-2 sentences, about 25-45 words, at most 300 characters.\n"
+            "Return only the title and body required by the JSON schema."
+        )
+
+    return (
+        "Create one strong X post seed.\n"
+        f"Subject: {subject}\n"
+        f"Angle: {lens}\n"
+        f"Context: {setting}\n\n"
+        "Write a concise visible post with a short hidden reply-style title.\n"
+        "Title: at most 8 words and 48 characters.\n"
+        "Body: at most 280 characters.\n"
+        "Return only the title and body required by the JSON schema."
+    )
+
+
 def constrain_threadgens_idea_request(body):
-    """Force batch seed requests into the exact title/body shape ThreadGens expects."""
+    """Turn batch seed generation into a small, schema-bound Ollama task."""
     try:
         payload = json.loads(body.decode("utf-8"))
     except Exception:
@@ -49,29 +87,29 @@ def constrain_threadgens_idea_request(body):
     else:
         return body, None
 
-    # format='json' only guarantees some JSON. A JSON schema guarantees the
-    # two fields the batch parser actually consumes and blocks unrelated
-    # article/search-shaped objects.
+    # Do not ask the 8B model to reason over the whole batch controller prompt.
+    # The PowerShell code already owns novelty, cooldown, render-fit, and retry
+    # decisions. Give the model only the creative axes needed for this one seed.
+    payload["prompt"] = _compact_seed_prompt(prompt, kind)
     payload["format"] = schema
 
-    # The batch prompt previously used temperature 1.10. That is useful for
-    # free-form ideation but unnecessarily increases schema drift. Keep enough
-    # randomness for varied seeds while making the structured response stable.
+    # Tuned for short structured ideation: enough variation to avoid clones,
+    # without the 1.10-temperature drift that produced unrelated JSON shapes.
     options = payload.get("options")
     if not isinstance(options, dict):
         options = {}
-    try:
-        temperature = float(options.get("temperature", 0.80))
-    except (TypeError, ValueError):
-        temperature = 0.80
-    options["temperature"] = min(temperature, 0.80)
+    options["temperature"] = 0.72
+    options["top_p"] = 0.90
+    options["top_k"] = 40
+    options["repeat_penalty"] = 1.05
+    options["num_predict"] = 180
     payload["options"] = options
 
     return json.dumps(payload, separators=(",", ":")).encode("utf-8"), kind
 
 
 class SerialProxyHandler(BaseHTTPRequestHandler):
-    server_version = "ThreadGensOllamaProxy/1.1"
+    server_version = "ThreadGensOllamaProxy/1.2"
 
     def log_message(self, fmt, *args):
         return
@@ -97,7 +135,7 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
         request_id = self.server.request_counter
         if constrained_kind:
             print(
-                f"[ollama-proxy] #{request_id} constrained {constrained_kind} seed to title/body schema",
+                f"[ollama-proxy] #{request_id} tuned {constrained_kind} seed: compact prompt + strict title/body schema",
                 flush=True,
             )
         print(f"[ollama-proxy] #{request_id} -> {self.path}", flush=True)
