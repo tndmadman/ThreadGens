@@ -83,8 +83,9 @@ final class Qwen3VoiceGenerator extends VoiceGenerator {
                 + ",\"speaker\":" + JsonText.quote(voiceName)
                 + ",\"language\":" + JsonText.quote(delivery.language())
                 + ",\"speed\":" + String.format(Locale.ROOT, "%.4f", delivery.speed())
-                + ",\"sentence_pause_ms\":" + delivery.sentencePauseMs()
+                + ",\"sentence_pause_ms\":" + Math.min(delivery.sentencePauseMs(), 120)
                 + ",\"delivery\":" + JsonText.quote(delivery.preset())
+                + ",\"instruct\":" + JsonText.quote(shortFormInstruction())
                 + ",\"worker_id\":" + JsonText.quote(workerId)
                 + ",\"request_id\":" + JsonText.quote(requestId)
                 + "}";
@@ -127,6 +128,28 @@ final class Qwen3VoiceGenerator extends VoiceGenerator {
 
         Files.write(outputFile, audio);
         writeVoiceMetadata(outputFile, voiceName);
+    }
+
+    private String shortFormInstruction() {
+        String style = switch (delivery.preset()) {
+            case "calm" -> "calm and controlled, but never slow or sleepy";
+            case "energetic" -> "energetic, engaging, and conversational";
+            case "dramatic" -> "expressive and punchy without theatrical pauses";
+            default -> "natural, direct, and conversational";
+        };
+        String pace;
+        if (delivery.speed() >= 1.12) {
+            pace = "Use a very fast high-retention short-form video pace, around 15 to 20 percent faster than ordinary conversation.";
+        } else if (delivery.speed() >= 1.0) {
+            pace = "Use a fast compact short-form video pace, around 10 to 15 percent faster than ordinary conversation.";
+        } else {
+            pace = "Keep a brisk short-form video pace even for this more deliberate delivery; it must still feel faster than long-form narration.";
+        }
+        return "Speak in a " + style + " manner. "
+                + pace + " Keep gaps between phrases and sentences tight, move through punctuation without lingering, "
+                + "and avoid drawn-out words, dramatic dead air, or slow podcast-style delivery. "
+                + "Keep every word intelligible and preserve a natural human rhythm. "
+                + "Use a clean, dry, close-microphone studio sound with no echo, reverb, room ambience, doubled voice, or special effect.";
     }
 
     /**
