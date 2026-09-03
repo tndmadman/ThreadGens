@@ -342,6 +342,8 @@ class BatchScheduler:
         self._oom_backoffs = 0
         self._queue_wait_total = 0.0
         self._inference_total = 0.0
+        self._scalar_calls = 0
+        self._batched_calls = 0
         self._thread = threading.Thread(
             target=self._run,
             name="ThreadGensQwenBatchScheduler",
@@ -446,7 +448,7 @@ class BatchScheduler:
             else 0.0
         )
         return {
-            "scheduler_version": 1,
+            "scheduler_version": 2,
             "workers": self._workers,
             "queue_depth": self._pending,
             "max_queue": self._max_queue,
@@ -458,6 +460,8 @@ class BatchScheduler:
             "completed_chunks": self._completed_chunks,
             "failed_requests": self._failed_requests,
             "batch_calls": self._batch_calls,
+            "scalar_calls": self._scalar_calls,
+            "batched_calls": self._batched_calls,
             "oom_backoffs": self._oom_backoffs,
             "avg_queue_ms": round(avg_queue_ms, 1),
             "avg_inference_ms": round(avg_inference_ms, 1),
@@ -574,25 +578,45 @@ class BatchScheduler:
             self._process_with_isolation(live[midpoint:])
 
     def _infer(self, jobs: list[ChunkJob]) -> None:
-        texts = [job.text for job in jobs]
-        languages = [job.request.language for job in jobs]
-        speakers = [job.request.speaker for job in jobs]
-        instructs = [job.request.instruct for job in jobs]
+        if len(jobs) == 1:
+            # Preserve Qwen's known-good scalar API when only one worker is ready.
+            # The previous scheduler always wrapped scalar inputs in lists, which
+            # changed the model execution path even though no real batching existed.
+            job = jobs[0]
+            print(
+                f"[qwen3-tts] GPU scalar worker={job.request.worker_id}",
+                flush=True,
+            )
+            wavs, sample_rate = _MODEL.generate_custom_voice(
+                text=job.text,
+                language=job.request.language,
+                speaker=job.request.speaker,
+                instruct=job.request.instruct,
+            )
+            with self._cv:
+                self._scalar_calls += 1
+        else:
+            texts = [job.text for job in jobs]
+            languages = [job.request.language for job in jobs]
+            speakers = [job.request.speaker for job in jobs]
+            instructs = [job.request.instruct for job in jobs]
+            print(
+                f"[qwen3-tts] GPU batch={len(jobs)} workers="
+                f"{','.join(dict.fromkeys(job.request.worker_id for job in jobs))}",
+                flush=True,
+            )
+            wavs, sample_rate = _MODEL.generate_custom_voice(
+                text=texts,
+                language=languages,
+                speaker=speakers,
+                instruct=instructs,
+            )
+            with self._cv:
+                self._batched_calls += 1
 
-        print(
-            f"[qwen3-tts] GPU batch={len(jobs)} workers="
-            f"{','.join(dict.fromkeys(job.request.worker_id for job in jobs))}",
-            flush=True,
-        )
-        wavs, sample_rate = _MODEL.generate_custom_voice(
-            text=texts,
-            language=languages,
-            speaker=speakers,
-            instruct=instructs,
-        )
         if len(wavs) != len(jobs):
             raise RuntimeError(
-                f"Qwen3-TTS returned {len(wavs)} waveforms for a batch of {len(jobs)} requests."
+                f"Qwen3-TTS returned {len(wavs)} waveforms for {len(jobs)} request(s)."
             )
 
         newly_completed: set[str] = set()
@@ -651,7 +675,7 @@ class BatchScheduler:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ThreadGensQwen3TTS/2.0"
+    server_version = "ThreadGensQwen3TTS/2.1"
 
     def _send_json(self, status: int, value: dict[str, Any]) -> None:
         data = json.dumps(value, separators=(",", ":")).encode("utf-8")
@@ -680,7 +704,7 @@ class Handler(BaseHTTPRequestHandler):
                     "model": _MODEL_ID,
                     "device": _DEVICE,
                     "dtype": _DTYPE_NAME,
-                    "audio_pipeline": "coherent-generation-worker-microbatch-no-time-stretch",
+                    "audio_pipeline": "scalar-when-alone-worker-microbatch-no-time-stretch",
                     **scheduler,
                 },
             )

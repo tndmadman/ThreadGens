@@ -29,6 +29,8 @@ X_IDEA_SCHEMA = {
     "additionalProperties": False,
 }
 
+SEED_REPAIR_ATTEMPTS = 2
+
 
 def _prompt_value(prompt, label, fallback):
     match = re.search(rf"(?m)^{re.escape(label)}\s*(.+?)\s*$", prompt)
@@ -50,8 +52,8 @@ def _compact_seed_prompt(prompt, kind):
             f"Angle: {lens}\n"
             f"Context: {setting}\n\n"
             "Write a natural Reddit-style title and a concrete body that gives people something specific to respond to.\n"
-            "Title: 5-11 words, at most 64 characters.\n"
-            "Body: 1-2 sentences, about 25-45 words, at most 300 characters.\n"
+            "Title: non-empty, 5-11 words, 3-64 characters.\n"
+            "Body: non-empty, 1-2 sentences, about 25-45 words, 12-300 characters.\n"
             "Return only the title and body required by the JSON schema."
         )
 
@@ -61,10 +63,120 @@ def _compact_seed_prompt(prompt, kind):
         f"Angle: {lens}\n"
         f"Context: {setting}\n\n"
         "Write a concise visible post with a short hidden reply-style title.\n"
-        "Title: at most 8 words and 48 characters.\n"
-        "Body: at most 280 characters.\n"
+        "Title: non-empty, 2-8 words, 3-48 characters.\n"
+        "Body: non-empty, concrete, 12-280 characters.\n"
         "Return only the title and body required by the JSON schema."
     )
+
+
+def _normalize_seed_text(value):
+    return " ".join(str(value or "").split()).strip()
+
+
+def _seed_limits(kind):
+    if kind == "x":
+        return 48, 280
+    return 64, 300
+
+
+def _extract_seed_object(value, kind):
+    if not isinstance(value, dict):
+        return None, "seed JSON was not an object"
+
+    title = _normalize_seed_text(value.get("title"))
+    body = _normalize_seed_text(value.get("body"))
+
+    # Recover a few common small-model schema drifts before asking Ollama again.
+    # The normalized response sent back to PowerShell is still exactly title/body.
+    if not title:
+        for key in ("headline", "query", "subject"):
+            candidate = _normalize_seed_text(value.get(key))
+            if candidate:
+                title = candidate
+                break
+    if not body:
+        for key in ("text", "post", "content"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and _normalize_seed_text(candidate):
+                body = _normalize_seed_text(candidate)
+                break
+
+    title_max, body_max = _seed_limits(kind)
+    if len(title) < 3:
+        return None, f"title was empty/short ({len(title)} chars)"
+    if len(body) < 12:
+        return None, f"body was empty/short ({len(body)} chars)"
+    if len(title) > title_max:
+        return None, f"title exceeded {title_max} chars ({len(title)})"
+    if len(body) > body_max:
+        return None, f"body exceeded {body_max} chars ({len(body)})"
+    if kind == "x" and len(title.split()) > 8:
+        return None, f"X title exceeded 8 words ({len(title.split())})"
+    if kind == "reddit" and len(title.split()) > 11:
+        return None, f"Reddit title exceeded 11 words ({len(title.split())})"
+
+    return {"title": title, "body": body}, None
+
+
+def _validate_ollama_seed_payload(payload_bytes, kind):
+    try:
+        outer = json.loads(payload_bytes.decode("utf-8"))
+    except Exception as exc:
+        return None, f"Ollama outer response was invalid JSON: {exc}"
+    if not isinstance(outer, dict):
+        return None, "Ollama outer response was not an object"
+
+    raw_response = outer.get("response")
+    if isinstance(raw_response, dict):
+        inner = raw_response
+    else:
+        raw_text = str(raw_response or "").strip()
+        if not raw_text:
+            return None, "Ollama response field was empty"
+        first = raw_text.find("{")
+        last = raw_text.rfind("}")
+        if first < 0 or last <= first:
+            return None, f"Ollama response had no JSON object: {raw_text[:180]!r}"
+        try:
+            inner = json.loads(raw_text[first:last + 1])
+        except Exception as exc:
+            return None, f"Ollama seed JSON was invalid: {exc}; raw={raw_text[:180]!r}"
+
+    seed, problem = _extract_seed_object(inner, kind)
+    if seed is None:
+        preview = json.dumps(inner, ensure_ascii=False, separators=(",", ":"))[:240]
+        return None, f"{problem}; raw={preview}"
+
+    # PowerShell expects response.response to contain a JSON object. Normalize it
+    # here so a structurally valid seed cannot be misread because of extra fields.
+    outer["response"] = json.dumps(seed, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(outer, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), None
+
+
+def _repair_seed_request(body, kind, prior_problem, repair_number):
+    payload = json.loads(body.decode("utf-8"))
+    base_prompt = str(payload.get("prompt") or "").strip()
+    payload["prompt"] = (
+        f"{base_prompt}\n\n"
+        "Your previous structured result was unusable. "
+        f"Problem: {prior_problem.split('; raw=', 1)[0]}. "
+        "Return a NON-EMPTY JSON object with exactly two string keys: title and body. "
+        "Do not return empty strings, nulls, arrays, nested objects, or extra keys."
+    )
+    # Some small models can get trapped producing legal-but-empty strings under a
+    # strict grammar. Keep JSON mode for the repair while validating exact shape
+    # ourselves before the response leaves the proxy.
+    payload["format"] = "json"
+    options = payload.get("options")
+    if not isinstance(options, dict):
+        options = {}
+    options["temperature"] = max(0.50, 0.64 - ((repair_number - 1) * 0.06))
+    options["top_p"] = 0.88
+    options["top_k"] = 32
+    options["repeat_penalty"] = 1.03
+    options["num_predict"] = 180
+    payload["options"] = options
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
 def constrain_threadgens_idea_request(body):
@@ -108,15 +220,26 @@ def constrain_threadgens_idea_request(body):
     return json.dumps(payload, separators=(",", ":")).encode("utf-8"), kind
 
 
+def _post_upstream(url, body, content_type, timeout):
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={"Content-Type": content_type or "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.status, response.headers.get("Content-Type", "application/json"), response.read()
+
+
 class SerialProxyHandler(BaseHTTPRequestHandler):
-    server_version = "ThreadGensOllamaProxy/1.2"
+    server_version = "ThreadGensOllamaProxy/1.3"
 
     def log_message(self, fmt, *args):
         return
 
     def do_GET(self):
         if self.path == "/health":
-            payload = b'{"status":"ok"}'
+            payload = b'{"status":"ok","seed_validation":"repair-and-normalize"}'
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
@@ -127,8 +250,8 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0") or "0")
-        body = self.rfile.read(length)
-        body, constrained_kind = constrain_threadgens_idea_request(body)
+        original_body = self.rfile.read(length)
+        body, constrained_kind = constrain_threadgens_idea_request(original_body)
         upstream = self.server.upstream.rstrip("/") + self.path
         started = time.time()
         self.server.request_counter += 1
@@ -140,26 +263,53 @@ class SerialProxyHandler(BaseHTTPRequestHandler):
             )
         print(f"[ollama-proxy] #{request_id} -> {self.path}", flush=True)
 
-        request = urllib.request.Request(
-            upstream,
-            data=body,
-            method="POST",
-            headers={"Content-Type": self.headers.get("Content-Type", "application/json")},
-        )
+        content_type = self.headers.get("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(request, timeout=self.server.upstream_timeout) as response:
-                payload = response.read()
-                self.send_response(response.status)
-                content_type = response.headers.get("Content-Type", "application/json")
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(len(payload)))
-                self.send_header("Connection", "close")
-                self.end_headers()
-                self.wfile.write(payload)
-                print(
-                    f"[ollama-proxy] #{request_id} <- {response.status} in {time.time() - started:.2f}s",
-                    flush=True,
-                )
+            status, response_type, payload = _post_upstream(
+                upstream, body, content_type, self.server.upstream_timeout
+            )
+
+            if constrained_kind and status == 200:
+                normalized, problem = _validate_ollama_seed_payload(payload, constrained_kind)
+                repair_number = 0
+                while normalized is None and repair_number < SEED_REPAIR_ATTEMPTS:
+                    repair_number += 1
+                    print(
+                        f"[ollama-proxy] #{request_id} invalid {constrained_kind} seed "
+                        f"({problem}); repair {repair_number}/{SEED_REPAIR_ATTEMPTS}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    repair_body = _repair_seed_request(body, constrained_kind, problem, repair_number)
+                    status, response_type, payload = _post_upstream(
+                        upstream, repair_body, content_type, self.server.upstream_timeout
+                    )
+                    if status != 200:
+                        break
+                    normalized, problem = _validate_ollama_seed_payload(payload, constrained_kind)
+
+                if status == 200 and normalized is not None:
+                    payload = normalized
+                elif status == 200:
+                    message = (
+                        f"ThreadGens seed schema validation failed after "
+                        f"{1 + SEED_REPAIR_ATTEMPTS} Ollama generations: {problem}"
+                    )
+                    print(f"[ollama-proxy] #{request_id} {message}", file=sys.stderr, flush=True)
+                    payload = json.dumps({"error": message}, separators=(",", ":")).encode("utf-8")
+                    status = 502
+                    response_type = "application/json"
+
+            self.send_response(status)
+            self.send_header("Content-Type", response_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(payload)
+            print(
+                f"[ollama-proxy] #{request_id} <- {status} in {time.time() - started:.2f}s",
+                flush=True,
+            )
         except urllib.error.HTTPError as exc:
             payload = exc.read()
             self.send_response(exc.code)
