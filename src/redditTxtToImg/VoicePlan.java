@@ -83,6 +83,7 @@ final class VoicePlan {
     private final String effectiveEngine;
     private final String fallbackEngine;
     private final int seriesVoiceIndex;
+    private boolean fallbackActive;
 
     VoicePlan(
             String engine,
@@ -137,6 +138,11 @@ final class VoicePlan {
     }
 
     void generateSpeech(String text, Path outputFile, int slideIndex) throws IOException, InterruptedException {
+        if (fallbackActive && fallbackGenerator != null) {
+            fallbackGenerator.generateSpeech(text, outputFile, fallbackVoiceFor(slideIndex));
+            return;
+        }
+
         try {
             generator.generateSpeech(text, outputFile, voiceFor(slideIndex));
         } catch (IOException primaryFailure) {
@@ -145,9 +151,10 @@ final class VoicePlan {
             }
 
             cleanupFailedNarration(outputFile);
+            fallbackActive = true;
             Path fallbackVoice = fallbackVoiceFor(slideIndex);
-            System.err.println("Kokoro TTS failed for " + outputFile
-                    + "; falling back to Qwen3-TTS [" + fallbackVoice + "]: "
+            System.err.println(effectiveEngine + " TTS failed for " + outputFile
+                    + "; switching this video to Qwen3-TTS [" + fallbackVoice + "]: "
                     + primaryFailure.getMessage());
             try {
                 fallbackGenerator.generateSpeech(text, outputFile, fallbackVoice);
