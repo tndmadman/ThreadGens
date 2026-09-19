@@ -227,18 +227,35 @@ function Update-WorkerFromMessage($Worker, $Message) {
         return
     }
     if ($messageText -match '^Phase 2/4:') {
-        Set-WorkerStage $Worker 'TTS' 0 $Count 'Kokoro narration'
+        Set-WorkerStage $Worker 'TTS' 0 $Count 'waiting for actual TTS engine'
         return
     }
-    if ($messageText -match '^Starting Kokoro TTS:') {
+    if ($messageText.StartsWith('Starting Kokoro TTS:')) {
         $item = Get-ItemNumberFromPath $messageText 'wav'
-        if ($item -gt 0) { Set-WorkerStage $Worker 'TTS' ([Math]::Max(0, $item - 1)) $Count ("speaking $item/$Count") }
+        if ($item -gt 0) { Set-WorkerStage $Worker 'TTS' ([Math]::Max(0, $item - 1)) $Count ("KOKORO active $item/$Count") }
+        return
+    }
+    if ($messageText.StartsWith('Starting Qwen3-TTS:')) {
+        $item = Get-ItemNumberFromPath $messageText 'wav'
+        if ($item -gt 0) { Set-WorkerStage $Worker 'TTS' ([Math]::Max(0, $item - 1)) $Count ("QWEN3 FALLBACK active $item/$Count") }
+        return
+    }
+    if ($messageText.StartsWith('TTS engine used: Kokoro ->')) {
+        $item = Get-ItemNumberFromPath $messageText 'wav'
+        if ($item -lt 0) { $item = [Math]::Min($Count, $Worker.Current + 1) }
+        Set-WorkerStage $Worker 'TTS' $item $Count ("KOKORO USED $item/$Count")
+        return
+    }
+    if ($messageText.StartsWith('TTS engine used: Qwen3 fallback ->')) {
+        $item = Get-ItemNumberFromPath $messageText 'wav'
+        if ($item -lt 0) { $item = [Math]::Min($Count, $Worker.Current + 1) }
+        Set-WorkerStage $Worker 'TTS' $item $Count ("QWEN3 FALLBACK USED $item/$Count")
         return
     }
     if ($messageText -match '^Generated audio:') {
         $item = Get-ItemNumberFromPath $messageText 'wav'
         if ($item -lt 0) { $item = [Math]::Min($Count, $Worker.Current + 1) }
-        Set-WorkerStage $Worker 'TTS' $item $Count ("audio $item/$Count")
+        Set-WorkerStage $Worker 'TTS' $item $Count ("audio complete $item/$Count")
         return
     }
     if ($messageText -match '^P0 integrity:') {
