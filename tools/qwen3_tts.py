@@ -108,6 +108,74 @@ def _local_server_target() -> tuple[str, int] | None:
     return parsed.hostname or "127.0.0.1", parsed.port or 80
 
 
+def _stop_incompatible_local_server(ready: dict) -> None:
+    target = _local_server_target()
+    if target is None or "scheduler_version" not in ready:
+        raise RuntimeError(
+            "An incompatible service is already using the configured Qwen3-TTS URL. "
+            "Stop it once, then rerun ThreadGens."
+        )
+    if os.name != "nt":
+        raise RuntimeError(
+            "The running Qwen3-TTS service predates ThreadGens shared-GPU coordination. "
+            "Stop it once, then rerun ThreadGens."
+        )
+
+    _, port = target
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not inspect the stale local Qwen3-TTS process. "
+            "Stop the process listening on port 8765 once, then rerun ThreadGens."
+        ) from exc
+
+    pids: set[int] = set()
+    suffix = f":{port}"
+    for raw_line in result.stdout.splitlines():
+        parts = raw_line.split()
+        if len(parts) < 5 or parts[0].upper() != "TCP":
+            continue
+        local_address = parts[1]
+        state = parts[3].upper()
+        if state != "LISTENING" or not local_address.endswith(suffix):
+            continue
+        try:
+            pids.add(int(parts[4]))
+        except ValueError:
+            continue
+
+    if not pids:
+        raise RuntimeError(
+            f"Qwen3-TTS on port {port} is stale but its Windows PID could not be found. "
+            "Stop it once, then rerun ThreadGens."
+        )
+
+    for pid in sorted(pids):
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        if _health(timeout=0.5) is None:
+            return
+        time.sleep(0.25)
+    raise RuntimeError(
+        f"Old Qwen3-TTS process on port {port} did not stop cleanly."
+    )
+
+
 def _start_server() -> None:
     target = _local_server_target()
     if target is None:
@@ -144,11 +212,14 @@ def _start_server() -> None:
 
 def _ensure_server() -> dict:
     ready = _health()
-    if ready is not None:
+    if ready is not None and ready.get("gpu_release"):
         return ready
 
     with _startup_lock():
         ready = _health()
+        if ready is not None and not ready.get("gpu_release"):
+            _stop_incompatible_local_server(ready)
+            ready = None
         if ready is not None:
             return ready
 
