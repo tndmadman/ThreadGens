@@ -1,12 +1,14 @@
 package redditTxtToImg;
 
 import java.io.IOException;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.time.Duration;
 
 final class OpImagePipeline {
     private OpImagePipeline() {
@@ -59,18 +61,50 @@ final class OpImagePipeline {
         System.out.println("Generated OP image prompt: " + promptFile);
 
         ComfyUiImageGenerator imageGenerator = new ComfyUiImageGenerator();
-        Path lockPath = Path.of("output", "runtime", "comfyui_op_image.lock");
-        Files.createDirectories(lockPath.getParent());
-        System.out.println("Waiting for shared ComfyUI OP-image GPU lane: " + lockPath);
-        try (FileChannel lockChannel = FileChannel.open(
-                    lockPath,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.WRITE);
-             FileLock ignored = lockChannel.lock()) {
-            System.out.println("Acquired shared ComfyUI OP-image GPU lane.");
+        System.out.println("Waiting for exclusive ThreadGens GPU lane for ComfyUI: " + GpuAiLane.lockPath());
+        try (GpuAiLane ignored = GpuAiLane.acquireExclusive()) {
+            System.out.println("Acquired exclusive ThreadGens GPU lane for ComfyUI.");
+            releaseQwenGpuIfConfigured();
             Path generated = imageGenerator.generate(imagePrompt, settings, imageFile);
             System.out.println("Generated OP image with ComfyUI: " + generated);
             return generated;
+        }
+    }
+
+    private static void releaseQwenGpuIfConfigured() throws IOException, InterruptedException {
+        String override = System.getenv("THREADGENS_TTS_ENGINE_OVERRIDE");
+        if (override == null
+                || (!"qwen3".equalsIgnoreCase(override.trim())
+                && !"qwen3-tts".equalsIgnoreCase(override.trim()))) {
+            return;
+        }
+
+        String configuredUrl = System.getenv("THREADGENS_QWEN3_URL");
+        String baseUrl = configuredUrl == null || configuredUrl.isBlank()
+                ? "http://127.0.0.1:8765"
+                : configuredUrl.trim().replaceAll("/+$", "");
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(3))
+                .build();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/release-gpu"))
+                .timeout(Duration.ofSeconds(45))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .POST(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8))
+                .build();
+
+        try {
+            HttpResponse<String> response = client.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() != 200) {
+                throw new IOException(
+                        "Qwen3-TTS refused to release GPU memory before ComfyUI (HTTP "
+                                + response.statusCode() + "): " + response.body());
+            }
+            System.out.println("Qwen3-TTS GPU memory released for ComfyUI.");
+        } catch (java.net.ConnectException e) {
+            // No Qwen server means there is no resident Qwen model to evict.
+            System.out.println("Qwen3-TTS server is not running; ComfyUI already has the GPU lane.");
         }
     }
 
