@@ -393,41 +393,29 @@ if (-not (Test-Path $DashboardCore)) {
     throw "Live dashboard core was not found: $DashboardCore"
 }
 
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('threadgens-color-dashboard-' + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
-$script:patchedDashboard = Join-Path $tempRoot 'batch_create_videos_dashboard_colored.ps1'
+$script:patchedDashboard = $DashboardCore
 $exitCode = 1
 $stoppedByUser = $false
 
 try {
     Normalize-ProcessPathEnvironment
     $source = Get-Content -Raw -Path $DashboardCore -Encoding UTF8
-    $patched = New-ColoredDashboardSource $source
-
     $parseTokens = $null
     $parseErrors = $null
     [System.Management.Automation.Language.Parser]::ParseInput(
-        $patched,
+        $source,
         [ref]$parseTokens,
         [ref]$parseErrors) | Out-Null
     if ($parseErrors.Count -gt 0) {
         $details = @($parseErrors | ForEach-Object {
             "line $($_.Extent.StartLineNumber), column $($_.Extent.StartColumnNumber): $($_.Message)"
         }) -join [Environment]::NewLine
-        throw "Generated color dashboard has PowerShell syntax errors before launch:$([Environment]::NewLine)$details"
+        throw "Dashboard core has PowerShell syntax errors before launch:$([Environment]::NewLine)$details"
     }
 
-    [System.IO.File]::WriteAllText($script:patchedDashboard, $patched, $Utf8NoBom)
-
     if ($SelfTest) {
-        if ($patched -notmatch 'Get-DashboardLineColor' -or $patched -notmatch 'Write-DashboardColorLine') {
-            throw 'Dashboard color self-test failed to inject color helpers.'
-        }
-        if ($patched -match '\$RepoRoot = Split-Path -Parent \$PSScriptRoot') {
-            throw 'Dashboard color self-test failed to preserve the real repository root.'
-        }
-        if ($patched -notmatch 'taskkill\.exe /PID \$process\.Id /T /F') {
-            throw 'Dashboard shutdown self-test failed to inject engine process-tree cleanup.'
+        if ($source -notmatch 'function Get-DashboardLineColor' -or $source -notmatch 'function Write-DashboardColorLine') {
+            throw 'Dashboard color self-test failed: native color helpers are missing from the dashboard core.'
         }
         Test-KillOnCloseJob
     }
@@ -476,7 +464,6 @@ try {
         Close-KillOnCloseJob $script:killJobHandle
         $script:killJobHandle = [IntPtr]::Zero
     }
-    Remove-Item -Recurse -Force -Path $tempRoot -ErrorAction SilentlyContinue
 }
 
 exit $exitCode
