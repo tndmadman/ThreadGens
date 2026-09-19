@@ -83,11 +83,6 @@ if ($MaxSynchronizationIdeas -lt 0) {
 if ($IdentityHistoryLimit -lt 1) {
     $IdentityHistoryLimit = 1
 }
-if ($GenerateOpImage -and $Workers -gt 1) {
-    Write-Host 'ComfyUI OP images share the GPU compute lane with Ollama; parallel whole-video workers are clamped to 1 while OP image generation is enabled.' -ForegroundColor Yellow
-    $Workers = 1
-}
-
 $TtsEngine = 'kokoro'
 $KokoroPython = Join-Path $RepoRoot '.venv-kokoro\Scripts\python.exe'
 $WorkerScript = Join-Path $RepoRoot 'tools\batch_parallel_worker.ps1'
@@ -1456,7 +1451,7 @@ if ($MaxAttempts -gt 0) { Write-Host "Attempt cap: $MaxAttempts total ideas" } e
 Write-Host "Per-slot attempt cap: $MaxSlotAttempts total seed/render launches"
 Write-Host "Per-slot rendered reject cap: $MaxSlotRenderedRejects"
 Write-Host "Batch cooldowns: Tokyo/Japan max $MaxTokyoIdeas; synchronization/alignment language max $MaxSynchronizationIdeas"
-if ($GenerateOpImage) { Write-Host 'OP image generation: enabled; worker count forced to 1 for GPU safety' -ForegroundColor Yellow } else { Write-Host 'OP image generation: disabled' }
+if ($GenerateOpImage) { Write-Host "OP image generation: enabled; $Workers whole-video workers remain active while ComfyUI image generation uses one shared GPU lane" -ForegroundColor Green } else { Write-Host 'OP image generation: disabled' }
 
 Write-Step 'Building Java files'
 New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot 'out') | Out-Null
@@ -1569,6 +1564,7 @@ Write-Host "Rejected attempts:      $($script:failedAttempts.Count)"
 Write-Host "Skipped slots:          $($script:skippedSlots.Count)"
 Write-Host "Maximum video workers:  $Workers"
 Write-Host 'Ollama request workers: 1 (serialized)'
+if ($GenerateOpImage) { Write-Host 'ComfyUI OP-image GPU lanes: 1 (cross-process file lock)' }
 Write-Host "Persistent idea history: $IdeaHistoryPath"
 Write-Host "Persistent generation history: $GlobalGenerationHistoryPath"
 Write-Host "All attempt folders:     $OutputRoot"
