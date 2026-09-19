@@ -49,9 +49,35 @@ final class ComfyUiImageGenerator {
             throw new IOException("ComfyUI did not return prompt_id: " + response.body());
         }
 
-        ImageRef imageRef = waitForImage(baseUrl, promptId, settings.timeoutSeconds);
-        downloadImage(baseUrl, imageRef, outputFile);
-        return outputFile;
+        try {
+            ImageRef imageRef = waitForImage(baseUrl, promptId, settings.timeoutSeconds);
+            downloadImage(baseUrl, imageRef, outputFile);
+            return outputFile;
+        } finally {
+            releaseComfyMemory(baseUrl);
+        }
+    }
+
+    private void releaseComfyMemory(String baseUrl) throws InterruptedException {
+        String body = "{\"unload_models\":true,\"free_memory\":true}";
+        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/free"))
+                .timeout(Duration.ofSeconds(30))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                .build();
+        try {
+            HttpResponse<String> response = httpClient.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                System.out.println("Requested ComfyUI model unload and VRAM cleanup.");
+            } else {
+                System.err.println("Warning: ComfyUI /free returned HTTP "
+                        + response.statusCode() + ": " + response.body());
+            }
+        } catch (IOException e) {
+            System.err.println("Warning: could not request ComfyUI VRAM cleanup: " + e.getMessage());
+        }
     }
 
     private ImageRef waitForImage(String baseUrl, String promptId, int timeoutSeconds)
