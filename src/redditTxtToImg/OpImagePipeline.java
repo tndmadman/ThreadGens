@@ -1,9 +1,12 @@
 package redditTxtToImg;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
 final class OpImagePipeline {
     private OpImagePipeline() {
@@ -56,9 +59,19 @@ final class OpImagePipeline {
         System.out.println("Generated OP image prompt: " + promptFile);
 
         ComfyUiImageGenerator imageGenerator = new ComfyUiImageGenerator();
-        Path generated = imageGenerator.generate(imagePrompt, settings, imageFile);
-        System.out.println("Generated OP image with ComfyUI: " + generated);
-        return generated;
+        Path lockPath = Path.of("output", "runtime", "comfyui_op_image.lock");
+        Files.createDirectories(lockPath.getParent());
+        System.out.println("Waiting for shared ComfyUI OP-image GPU lane: " + lockPath);
+        try (FileChannel lockChannel = FileChannel.open(
+                    lockPath,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE);
+             FileLock ignored = lockChannel.lock()) {
+            System.out.println("Acquired shared ComfyUI OP-image GPU lane.");
+            Path generated = imageGenerator.generate(imagePrompt, settings, imageFile);
+            System.out.println("Generated OP image with ComfyUI: " + generated);
+            return generated;
+        }
     }
 
     private static String safeName(String value) {
