@@ -228,7 +228,17 @@ function Update-WorkerFromMessage($Worker, $Message) {
     }
     if ($messageText -match '^Phase 2/4:') {
         $detail = 'TTS narration'
-        if ($messageText -match 'with\s+(?<engine>[^.]+)\.\.\.
+        if ($messageText -match 'with\s+(?<engine>[^.]+)\.\.\.$') {
+            $detail = ($Matches.engine.Trim() + ' narration')
+        }
+        Set-WorkerStage $Worker 'TTS' 0 $Count $detail
+        return
+    }
+    if ($messageText -match '^Starting (Kokoro|Qwen3-TTS):') {
+        $item = Get-ItemNumberFromPath $messageText 'wav'
+        if ($item -gt 0) { Set-WorkerStage $Worker 'TTS' ([Math]::Max(0, $item - 1)) $Count ("speaking $item/$Count") }
+        return
+    }
     if ($messageText -match '^Generated audio:') {
         $item = Get-ItemNumberFromPath $messageText 'wav'
         if ($item -lt 0) { $item = [Math]::Min($Count, $Worker.Current + 1) }
