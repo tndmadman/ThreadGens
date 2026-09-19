@@ -2,6 +2,7 @@ package redditTxtToImg;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -75,9 +76,12 @@ final class VoicePlan {
     }
 
     private final VoiceGenerator generator;
+    private final VoiceGenerator fallbackGenerator;
     private final List<Path> voices;
+    private final List<Path> fallbackVoices;
     private final Selection selection;
     private final String effectiveEngine;
+    private final String fallbackEngine;
     private final int seriesVoiceIndex;
 
     VoicePlan(
@@ -102,6 +106,22 @@ final class VoicePlan {
         this.generator = isQwenEngine(effectiveEngine)
                 ? new Qwen3VoiceGenerator(effectiveCommand, voices.get(0), timeoutSeconds, delivery)
                 : new VoiceGenerator(effectiveEngine, effectiveCommand, voices.get(0), timeoutSeconds, delivery);
+
+        this.fallbackEngine = resolveFallbackEngine(effectiveEngine);
+        if (isQwenEngine(this.fallbackEngine)) {
+            String fallbackCommand = resolveCommandOverride(command, configuredEngine, "qwen3");
+            String fallbackSeries = System.getenv("THREADGENS_QWEN3_FALLBACK_VOICE_SERIES");
+            if (fallbackSeries == null || fallbackSeries.isBlank()) {
+                fallbackSeries = "Ryan,Aiden,Ono_Anna,Sohee";
+            }
+            this.fallbackVoices = resolveVoices(
+                    "qwen3", Path.of("Ryan"), fallbackSeries, voiceDirectory, this.selection);
+            this.fallbackGenerator = new Qwen3VoiceGenerator(
+                    fallbackCommand, this.fallbackVoices.get(0), timeoutSeconds, delivery);
+        } else {
+            this.fallbackVoices = List.of();
+            this.fallbackGenerator = null;
+        }
     }
 
     boolean isEnabled() {
@@ -117,7 +137,25 @@ final class VoicePlan {
     }
 
     void generateSpeech(String text, Path outputFile, int slideIndex) throws IOException, InterruptedException {
-        generator.generateSpeech(text, outputFile, voiceFor(slideIndex));
+        try {
+            generator.generateSpeech(text, outputFile, voiceFor(slideIndex));
+        } catch (IOException primaryFailure) {
+            if (fallbackGenerator == null) {
+                throw primaryFailure;
+            }
+
+            cleanupFailedNarration(outputFile);
+            Path fallbackVoice = fallbackVoiceFor(slideIndex);
+            System.err.println("Kokoro TTS failed for " + outputFile
+                    + "; falling back to Qwen3-TTS [" + fallbackVoice + "]: "
+                    + primaryFailure.getMessage());
+            try {
+                fallbackGenerator.generateSpeech(text, outputFile, fallbackVoice);
+            } catch (IOException fallbackFailure) {
+                fallbackFailure.addSuppressed(primaryFailure);
+                throw fallbackFailure;
+            }
+        }
     }
 
     List<String> voiceLabels() {
@@ -130,6 +168,50 @@ final class VoicePlan {
 
     String engineLabel() {
         return effectiveEngine;
+    }
+
+    private Path fallbackVoiceFor(int slideIndex) {
+        if (fallbackVoices.isEmpty()) {
+            return Path.of("Ryan");
+        }
+        return switch (selection) {
+            case SINGLE -> fallbackVoices.get(0);
+            case SERIES -> fallbackVoices.get(Math.floorMod(seriesVoiceIndex, fallbackVoices.size()));
+            case PER_SLIDE -> fallbackVoices.get(Math.floorMod(slideIndex, fallbackVoices.size()));
+        };
+    }
+
+    private static void cleanupFailedNarration(Path outputFile) {
+        if (outputFile == null) {
+            return;
+        }
+        String fileName = outputFile.getFileName().toString();
+        String stem = fileName.toLowerCase(Locale.ROOT).endsWith(".wav")
+                ? fileName.substring(0, fileName.length() - 4)
+                : fileName;
+        for (String suffix : List.of(".wav", ".timing.tsv", ".voice.json")) {
+            try {
+                Files.deleteIfExists(outputFile.resolveSibling(stem + suffix));
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private static String resolveFallbackEngine(String primaryEngine) {
+        String fallback = System.getenv("THREADGENS_TTS_FALLBACK_ENGINE");
+        if (fallback == null || fallback.isBlank()) {
+            return "none";
+        }
+        String normalized = fallback.trim().toLowerCase(Locale.ROOT);
+        if ("none".equals(normalized) || normalized.equalsIgnoreCase(primaryEngine)) {
+            return "none";
+        }
+        if (isQwenEngine(normalized)) {
+            return "qwen3";
+        }
+        throw new IllegalArgumentException(
+                "Unsupported THREADGENS_TTS_FALLBACK_ENGINE: " + fallback
+                        + ". Use qwen3 or none.");
     }
 
     private static String resolveEngineOverride(String configuredEngine) {
