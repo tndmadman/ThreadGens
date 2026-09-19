@@ -38,6 +38,7 @@ _MODEL_ID = ""
 _DEVICE = ""
 _DTYPE_NAME = ""
 _SCHEDULER = None
+_MODEL_LOCK = threading.Lock()
 
 
 def _env_int(name: str, fallback: int, minimum: int, maximum: int) -> int:
@@ -186,49 +187,74 @@ def _edge_fade(audio, sample_rate: int, milliseconds: float = 6.0):
 def _load_model() -> None:
     global _MODEL, _TORCH, _NP, _SF, _MODEL_ID, _DEVICE, _DTYPE_NAME
 
-    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    with _MODEL_LOCK:
+        if _MODEL is not None:
+            return
 
-    import numpy as np
-    import soundfile as sf
-    import torch
-    from qwen_tts import Qwen3TTSModel
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+        os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-    model_id = os.environ.get("THREADGENS_QWEN3_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
-    allow_cpu = _truthy(os.environ.get("THREADGENS_QWEN3_ALLOW_CPU"))
-    if torch.cuda.is_available():
-        device = os.environ.get("THREADGENS_QWEN3_DEVICE", "cuda:0").strip() or "cuda:0"
-        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-    elif allow_cpu:
-        device = "cpu"
-        dtype = torch.float32
-    else:
-        raise RuntimeError(
-            "Qwen3-TTS requires CUDA for ThreadGens production. PyTorch cannot see an NVIDIA GPU. "
-            "Run setup_qwen3_tts_windows.ps1 and verify the CUDA PyTorch install."
+        import numpy as np
+        import soundfile as sf
+        import torch
+        from qwen_tts import Qwen3TTSModel
+
+        model_id = os.environ.get("THREADGENS_QWEN3_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+        allow_cpu = _truthy(os.environ.get("THREADGENS_QWEN3_ALLOW_CPU"))
+        if torch.cuda.is_available():
+            device = os.environ.get("THREADGENS_QWEN3_DEVICE", "cuda:0").strip() or "cuda:0"
+            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        elif allow_cpu:
+            device = "cpu"
+            dtype = torch.float32
+        else:
+            raise RuntimeError(
+                "Qwen3-TTS requires CUDA for ThreadGens production. PyTorch cannot see an NVIDIA GPU. "
+                "Run setup_qwen3_tts_windows.ps1 and verify the CUDA PyTorch install."
+            )
+
+        attn = os.environ.get("THREADGENS_QWEN3_ATTN", "sdpa").strip() or "sdpa"
+        print(
+            f"[qwen3-tts] loading {model_id} on {device} with {dtype} / attention={attn}",
+            flush=True,
+        )
+        torch.set_grad_enabled(False)
+        model = Qwen3TTSModel.from_pretrained(
+            model_id,
+            device_map=device,
+            dtype=dtype,
+            attn_implementation=attn,
         )
 
-    attn = os.environ.get("THREADGENS_QWEN3_ATTN", "sdpa").strip() or "sdpa"
-    print(
-        f"[qwen3-tts] loading {model_id} on {device} with {dtype} / attention={attn}",
-        flush=True,
-    )
-    torch.set_grad_enabled(False)
-    model = Qwen3TTSModel.from_pretrained(
-        model_id,
-        device_map=device,
-        dtype=dtype,
-        attn_implementation=attn,
-    )
+        _MODEL = model
+        _TORCH = torch
+        _NP = np
+        _SF = sf
+        _MODEL_ID = model_id
+        _DEVICE = device
+        _DTYPE_NAME = str(dtype).replace("torch.", "")
+        print(f"[qwen3-tts] ready: {_MODEL_ID} on {_DEVICE}", flush=True)
 
-    _MODEL = model
-    _TORCH = torch
-    _NP = np
-    _SF = sf
-    _MODEL_ID = model_id
-    _DEVICE = device
-    _DTYPE_NAME = str(dtype).replace("torch.", "")
-    print(f"[qwen3-tts] ready: {_MODEL_ID} on {_DEVICE}", flush=True)
+
+def _unload_model() -> bool:
+    global _MODEL
+
+    with _MODEL_LOCK:
+        if _MODEL is None:
+            return False
+        print("[qwen3-tts] releasing model from GPU for exclusive ComfyUI work", flush=True)
+        model = _MODEL
+        _MODEL = None
+        del model
+        gc.collect()
+        if _TORCH is not None:
+            try:
+                if _TORCH.cuda.is_available():
+                    _TORCH.cuda.empty_cache()
+                    _TORCH.cuda.ipc_collect()
+            except Exception:
+                pass
+        return True
 
 
 @dataclass
@@ -435,6 +461,16 @@ class BatchScheduler:
     def status(self) -> dict[str, Any]:
         with self._cv:
             return self._status_locked()
+
+    def wait_idle(self, timeout: float) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._cv:
+            while self._pending > 0 or self._active_batch > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._cv.wait(timeout=min(0.25, remaining))
+            return True
 
     def _status_locked(self) -> dict[str, Any]:
         avg_queue_ms = (
@@ -702,6 +738,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "model": _MODEL_ID,
+                    "model_loaded": _MODEL is not None,
                     "device": _DEVICE,
                     "dtype": _DTYPE_NAME,
                     "audio_pipeline": "scalar-when-alone-worker-microbatch-no-time-stretch",
@@ -727,12 +764,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, **status})
                 return
 
+            if path == "/release-gpu":
+                if _SCHEDULER is None:
+                    raise RuntimeError("Qwen3-TTS scheduler is not ready.")
+                if not _SCHEDULER.wait_idle(30.0):
+                    raise TimeoutError("Qwen3-TTS GPU release timed out waiting for active narration.")
+                released = _unload_model()
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "released": released,
+                        "model_loaded": _MODEL is not None,
+                    },
+                )
+                return
+
             if path != "/synthesize":
                 self._send_json(404, {"ok": False, "error": "not found"})
                 return
             if _SCHEDULER is None:
                 raise RuntimeError("Qwen3-TTS scheduler is not ready.")
 
+            _load_model()
             request = _SCHEDULER.submit(payload)
             request_timeout = _env_int(
                 "THREADGENS_QWEN3_REQUEST_TIMEOUT",
