@@ -482,7 +482,7 @@ public class RedditScreenshotGenerator {
             System.out.println("Generated image: " + job.imagePath);
         }
         if (voicePlan.isEnabled()) {
-            System.out.println("Phase 2/4: generating all audio with " + settings.ttsEngine + "...");
+            System.out.println("Phase 2/4: generating all audio with " + voicePlan.engineLabel() + "...");
             for (FrameJob job : jobs) {
                 voicePlan.generateSpeech(job.text, job.audioPath, job.index);
                 System.out.println("Generated audio: " + job.audioPath);
