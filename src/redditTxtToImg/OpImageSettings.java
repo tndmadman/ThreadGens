@@ -11,7 +11,7 @@ final class OpImageSettings {
     String comfyUrl = "http://127.0.0.1:8188";
     String ollamaUrl = "http://localhost:11434/api/generate";
     String llmModel = "llama3.1:8b";
-    String checkpoint = "RealVisXL_V5.0_fp32.safetensors";
+    String checkpoint = "RealVisXL_V5.0_fp16.safetensors";
     String sampler = "dpmpp_2m_sde";
     String scheduler = "karras";
     String negativePrompt = "low quality, blurry, distorted, deformed, cartoon, anime, text, captions, watermark, logo, signature, bad anatomy, extra fingers";
