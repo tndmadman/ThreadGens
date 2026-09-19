@@ -403,6 +403,20 @@ try {
     Normalize-ProcessPathEnvironment
     $source = Get-Content -Raw -Path $DashboardCore -Encoding UTF8
     $patched = New-ColoredDashboardSource $source
+
+    $parseTokens = $null
+    $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseInput(
+        $patched,
+        [ref]$parseTokens,
+        [ref]$parseErrors) | Out-Null
+    if ($parseErrors.Count -gt 0) {
+        $details = @($parseErrors | ForEach-Object {
+            "line $($_.Extent.StartLineNumber), column $($_.Extent.StartColumnNumber): $($_.Message)"
+        }) -join [Environment]::NewLine
+        throw "Generated color dashboard has PowerShell syntax errors before launch:$([Environment]::NewLine)$details"
+    }
+
     [System.IO.File]::WriteAllText($script:patchedDashboard, $patched, $Utf8NoBom)
 
     if ($SelfTest) {
