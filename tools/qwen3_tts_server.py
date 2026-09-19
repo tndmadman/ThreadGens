@@ -739,6 +739,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "model": _MODEL_ID,
                     "model_loaded": _MODEL is not None,
+                    "gpu_release": True,
                     "device": _DEVICE,
                     "dtype": _DTYPE_NAME,
                     "audio_pipeline": "scalar-when-alone-worker-microbatch-no-time-stretch",
