@@ -180,6 +180,11 @@ def _configure_server(
             "The running Qwen3-TTS service predates the worker-aware batch scheduler. "
             "Stop the process listening on port 8765 once, then rerun ThreadGens."
         )
+    if not ready.get("gpu_release"):
+        raise RuntimeError(
+            "The running Qwen3-TTS service predates ThreadGens shared-GPU coordination. "
+            "Stop the process listening on port 8765 once, then rerun ThreadGens so the updated server can start."
+        )
 
     payload: dict[str, int] = {}
     if workers is not None:
