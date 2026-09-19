@@ -73,8 +73,6 @@ final class Qwen3VoiceGenerator extends VoiceGenerator {
                 : selectedVoice.toString();
         String voiceName = resolveVideoVoice(outputFile, requestedVoice);
 
-        ensureServer();
-
         String requestId = workerId + "-"
                 + outputFile.getFileName().toString().replaceAll("\\.wav$", "")
                 + "-" + Long.toUnsignedString(System.nanoTime());
@@ -98,17 +96,20 @@ final class Qwen3VoiceGenerator extends VoiceGenerator {
                 .build();
 
         HttpResponse<byte[]> response;
-        try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
-        } catch (IOException firstFailure) {
-            // The persistent server may have exited between the health check and
-            // synthesis. Bootstrap it once, then retry this request directly.
-            ensureServerAfterFailure();
+        try (GpuAiLane ignored = GpuAiLane.acquireShared()) {
+            ensureServer();
             try {
                 response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
-            } catch (IOException retryFailure) {
-                retryFailure.addSuppressed(firstFailure);
-                throw retryFailure;
+            } catch (IOException firstFailure) {
+                // The persistent server may have exited between the health check and
+                // synthesis. Bootstrap it once, then retry this request directly.
+                ensureServerAfterFailure();
+                try {
+                    response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+                } catch (IOException retryFailure) {
+                    retryFailure.addSuppressed(firstFailure);
+                    throw retryFailure;
+                }
             }
         }
 
