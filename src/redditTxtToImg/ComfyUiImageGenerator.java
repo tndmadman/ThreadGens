@@ -76,7 +76,7 @@ final class ComfyUiImageGenerator {
                         + response.statusCode() + ": " + response.body());
             }
         } catch (IOException e) {
-            System.err.println("Warning: could not request ComfyUI VRAM cleanup: " + e.getMessage());
+            System.out.println("ComfyUI cleanup skipped because the server is unavailable.");
         }
     }
 
@@ -89,7 +89,16 @@ final class ComfyUiImageGenerator {
                     .timeout(Duration.ofSeconds(30))
                     .GET()
                     .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response;
+            try {
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                throw new IOException(
+                        "ComfyUI became unreachable after accepting the image prompt. "
+                                + "The ComfyUI process likely crashed while loading the model; "
+                                + "check the ComfyUI console for the native error.",
+                        e);
+            }
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 ImageRef ref = parseImageRef(response.body());
                 if (ref != null) {
