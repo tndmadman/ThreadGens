@@ -129,6 +129,7 @@ final class Qwen3VoiceGenerator extends VoiceGenerator {
 
         Files.write(outputFile, audio);
         writeVoiceMetadata(outputFile, voiceName);
+        System.out.println("TTS engine used: Qwen3 fallback -> " + outputFile);
     }
 
     private String shortFormInstruction() {
