@@ -72,10 +72,9 @@ final class OpImagePipeline {
     }
 
     private static void releaseQwenGpuIfConfigured() throws IOException, InterruptedException {
-        String override = System.getenv("THREADGENS_TTS_ENGINE_OVERRIDE");
-        if (override == null
-                || (!"qwen3".equalsIgnoreCase(override.trim())
-                && !"qwen3-tts".equalsIgnoreCase(override.trim()))) {
+        String primary = System.getenv("THREADGENS_TTS_ENGINE_OVERRIDE");
+        String fallback = System.getenv("THREADGENS_TTS_FALLBACK_ENGINE");
+        if (!isQwenEngine(primary) && !isQwenEngine(fallback)) {
             return;
         }
 
@@ -106,6 +105,14 @@ final class OpImagePipeline {
             // No Qwen server means there is no resident Qwen model to evict.
             System.out.println("Qwen3-TTS server is not running; ComfyUI already has the GPU lane.");
         }
+    }
+
+    private static boolean isQwenEngine(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.trim();
+        return "qwen3".equalsIgnoreCase(normalized) || "qwen3-tts".equalsIgnoreCase(normalized);
     }
 
     private static String safeName(String value) {
