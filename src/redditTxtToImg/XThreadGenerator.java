@@ -377,7 +377,7 @@ public class XThreadGenerator {
             job.generator.generateImage();
         }
         if (voicePlan.isEnabled()) {
-            System.out.println("Phase 2/4: generating audio with " + settings.ttsEngine + "...");
+            System.out.println("Phase 2/4: generating audio with " + voicePlan.engineLabel() + "...");
             for (FrameJob job : jobs) voicePlan.generateSpeech(job.text, job.audioPath, job.index);
         } else {
             System.out.println("Phase 2/4: skipping audio because TTS is disabled.");
