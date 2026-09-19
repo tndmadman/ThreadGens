@@ -12,18 +12,21 @@ set "MAX_SYNC_IDEAS=3"
 set "IDENTITY_HISTORY_LIMIT=2000"
 set "PACING_PROFILES=rapid_beats,balanced,slow_reveal,qa_cadence,three_act,staccato"
 set "MODEL=llama3.1:8b"
-set "VOICE=Ryan"
-set "VOICE_SERIES=Ryan,Aiden,Ono_Anna,Sohee"
+set "VOICE=af_heart"
+set "VOICE_SERIES=af_heart,af_bella,af_nicole,bf_emma"
+set "QWEN_FALLBACK_VOICE_SERIES=Ryan,Aiden,Ono_Anna,Sohee"
 set "PLATFORM=reddit"
 set "KEEP_OLLAMA_FLAG=-KeepOllamaLoaded"
 set "OP_IMAGE_FLAG="
 set "THREADGENS_VIDEO_ENCODER=auto"
-set "THREADGENS_TTS_ENGINE_OVERRIDE=qwen3"
+set "THREADGENS_TTS_ENGINE_OVERRIDE=kokoro"
+set "THREADGENS_TTS_FALLBACK_ENGINE=qwen3"
 set "THREADGENS_QWEN3_PYTHON=%~dp0.venv-qwen3-tts\Scripts\python.exe"
 set "THREADGENS_QWEN3_VERBOSE=0"
 set "THREADGENS_QWEN3_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
 set "THREADGENS_QWEN3_ATTN=sdpa"
-set "THREADGENS_QWEN3_VIDEO_VOICE_SERIES=%VOICE_SERIES%"
+set "THREADGENS_QWEN3_VIDEO_VOICE_SERIES=%QWEN_FALLBACK_VOICE_SERIES%"
+set "THREADGENS_QWEN3_FALLBACK_VOICE_SERIES=%QWEN_FALLBACK_VOICE_SERIES%"
 set "THREADGENS_REQUIRE_SMOOTH_REVEAL=1"
 set "PYTHONWARNINGS=ignore"
 set "HF_HUB_DISABLE_PROGRESS_BARS=1"
@@ -56,7 +59,8 @@ echo.
 echo This mode generates fresh ideas with local Ollama and keeps replacing rejected
 echo attempts until the requested number of approved final videos has been created.
 echo Ollama stays serialized while complete video workers render in parallel.
-echo Qwen3-TTS 1.7B stays loaded as a persistent local CUDA narration service.
+echo Kokoro is the primary narration engine.
+echo Qwen3-TTS 1.7B is the automatic fallback if Kokoro fails.
 echo.
 echo Usage:
 echo   batch_create_videos_windows.bat [approved-video-target] [slides-per-video] [workers]
@@ -119,18 +123,11 @@ set "THREADGENS_QWEN3_BATCH_WINDOW_MS=100"
 set "THREADGENS_QWEN3_MAX_QUEUE=%QWEN_MAX_QUEUE%"
 
 echo.
-echo Preparing Qwen3-TTS worker-aware GPU scheduler...
-echo   worker lanes: %QWEN_EFFECTIVE_WORKERS%
-echo   max batch:    %QWEN_EFFECTIVE_WORKERS%
-echo   queue limit:  %QWEN_MAX_QUEUE%
-"%THREADGENS_QWEN3_PYTHON%" "%~dp0tools\qwen3_tts.py" --ensure-server --workers %QWEN_EFFECTIVE_WORKERS% --max-batch %QWEN_EFFECTIVE_WORKERS% --batch-window-ms 100 --max-queue %QWEN_MAX_QUEUE%
-if errorlevel 1 (
-  echo.
-  echo Qwen3-TTS scheduler startup/configuration failed. Batch workers were not started.
-  echo If an older Qwen service is still listening on port 8765, stop it once and rerun this launcher.
-  pause
-  exit /b 1
-)
+echo TTS policy:
+echo   primary:   Kokoro
+echo   fallback:  Qwen3-TTS 1.7B CustomVoice ^(starts on demand only if Kokoro fails^)
+echo   fallback worker lanes: %QWEN_EFFECTIVE_WORKERS%
+echo   fallback queue limit:  %QWEN_MAX_QUEUE%
 
 echo.
 echo Starting color live batch dashboard...
@@ -139,8 +136,9 @@ echo   slides:   %COUNT% per video
 echo   workers:  %WORKERS%
 echo   encoder:  %THREADGENS_VIDEO_ENCODER%
 echo   platform: %PLATFORM%
-echo   TTS:      Qwen3-TTS 1.7B CustomVoice
-echo   voices:   %VOICE_SERIES% (one stable voice per video; rotates by video slot)
+echo   TTS:      Kokoro primary / Qwen3-TTS fallback
+echo   voices:   %VOICE_SERIES% (Kokoro; one stable voice per video)
+echo   fallback: %QWEN_FALLBACK_VOICE_SERIES% (Qwen3; same per-video rotation)
 echo   planner:  pacing %PACING_PROFILES%; identity history %IDENTITY_HISTORY_LIMIT%
 echo   slot cap: %MAX_SLOT_ATTEMPTS% attempts, %MAX_SLOT_RENDERED_REJECTS% rendered rejects
 echo   cooldown: Tokyo/Japan %MAX_TOKYO_IDEAS%, sync/alignment %MAX_SYNC_IDEAS%
