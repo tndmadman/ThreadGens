@@ -77,6 +77,7 @@ final class VoicePlan {
     private final VoiceGenerator generator;
     private final List<Path> voices;
     private final Selection selection;
+    private final String effectiveEngine;
     private final int seriesVoiceIndex;
 
     VoicePlan(
@@ -93,6 +94,7 @@ final class VoicePlan {
         String configuredEngine = engine == null ? "none" : engine.trim().toLowerCase(Locale.ROOT);
         String effectiveEngine = resolveEngineOverride(configuredEngine);
         String effectiveCommand = resolveCommandOverride(command, configuredEngine, effectiveEngine);
+        this.effectiveEngine = effectiveEngine;
         this.selection = Selection.resolve(selection);
         this.voices = resolveVoices(effectiveEngine, primaryVoice, voiceSeries, voiceDirectory, this.selection);
         String key = seriesKey == null || seriesKey.isBlank() ? "threadgens-default-series" : seriesKey.trim();
@@ -124,6 +126,10 @@ final class VoicePlan {
 
     Selection selection() {
         return selection;
+    }
+
+    String engineLabel() {
+        return effectiveEngine;
     }
 
     private static String resolveEngineOverride(String configuredEngine) {
