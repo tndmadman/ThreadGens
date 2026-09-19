@@ -228,8 +228,12 @@ function Update-WorkerFromMessage($Worker, $Message) {
     }
     if ($messageText -match '^Phase 2/4:') {
         $detail = 'TTS narration'
-        if ($messageText -match 'with\s+(?<engine>[^.]+)\.\.\.$') {
-            $detail = ($Matches.engine.Trim() + ' narration')
+        if ($messageText -match '(?i)qwen3') {
+            $detail = 'Qwen3-TTS narration'
+        } elseif ($messageText -match '(?i)kokoro') {
+            $detail = 'Kokoro narration'
+        } elseif ($messageText -match '(?i)piper') {
+            $detail = 'Piper narration'
         }
         Set-WorkerStage $Worker 'TTS' 0 $Count $detail
         return
@@ -1143,7 +1147,9 @@ function Run-DashboardSelfTest {
     Update-WorkerFromMessage $worker 'Phase 1/4: rendering all images without synthetic engagement...'
     Update-WorkerFromMessage $worker 'Generated image: C:\temp\3aithread.png'
     if ($worker.Stage -ne 'IMAGES' -or $worker.Current -ne 4 -or $worker.Total -ne $Count) { throw 'Dashboard parser did not track image progress.' }
-    Update-WorkerFromMessage $worker 'Phase 2/4: generating all audio with kokoro...'
+    Update-WorkerFromMessage $worker 'Phase 2/4: generating all audio with qwen3...'
+    if ($worker.Detail -ne 'Qwen3-TTS narration') { throw 'Dashboard parser did not report the effective Qwen3 TTS engine.' }
+    Update-WorkerFromMessage $worker 'Starting Qwen3-TTS: C:\temp\7aithread.wav [Ryan] worker=test-worker'
     Update-WorkerFromMessage $worker 'Generated audio: C:\temp\7aithread.wav'
     if ($worker.Stage -ne 'TTS' -or $worker.Current -ne 8) { throw 'Dashboard parser did not track TTS progress.' }
     Update-WorkerFromMessage $worker 'P0/P1 video: building caption-aligned multi-state thread_story compositions...'
