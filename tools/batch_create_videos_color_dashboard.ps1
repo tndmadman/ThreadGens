@@ -253,33 +253,167 @@ function Build-ForwardArgumentLine {
     return (@($tokens | ForEach-Object { Quote-NativeArgument $_ }) -join ' ')
 }
 
+function New-ColoredDashboardSource($Source) {
+    $marker = 'function Render-Dashboard([switch]$Final) {'
+    if (-not $Source.Contains($marker)) {
+        throw 'Live dashboard colorizer could not find Render-Dashboard marker.'
+    }
+
+    $colorHelpers = @'
+function Get-DashboardLineColor($Line) {
+    $text = [string]$Line
+    if ([string]::IsNullOrWhiteSpace($text)) { return [ConsoleColor]::Gray }
+
+    if ($text -match '^ThreadGens LIVE BATCH MONITOR') { return [ConsoleColor]::Cyan }
+    if ($text -match '^\[' -and $text -match 'APPROVED\s+\d+/\d+') {
+        if ($text -match 'rejected\s+[1-9]') { return [ConsoleColor]::Yellow }
+        return [ConsoleColor]::Green
+    }
+    if ($text -match '^Slots:') { return [ConsoleColor]::DarkCyan }
+    if ($text -match '^CPU ') {
+        if ($text -match '\]\s+(?<pct>\d+)%') {
+            $pct = [int]$Matches.pct
+            if ($pct -ge 92) { return [ConsoleColor]::Red }
+            if ($pct -ge 78) { return [ConsoleColor]::Yellow }
+        }
+        return [ConsoleColor]::Green
+    }
+    if ($text -match '^GPU ') { return [ConsoleColor]::Magenta }
+    if ($text -match '^Ollama gate:') { return [ConsoleColor]::Yellow }
+    if ($text -match '^SLOT ATT\s+STAGE') { return [ConsoleColor]::Cyan }
+    if ($text -match '^-{8,}$') { return [ConsoleColor]::DarkGray }
+    if ($text -match '^RECENT EVENTS$') { return [ConsoleColor]::Cyan }
+    if ($text -match '^DEBUG LOG:') { return [ConsoleColor]::DarkGray }
+
+    if ($text -match '^\d{3}\s+\d{4}\s+(?<stage>[A-Z0-9 ]{2,12})\s+') {
+        $stage = $Matches.stage.Trim()
+        switch -Regex ($stage) {
+            '^FAILED$' { return [ConsoleColor]::Red }
+            '^APPROVED$' { return [ConsoleColor]::Green }
+            '^OLLAMA$|^NOVELTY$' { return [ConsoleColor]::Yellow }
+            '^SCRIPT READY$|^PROFILES$|^IMAGES$|^RENDER QUEUE$|^STARTING$' { return [ConsoleColor]::Cyan }
+            '^TTS$' { return [ConsoleColor]::DarkYellow }
+            '^VIDEO$' { return [ConsoleColor]::Magenta }
+            '^VALIDATE$' { return [ConsoleColor]::White }
+            '^FINALIZE$|^P2 AUDIT$|^SAVE$' { return [ConsoleColor]::Green }
+            default { return [ConsoleColor]::Gray }
+        }
+    }
+
+    if ($text -match '^\s+\d{2}:\d{2}:\d{2}\s+') {
+        if ($text -match '(?i)FAILED|ERROR|rejected|too long|timed out|did not fill|replacement queued|SEED FAILED') { return [ConsoleColor]::Red }
+        if ($text -match '(?i)APPROVED|saved') { return [ConsoleColor]::Green }
+        if ($text -match '(?i)started|launch') { return [ConsoleColor]::DarkCyan }
+        if ($text -match '(?i)retry|regenerat|render-fit guard') { return [ConsoleColor]::Yellow }
+        return [ConsoleColor]::Gray
+    }
+
+    return [ConsoleColor]::Gray
+}
+
+function Write-DashboardColorLine($Text, $Color, [int]$Width) {
+    $line = Truncate-Line ([string]$Text) $Width
+    $padded = $line.PadRight($Width)
+    $oldColor = [Console]::ForegroundColor
+    try {
+        [Console]::ForegroundColor = $Color
+        [Console]::WriteLine($padded)
+    } catch {
+        Write-Host $line -ForegroundColor $Color
+    } finally {
+        try { [Console]::ForegroundColor = $oldColor } catch { }
+    }
+}
+
+'@
+
+    $patched = $Source.Replace($marker, $colorHelpers + $marker)
+    $repoLiteral = $RepoRoot.Replace("'", "''")
+    $patched = $patched.Replace('$RepoRoot = Split-Path -Parent $PSScriptRoot', ('$RepoRoot = ''' + $repoLiteral + ''''))
+    $patched = $patched.Replace(
+        'ThreadGens LIVE BATCH MONITOR  |  $statusWord  |  runtime $(Format-Duration $elapsed)',
+        'ThreadGens LIVE BATCH MONITOR  |  $statusWord  |  runtime $(Format-Duration $elapsed)  |  Q/Esc=STOP')
+
+    $oldLoop = @'
+    for ($i = 0; $i -lt $renderCount; $i++) {
+        $line = if ($i -lt $lines.Count) { [string]$lines[$i] } else { '' }
+        $line = Truncate-Line $line $width
+        try { [Console]::WriteLine($line.PadRight($width)) } catch { Write-Host $line }
+    }
+'@
+    $newLoop = @'
+    for ($i = 0; $i -lt $renderCount; $i++) {
+        $line = if ($i -lt $lines.Count) { [string]$lines[$i] } else { '' }
+        $color = Get-DashboardLineColor $line
+        Write-DashboardColorLine $line $color $width
+    }
+'@
+    if (-not $patched.Contains($oldLoop)) {
+        throw 'Live dashboard colorizer could not find the dashboard render loop.'
+    }
+    $patched = $patched.Replace($oldLoop, $newLoop)
+
+    $oldFinally = @'
+} finally {
+    if ($null -ne $stdoutReader) { $stdoutReader.Dispose() }
+    if ($null -ne $stderrReader) { $stderrReader.Dispose() }
+    if ($null -ne $stdoutStream) { $stdoutStream.Dispose() }
+    if ($null -ne $stderrStream) { $stderrStream.Dispose() }
+    try { Remove-Item -Recurse -Force -Path $monitorTemp -ErrorAction SilentlyContinue } catch { }
+}
+'@
+    $newFinally = @'
+} finally {
+    if ($null -ne $process) {
+        try {
+            $process.Refresh()
+            if (-not $process.HasExited) {
+                if ($env:OS -eq 'Windows_NT') {
+                    & taskkill.exe /PID $process.Id /T /F *> $null
+                } else {
+                    $process.Kill()
+                }
+            }
+        } catch { }
+    }
+    if ($null -ne $stdoutReader) { $stdoutReader.Dispose() }
+    if ($null -ne $stderrReader) { $stderrReader.Dispose() }
+    if ($null -ne $stdoutStream) { $stdoutStream.Dispose() }
+    if ($null -ne $stderrStream) { $stderrStream.Dispose() }
+    try { Remove-Item -Recurse -Force -Path $monitorTemp -ErrorAction SilentlyContinue } catch { }
+}
+'@
+    if (-not $patched.Contains($oldFinally)) {
+        throw 'Live dashboard colorizer could not find the dashboard cleanup block.'
+    }
+    return $patched.Replace($oldFinally, $newFinally)
+}
+
 if (-not (Test-Path $DashboardCore)) {
     throw "Live dashboard core was not found: $DashboardCore"
 }
 
-$script:patchedDashboard = $DashboardCore
+$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('threadgens-color-dashboard-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+$script:patchedDashboard = Join-Path $tempRoot 'batch_create_videos_dashboard_colored.ps1'
 $exitCode = 1
 $stoppedByUser = $false
 
 try {
     Normalize-ProcessPathEnvironment
     $source = Get-Content -Raw -Path $DashboardCore -Encoding UTF8
-    $parseTokens = $null
-    $parseErrors = $null
-    [System.Management.Automation.Language.Parser]::ParseInput(
-        $source,
-        [ref]$parseTokens,
-        [ref]$parseErrors) | Out-Null
-    if ($parseErrors.Count -gt 0) {
-        $details = @($parseErrors | ForEach-Object {
-            "line $($_.Extent.StartLineNumber), column $($_.Extent.StartColumnNumber): $($_.Message)"
-        }) -join [Environment]::NewLine
-        throw "Dashboard core has PowerShell syntax errors before launch:$([Environment]::NewLine)$details"
-    }
+    $patched = New-ColoredDashboardSource $source
+    [System.IO.File]::WriteAllText($script:patchedDashboard, $patched, $Utf8NoBom)
 
     if ($SelfTest) {
-        if ($source -notmatch 'function Get-DashboardLineColor' -or $source -notmatch 'function Write-DashboardColorLine') {
-            throw 'Dashboard color self-test failed: native color helpers are missing from the dashboard core.'
+        if ($patched -notmatch 'Get-DashboardLineColor' -or $patched -notmatch 'Write-DashboardColorLine') {
+            throw 'Dashboard color self-test failed to inject color helpers.'
+        }
+        if ($patched -match '\$RepoRoot = Split-Path -Parent \$PSScriptRoot') {
+            throw 'Dashboard color self-test failed to preserve the real repository root.'
+        }
+        if ($patched -notmatch 'taskkill\.exe /PID \$process\.Id /T /F') {
+            throw 'Dashboard shutdown self-test failed to inject engine process-tree cleanup.'
         }
         Test-KillOnCloseJob
     }
@@ -328,6 +462,7 @@ try {
         Close-KillOnCloseJob $script:killJobHandle
         $script:killJobHandle = [IntPtr]::Zero
     }
+    Remove-Item -Recurse -Force -Path $tempRoot -ErrorAction SilentlyContinue
 }
 
 exit $exitCode
