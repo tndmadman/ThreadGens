@@ -254,8 +254,16 @@ final class Qwen3VoiceGenerator extends VoiceGenerator {
                 .GET()
                 .build();
         try {
-            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
-            return response.statusCode() == 200;
+            HttpResponse<String> response = httpClient.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() != 200) {
+                return false;
+            }
+            String compact = response.body() == null
+                    ? ""
+                    : response.body().replaceAll("\\s+", "");
+            return compact.contains("\"gpu_release\":true");
         } catch (IOException e) {
             return false;
         }
