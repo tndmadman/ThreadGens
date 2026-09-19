@@ -178,6 +178,7 @@ public class VoiceGenerator {
         if (!Files.exists(outputFile)) {
             throw new IOException("Kokoro finished but did not create WAV: " + outputFile + ". Output: " + output);
         }
+        System.out.println("TTS engine used: Kokoro -> " + outputFile);
     }
 
     private void writeNarrationSidecar(String text, Path outputFile) throws IOException {
